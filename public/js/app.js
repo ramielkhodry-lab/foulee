@@ -1,6 +1,7 @@
 import { KINDS } from './phrases.js';
 import { assemble, stepAt } from './track.js';
 import { load, update, uid, PRESETS } from './store.js';
+import { createTrack, addPoint, markGap, summary } from './gps.js';
 
 const app = document.getElementById('app');
 const audio = document.getElementById('player');
@@ -10,7 +11,7 @@ const mmss = (sec) => {
   const s = Math.max(0, Math.ceil(sec));
   return `${Math.floor(s / 60)}:${String(s % 60).padStart(2, '0')}`;
 };
-const minutesLabel = (sec) => (sec % 60 ? `${Math.floor(sec / 60)} min ${sec % 60} s` : `${sec / 60} min`);
+const minutesLabel = (sec) => (sec < 60 ? `${sec} s` : sec % 60 ? `${Math.floor(sec / 60)} min ${sec % 60} s` : `${sec / 60} min`);
 const total = (steps) => steps.reduce((a, s) => a + s.duration, 0);
 const today = () => new Date().toLocaleDateString('sv-SE'); // AAAA-MM-JJ, heure locale
 const dateLabel = (d) => new Date(String(d).length === 10 ? `${d}T12:00` : d).toLocaleDateString('fr-FR', { weekday: 'long', day: 'numeric', month: 'long' });
@@ -23,6 +24,7 @@ function journalCard(h) {
   if (sport === 'natation' && h.swim?.longueurs) parts.push(`${h.swim.longueurs} × ${h.swim.bassinM} m = ${h.swim.longueurs * h.swim.bassinM} m`);
   if (h.distanceKm && sport !== 'natation') parts.push(`${h.distanceKm.toLocaleString('fr-FR')} km${h.distanceEstimee ? ' (estimé)' : ''}`);
   if (h.allureSecKm) parts.push(`allure ${allure(h.allureSecKm)}`);
+  if (h.gpsIncomplet) parts.push('GPS incomplet');
   if (h.steps && h.source === 'guidee') parts.push(`${h.completedSteps}/${h.steps.length} étapes`);
   const feel = [
     h.difficulte && `difficulté ${h.difficulte}/5`,
@@ -79,13 +81,78 @@ function startSession(session) {
   const track = assemble(session.steps, audioAssets.index, audioAssets.pack);
   if (live) URL.revokeObjectURL(live.url);
   const url = URL.createObjectURL(new Blob([track.bytes], { type: 'audio/mpeg' }));
-  live = { session, track, url, skipped: new Set(), maxTime: 0, lastStep: null, startedAt: new Date().toISOString() };
+  stopLiveExtras();
+  live = { session, track, url, skipped: new Set(), maxTime: 0, lastStep: null, startedAt: new Date().toISOString(), gps: createTrack(), gpsError: null };
   applyAudioMode();
   audio.src = url;
   audio.currentTime = 0;
   audio.play().catch((e) => alert(`Lecture impossible : ${e.message}`));
   setupMediaSession();
+  startGps();
+  keepAwake();
   go('live');
+}
+
+// GPS : actif tant que la page est à l'écran. Écran verrouillé = coupure notée.
+let gpsWatch = null;
+function startGps() {
+  if (!('geolocation' in navigator)) { live.gpsError = 'GPS indisponible'; return; }
+  gpsWatch = navigator.geolocation.watchPosition(
+    (pos) => {
+      if (!live) return;
+      live.gpsError = null;
+      // Pas de distance pendant une pause : on ne compte que le temps de séance.
+      if (audio.paused) return;
+      addPoint(live.gps, { lat: pos.coords.latitude, lon: pos.coords.longitude, t: pos.timestamp, acc: pos.coords.accuracy });
+    },
+    (err) => { if (live) live.gpsError = err.code === 1 ? 'GPS refusé' : 'GPS en attente'; },
+    { enableHighAccuracy: true, maximumAge: 0, timeout: 20000 },
+  );
+}
+
+// Empêche l'iPhone de verrouiller l'écran pendant la séance (Safari 16.4+).
+let wakeLock = null;
+async function keepAwake() {
+  try {
+    if ('wakeLock' in navigator && document.visibilityState === 'visible') wakeLock = await navigator.wakeLock.request('screen');
+  } catch {}
+}
+
+function stopLiveExtras() {
+  if (gpsWatch !== null) navigator.geolocation.clearWatch(gpsWatch);
+  gpsWatch = null;
+  wakeLock?.release().catch(() => {});
+  wakeLock = null;
+  touchLocked = false;
+}
+
+document.addEventListener('visibilitychange', () => {
+  if (!live || current !== 'live') return;
+  if (document.visibilityState === 'hidden') markGap(live.gps);
+  else keepAwake();
+});
+
+// Verrou tactile : en poche, l'écran allumé ne doit pas réagir au tissu.
+let touchLocked = false;
+let unlockTimer = null;
+function renderTouchLock() {
+  let el = document.getElementById('touchlock');
+  if (!touchLocked) { el?.remove(); return; }
+  if (el) return;
+  el = document.createElement('div');
+  el.id = 'touchlock';
+  el.innerHTML = '<div class="lockhint">Écran verrouillé<br><span class="small">Appui long 2 secondes pour déverrouiller</span></div>';
+  const cancel = () => { clearTimeout(unlockTimer); el.classList.remove('pressing'); };
+  el.addEventListener('pointerdown', (e) => {
+    e.preventDefault();
+    el.classList.add('pressing');
+    unlockTimer = setTimeout(() => { touchLocked = false; renderTouchLock(); }, 2000);
+  });
+  el.addEventListener('pointerup', cancel);
+  el.addEventListener('pointercancel', cancel);
+  el.addEventListener('pointerleave', cancel);
+  el.addEventListener('contextmenu', (e) => e.preventDefault());
+  document.body.appendChild(el);
 }
 
 function seekToStep(i) {
@@ -171,6 +238,12 @@ function tick() {
   el('stepno').textContent = i < 0 ? '' : `Étape ${Math.min(i + 1, steps.length)} sur ${steps.length}`;
   el('progress').style.width = `${Math.min(100, ((t - starts[0]) / (end - starts[0])) * 100)}%`;
   el('elapsed').textContent = `${mmss(Math.max(0, t - starts[0]))} / ${mmss(end - starts[0])}`;
+  const g = summary(live.gps, Math.max(0, t - starts[0]));
+  el('gps').textContent = live.gpsError
+    ? live.gpsError
+    : g.distanceKm
+      ? `${g.distanceKm.toLocaleString('fr-FR')} km${g.allureSecKm ? ` · ${allure(g.allureSecKm)}` : ''}${g.gpsIncomplet ? ' · GPS coupé un moment' : ''}`
+      : 'GPS : recherche…';
   requestAnimationFrame(tick);
 }
 
@@ -246,13 +319,15 @@ const screens = {
         <p class="next muted" id="next"></p>
         <div class="bar"><div id="progress"></div></div>
         <p class="muted small" id="elapsed"></p>
+        <p class="gpsline" id="gps"></p>
       </div>
       <div class="live-controls">
         <button class="btn-dark" data-toggle>${playing ? 'Pause' : 'Reprendre'}</button>
         <button data-skip>Étape suivante</button>
       </div>
+      <p style="margin-top:10px"><button class="btn-primary" data-touchlock>Verrouiller l'écran (poche)</button></p>
       <p style="margin-top:10px"><button data-finish style="width:100%">Terminer et faire le bilan</button></p>
-      <p class="muted small" style="margin-top:12px">Tu peux verrouiller l'écran. Pause et étape suivante marchent aussi depuis l'écran verrouillé et tes écouteurs.</p>`;
+      <p class="muted small" style="margin-top:12px">Garde l'écran allumé pour mesurer la distance. Si l'iPhone se verrouille, la voix continue mais le GPS s'arrête.</p>`;
   },
 
   bilan() {
@@ -263,8 +338,9 @@ const screens = {
       <div class="card">
         <p><strong>${esc(b.sessionName)}</strong></p>
         <p class="muted">${mmss(b.elapsedSec)} de séance · ${b.completedSteps} étape(s) sur ${b.steps.length}${b.skipped.length ? ` · ${b.skipped.length} passée(s)` : ''}</p>
-        <label for="dist">Distance (km, facultatif)</label>
-        <input id="dist" type="number" inputmode="decimal" step="0.1" min="0" value="${b.distanceKm ?? ''}">
+        ${b.distanceSource === 'gps' ? `<p class="small">GPS : ${b.distanceKm.toLocaleString('fr-FR')} km${b.allureSecKm ? ` · ${allure(b.allureSecKm)}` : ''}${b.gpsIncomplet ? ' · <strong>incomplet</strong> (écran verrouillé un moment)' : ''}</p>` : ''}
+        <label for="dist">Distance (km${b.distanceSource === 'gps' ? ', corrige si besoin' : ', facultatif'})</label>
+        <input id="dist" type="number" inputmode="decimal" step="0.01" min="0" value="${b.distanceKm ?? ''}">
         <label style="font-weight:400"><input id="estim" type="checkbox" style="width:auto" ${b.distanceEstimee ? 'checked' : ''}> C'est une estimation</label>
         <label>Difficulté</label>
         ${scale('difficulte', '1 = très facile · 5 = très dur')}
@@ -375,6 +451,10 @@ function go(screen) {
     const reached = Math.min(live.maxTime, end);
     const lastIdx = stepAt(starts, end, reached);
     const completed = lastIdx >= steps.length ? steps.length : Math.max(0, lastIdx);
+    const elapsedSec = Math.round(Math.max(0, reached - starts[0]));
+    const gps = summary(live.gps, elapsedSec);
+    stopLiveExtras();
+    renderTouchLock();
     bilan = {
       id: uid(),
       sport: 'course',
@@ -383,11 +463,15 @@ function go(screen) {
       sessionName: live.session.name,
       steps: steps,
       plannedSec: total(steps),
-      elapsedSec: Math.round(Math.max(0, reached - starts[0])),
+      elapsedSec,
       completedSteps: completed,
       skipped: [...live.skipped],
-      distanceKm: null,
-      distanceEstimee: true,
+      distanceKm: gps.distanceKm,
+      distanceEstimee: false,
+      distanceSource: gps.distanceKm ? 'gps' : null,
+      allureSecKm: gps.allureSecKm,
+      gpsIncomplet: gps.gpsIncomplet,
+      gpsPoints: gps.points,
       difficulte: null,
       fatigue: null,
       douleur: '',
@@ -464,7 +548,12 @@ function readBilan() {
   const v = (id) => document.getElementById(id);
   if (!v('dist')) return;
   const dist = parseFloat(String(v('dist').value).replace(',', '.'));
-  bilan.distanceKm = Number.isFinite(dist) && dist > 0 ? Math.round(dist * 100) / 100 : null;
+  const km = Number.isFinite(dist) && dist > 0 ? Math.round(dist * 100) / 100 : null;
+  if (km !== bilan.distanceKm) {
+    bilan.distanceKm = km;
+    bilan.distanceSource = km ? 'manuelle' : null;
+    bilan.allureSecKm = km && bilan.elapsedSec ? Math.round(bilan.elapsedSec / km) : null;
+  }
   bilan.distanceEstimee = v('estim').checked;
   bilan.douleur = v('douleur').value.trim();
   bilan.commentaire = v('comm').value.trim();
@@ -513,6 +602,9 @@ document.addEventListener('click', (e) => {
     if (audio.paused) audio.play(); else audio.pause();
   } else if ('skip' in ds) {
     nextStep();
+  } else if ('touchlock' in ds) {
+    touchLocked = true;
+    renderTouchLock();
   } else if ('finish' in ds) {
     go('bilan');
   } else if (ds.manual) {

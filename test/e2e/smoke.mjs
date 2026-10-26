@@ -18,7 +18,8 @@ const server = createServer(async (req, res) => {
 const base = `http://localhost:${server.address().port}/`;
 
 const browser = await chromium.launch({ args: ['--autoplay-policy=no-user-gesture-required'] });
-const page = await browser.newPage({ viewport: { width: 390, height: 844 } });
+const context = await browser.newContext({ viewport: { width: 390, height: 844 }, permissions: ['geolocation'], geolocation: { latitude: 48.897, longitude: 2.253, accuracy: 5 } });
+const page = await context.newPage();
 const errors = [];
 page.on('pageerror', (e) => errors.push(e.message));
 page.on('console', (m) => m.type() === 'error' && errors.push(m.text()));
@@ -31,15 +32,33 @@ await page.click('[data-tab="seance"]');
 await page.waitForTimeout(800); // chargement des sons
 await page.click('[data-start="test-4"]');
 await page.waitForSelector('#count');
-await page.waitForTimeout(2500);
+await page.waitForTimeout(1500);
 const t1 = await page.evaluate(() => document.getElementById('player').currentTime);
 const now1 = await page.textContent('#now');
-await page.screenshot({ path: '/tmp/foulee-live.png', fullPage: true });
-await page.click('[data-skip]'); // intro → saute à l'étape 1
-await page.waitForTimeout(500);
+await page.click('[data-skip]'); // intro → étape 1
+await page.waitForTimeout(300);
 const now2 = await page.textContent('#now');
+// Course simulée : 3 m toutes les 600 ms vers le nord.
+for (let i = 1; i <= 10; i++) {
+  await context.setGeolocation({ latitude: 48.897 + (i * 3) / 111195, longitude: 2.253, accuracy: 5 });
+  await page.waitForTimeout(600);
+}
+const gpsLine = await page.textContent('#gps');
+// Verrou tactile : un clic ne passe plus, un appui long déverrouille.
+await page.click('[data-touchlock]');
+const before = await page.evaluate(() => document.getElementById('player').paused);
+await page.mouse.click(100, 650);
+const lockedStill = await page.locator('#touchlock').count();
+await page.mouse.move(195, 400);
+await page.mouse.down();
+await page.waitForTimeout(2300);
+await page.mouse.up();
+const unlocked = (await page.locator('#touchlock').count()) === 0;
+const after = await page.evaluate(() => document.getElementById('player').paused);
+await page.screenshot({ path: '/tmp/foulee-live.png', fullPage: true });
 const dur = await page.evaluate(() => document.getElementById('player').duration);
 await page.click('[data-finish]');
+const bilanText = await page.textContent('#app');
 await page.click('[data-scale="difficulte"][data-v="2"]');
 await page.fill('#comm', 'Test automatique');
 await page.click('[data-savebilan]');
@@ -70,7 +89,11 @@ await browser.close();
 server.close();
 
 const checks = {
-  'la piste avance': t1 > 1.5,
+  'la piste avance': t1 > 1,
+  'GPS mesuré pendant la séance': /0,0[23] km/.test(gpsLine),
+  'verrou tactile bloque les clics': lockedStill === 1 && before === after,
+  'appui long déverrouille': unlocked,
+  'distance GPS reprise au bilan': bilanText.includes('GPS : 0,0'),
   'intro affichée': now1 === 'Prépare-toi',
   'étape suivante': now2 === "Marche d'échauffement",
   'durée de piste ≈ 4 min + intro + fin': dur > 250 && dur < 262,
@@ -81,6 +104,6 @@ const checks = {
   'pas de doublon à la réimport': count === 7,
   'aucune erreur hors alertes d\u2019import': errors.filter((e) => !e.includes('séance(s) ajoutée(s)')).length === 0,
 };
-console.log({ t1, now1, now2, dur, swimdist, count, errors });
+console.log({ t1, now1, now2, dur, gpsLine, swimdist, count, errors });
 for (const [k, v] of Object.entries(checks)) console.log(v ? 'ok  ' : 'FAIL', k);
 process.exit(Object.values(checks).every(Boolean) ? 0 : 1);

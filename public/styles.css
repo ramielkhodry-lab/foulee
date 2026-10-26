@@ -68,3 +68,11 @@ textarea { min-height: 90px; }
 .tabs button { flex: 1; background: transparent; min-height: 56px; font-size: 14px; color: var(--muted); border-radius: 14px; padding: 0; }
 .tabs button.on { color: var(--green); background: #E4F2C2; }
 .notice { background: #FFF6D8; border-radius: 14px; padding: 12px; font-size: 14px; margin-bottom: 14px; }
+.gpsline { font-size: 20px; font-weight: 700; margin: 8px 0 0; color: var(--lime); }
+#touchlock {
+  position: fixed; inset: 0; z-index: 10; background: rgba(21, 38, 28, 0.55);
+  display: flex; align-items: flex-end; justify-content: center; padding-bottom: calc(40px + env(safe-area-inset-bottom));
+  touch-action: none; user-select: none; -webkit-user-select: none; -webkit-touch-callout: none;
+}
+#touchlock .lockhint { background: var(--green); color: #fff; border-radius: var(--radius); padding: 18px 24px; text-align: center; font-weight: 700; transition: transform 2s linear, background 2s linear; }
+#touchlock.pressing .lockhint { transform: scale(1.08); background: #3D6B4F; }

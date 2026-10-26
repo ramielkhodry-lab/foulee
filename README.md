@@ -29,6 +29,8 @@ python3 tools/gen_audio.py <dossier-voix>  # régénère les clips après une mo
 ## Limites connues
 
 - Données sur le téléphone uniquement (localStorage). Comptes et serveur : phase 1.
-- Pas de GPS écran verrouillé dans une webapp : distance saisie, marquée estimée.
+- GPS mesuré tant que l'écran reste allumé (l'app empêche la mise en veille et propose un verrou
+  tactile pour la poche). Écran verrouillé : la voix continue, le GPS s'arrête, la distance est
+  marquée incomplète.
 - Mode « Guidage prioritaire » : met la musique en pause. Mode « Avec ma musique » : à tester.
 - Rien de tout cela n'est validé tant que les tests en vraie course sur iPhone n'ont pas été faits.
