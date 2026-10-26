@@ -256,11 +256,13 @@ let bilan = null; // formulaire de bilan en cours
 const screens = {
   accueil() {
     const d = load();
-    const last = d.history[0];
+    const last = [...d.history].sort((a, b) => String(b.date).localeCompare(String(a.date)))[0];
+    const installed = navigator.standalone === true || matchMedia('(display-mode: standalone)').matches;
     const next = d.sessions[0];
     const hello = d.profile.prenom ? `Bonjour ${esc(d.profile.prenom)} !` : 'Bonjour !';
     return `
       <h1>${hello}</h1>
+      ${installed ? '' : '<div class="notice"><strong>Installe Foulée :</strong> dans Safari, touche Partager puis « Sur l\'écran d\'accueil », et ouvre l\'app depuis son icône. Le guidage est plus fiable ainsi.</div>'}
       <div class="card dark">
         <span class="pill">Prochaine séance</span>
         <h2 style="margin-top:10px">${esc(next.name)}</h2>
@@ -268,8 +270,7 @@ const screens = {
         <ul class="steps">${next.steps.map((s) => `<li><span>${KINDS[s.kind].label}</span><span>${minutesLabel(s.duration)}</span></li>`).join('')}</ul>
         <p style="margin-top:14px"><button class="btn-primary" data-start="${esc(next.id)}">Démarrer la séance</button></p>
       </div>
-      ${last ? `<div class="card"><h2>Dernière sortie</h2><p>${new Date(last.date).toLocaleDateString('fr-FR', { weekday: 'long', day: 'numeric', month: 'long' })} · ${esc(last.sessionName)}</p>
-        <p class="muted">${mmss(last.elapsedSec)} de séance${last.distanceKm ? ` · ${last.distanceKm} km${last.distanceEstimee ? ' (estimé)' : ''}` : ''} · difficulté ${last.difficulte ?? '–'}/5</p></div>` : ''}
+      ${last ? `<h2 style="margin:4px 0 10px">Dernière séance</h2>${journalCard(last)}` : ''}
       <div class="notice">Prototype de test : tes séances sont enregistrées sur ce téléphone uniquement. Les comptes et le coach arrivent ensuite.</div>`;
   },
 

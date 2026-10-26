@@ -85,6 +85,8 @@ await page.click('[data-tab="reglages"]');
 await page.setInputFiles('#importfile', new URL('../fixtures/historique.json', import.meta.url).pathname);
 await page.waitForSelector('[data-manual="natation"]');
 const count = await page.locator('#app .card').count();
+await page.click('[data-tab="accueil"]');
+const accueil = await page.textContent('#app');
 await browser.close();
 server.close();
 
@@ -102,6 +104,7 @@ const checks = {
   'natation saisie au journal': journal2.includes('30 × 25 m = 750 m') && journal2.includes('essoufflement 4/5'),
   'historique importé': journal2.includes('3,35 km') && journal2.includes('28 × 25 m = 700 m'),
   'pas de doublon à la réimport': count === 7,
+  'accueil : dernière séance = la plus récente': accueil.includes('mercredi 28 octobre') && !accueil.includes('30 septembre'),
   'aucune erreur hors alertes d\u2019import': errors.filter((e) => !e.includes('séance(s) ajoutée(s)')).length === 0,
 };
 console.log({ t1, now1, now2, dur, gpsLine, swimdist, count, errors });
