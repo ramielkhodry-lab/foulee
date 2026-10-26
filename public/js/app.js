@@ -78,7 +78,7 @@ function startSession(session) {
   }
   // Tout se fait sans attente pour rester dans le geste de l'utilisateur :
   // iOS refuse de lancer l'audio sinon.
-  const track = assemble(session.steps, audioAssets.index, audioAssets.pack);
+  const track = assemble(session.steps, audioAssets.index, audioAssets.pack, { voice: load().settings.annonces === 'voix' });
   if (live) URL.revokeObjectURL(live.url);
   const url = URL.createObjectURL(new Blob([track.bytes], { type: 'audio/mpeg' }));
   stopLiveExtras();
@@ -221,6 +221,15 @@ function tick() {
   const i = stepAt(starts, end, t);
   const el = (id) => document.getElementById(id);
   if (!el('count')) return;
+  // Changement d'étape : l'écran clignote (citron = course, blanc = marche).
+  if (live.shownStep !== undefined && i !== live.shownStep && i >= 0 && i < steps.length) {
+    const flash = KINDS[steps[i].kind].effort === 'course' ? 'flash-course' : 'flash-marche';
+    document.body.classList.remove('flash-course', 'flash-marche');
+    void document.body.offsetWidth;
+    document.body.classList.add(flash);
+    setTimeout(() => document.body.classList.remove(flash), 1500);
+  }
+  live.shownStep = i;
   if (i < 0) {
     el('now').textContent = 'Prépare-toi';
     el('count').textContent = mmss(starts[0] - t);
@@ -418,6 +427,11 @@ const screens = {
       <div class="card">
         <label for="prenom">Ton prénom</label>
         <input id="prenom" value="${esc(d.profile.prenom)}" maxlength="40">
+      </div>
+      <div class="card">
+        <h2>Signal de changement d'étape</h2>
+        <label style="font-weight:400"><input type="radio" name="annonces" value="signaux" style="width:auto" ${d.settings.annonces !== 'voix' ? 'checked' : ''}> <strong>Signaux sonores</strong> : notes qui montent = cours, notes qui descendent = marche, 3 bips avant chaque changement.</label>
+        <label style="font-weight:400"><input type="radio" name="annonces" value="voix" style="width:auto" ${d.settings.annonces === 'voix' ? 'checked' : ''}> <strong>Voix</strong> : annonce chaque étape et sa durée.</label>
       </div>
       <div class="card">
         <h2>Son pendant la séance</h2>
@@ -643,7 +657,9 @@ document.addEventListener('click', (e) => {
 });
 
 document.addEventListener('change', (e) => {
-  if (e.target.name === 'mode') {
+  if (e.target.name === 'annonces') {
+    update((d) => { d.settings.annonces = e.target.value; });
+  } else if (e.target.name === 'mode') {
     update((d) => { d.settings.audioMode = e.target.value; });
     applyAudioMode();
   } else if (e.target.id === 'importfile') {

@@ -34,7 +34,7 @@ const empty = () => ({
   profile: { prenom: '' },
   sessions: structuredClone(PRESETS),
   history: [],
-  settings: { audioMode: 'exclusif' },
+  settings: { audioMode: 'exclusif', annonces: 'signaux' },
 });
 
 let cache = null;

@@ -107,3 +107,14 @@ test('séances aléatoires : annonces de départ et pré-annonces jamais coupée
     assert.deepEqual(cut, [], JSON.stringify(steps));
   }
 });
+
+test('mode signaux : aucune voix, une montée par course, une descente par marche', () => {
+  const { events } = assemble(EXEMPLE, index, pack, { voice: false });
+  const clips = events.map((e) => e.clip);
+  assert.ok(!clips.some((c) => c.startsWith('start_') || c.startsWith('pre_') || c === 'intro' || c === 'end'));
+  assert.equal(clips.filter((c) => c === 'signal_course').length, 3);
+  assert.equal(clips.filter((c) => c === 'signal_marche').length, 4);
+  assert.equal(clips.at(-1), 'signal_fin');
+  assert.deepEqual(events.filter((e) => e.truncated), []);
+  assert.equal(events.find((e) => e.clip === 'signal_course').at, 307);
+});

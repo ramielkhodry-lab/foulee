@@ -76,3 +76,7 @@ textarea { min-height: 90px; }
 }
 #touchlock .lockhint { background: var(--green); color: #fff; border-radius: var(--radius); padding: 18px 24px; text-align: center; font-weight: 700; transition: transform 2s linear, background 2s linear; }
 #touchlock.pressing .lockhint { transform: scale(1.08); background: #3D6B4F; }
+body.flash-course { animation: flash-course 1.5s ease-out; }
+body.flash-marche { animation: flash-marche 1.5s ease-out; }
+@keyframes flash-course { 0%, 40% { background: var(--lime); } 100% { background: var(--bg); } }
+@keyframes flash-marche { 0%, 40% { background: #FFFFFF; } 100% { background: var(--bg); } }

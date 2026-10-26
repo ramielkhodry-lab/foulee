@@ -33,28 +33,37 @@ export function validateSteps(steps) {
 }
 
 // Liste des sons à jouer : [{ at: secondes, clip: id }], triée.
-export function buildEvents(steps) {
+// voice=false : signaux seuls (montée = course, descente = marche), sans annonce parlée.
+export function buildEvents(steps, { voice = true } = {}) {
   validateSteps(steps);
   const { starts, end } = stepStarts(steps);
-  const events = [{ at: 0.3, clip: 'intro' }];
+  const events = voice ? [{ at: 0.3, clip: 'intro' }] : [];
   steps.forEach((s, i) => {
-    events.push({ at: starts[i], clip: 'bip_long' });
-    events.push({ at: starts[i] + 0.7, clip: startClipId(s.kind, s.duration) });
+    if (voice) {
+      events.push({ at: starts[i], clip: 'bip_long' });
+      events.push({ at: starts[i] + 0.7, clip: startClipId(s.kind, s.duration) });
+    } else {
+      events.push({ at: starts[i], clip: KINDS[s.kind].effort === 'course' ? 'signal_course' : 'signal_marche' });
+    }
     const next = steps[i + 1];
     const stepEnd = starts[i] + s.duration;
-    if (next && s.duration >= MIN_STEP_FOR_PRE) events.push({ at: stepEnd - PRE_ANNOUNCE, clip: preClipId(next.kind) });
+    if (voice && next && s.duration >= MIN_STEP_FOR_PRE) events.push({ at: stepEnd - PRE_ANNOUNCE, clip: preClipId(next.kind) });
     if (s.duration >= 15) for (const d of [3, 2, 1]) events.push({ at: stepEnd - d, clip: 'bip' });
   });
-  events.push({ at: end, clip: 'bip_long' });
-  events.push({ at: end + 0.7, clip: 'end' });
+  if (voice) {
+    events.push({ at: end, clip: 'bip_long' });
+    events.push({ at: end + 0.7, clip: 'end' });
+  } else {
+    events.push({ at: end, clip: 'signal_fin' });
+  }
   return { events: events.sort((a, b) => a.at - b.at), starts, end, total: end + TAIL };
 }
 
 // Assemble le MP3. `index` et `pack` viennent de public/audio (index.json, pack.mp3).
 // Un clip qui déborderait sur le suivant est tronqué : le son suivant reste à l'heure.
-export function assemble(steps, index, pack) {
+export function assemble(steps, index, pack, options) {
   const { frameBytes: fb, frameSeconds: fs, clips } = index;
-  const { events, starts, end, total } = buildEvents(steps);
+  const { events, starts, end, total } = buildEvents(steps, options);
   const nFrames = Math.ceil(total / fs);
   const out = new Uint8Array(nFrames * fb);
   const sil = clips.silence;
