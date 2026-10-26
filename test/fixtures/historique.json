@@ -1,0 +1,116 @@
+{
+ "format": "foulee-v1",
+ "profile": {
+  "prenom": "Test"
+ },
+ "history": [
+  {
+   "id": "fixture-nat-2026-09-30",
+   "sport": "natation",
+   "source": "manuelle",
+   "date": "2026-09-30",
+   "sessionName": "Natation",
+   "elapsedSec": 3600,
+   "distanceKm": 0.5,
+   "distanceEstimee": false,
+   "swim": {
+    "bassinM": 25,
+    "longueurs": 20,
+    "nages": [
+     "crawl",
+     "brasse",
+     "dos"
+    ],
+    "detail": "En alternant les nages."
+   },
+   "difficulte": null,
+   "essoufflement": null,
+   "fatigue": null,
+   "douleur": "",
+   "commentaire": ""
+  },
+  {
+   "id": "fixture-nat-2026-10-07",
+   "sport": "natation",
+   "source": "manuelle",
+   "date": "2026-10-07",
+   "sessionName": "Natation",
+   "elapsedSec": 2700,
+   "distanceKm": 0.5,
+   "distanceEstimee": false,
+   "swim": {
+    "bassinM": 25,
+    "longueurs": 20,
+    "nages": [
+     "crawl",
+     "brasse",
+     "dos"
+    ],
+    "detail": "En alternant les nages."
+   },
+   "difficulte": null,
+   "essoufflement": null,
+   "fatigue": null,
+   "douleur": "",
+   "commentaire": ""
+  },
+  {
+   "id": "fixture-nat-2026-10-14",
+   "sport": "natation",
+   "source": "manuelle",
+   "date": "2026-10-14",
+   "sessionName": "Natation",
+   "elapsedSec": 3600,
+   "distanceKm": 0.7,
+   "distanceEstimee": false,
+   "swim": {
+    "bassinM": 25,
+    "longueurs": 28,
+    "nages": [
+     "crawl",
+     "brasse",
+     "dos"
+    ],
+    "detail": "Beaucoup plus de dos que les autres fois : les 10 dernières longueurs uniquement en dos."
+   },
+   "difficulte": null,
+   "essoufflement": null,
+   "fatigue": null,
+   "douleur": "",
+   "commentaire": ""
+  },
+  {
+   "id": "fixture-run-2026-10-23",
+   "sport": "course",
+   "source": "manuelle",
+   "date": "2026-10-23",
+   "sessionName": "Course libre",
+   "elapsedSec": null,
+   "distanceKm": 3.35,
+   "distanceEstimee": false,
+   "allureSecKm": 582,
+   "structure": "5 min marche, 7 × (2 min course + 2 min marche), 5 min marche. Allure moyenne marche et course confondues.",
+   "difficulte": null,
+   "essoufflement": null,
+   "fatigue": null,
+   "douleur": "",
+   "commentaire": ""
+  },
+  {
+   "id": "fixture-run-2026-10-26",
+   "sport": "course",
+   "source": "manuelle",
+   "date": "2026-10-26",
+   "sessionName": "Course libre",
+   "elapsedSec": null,
+   "distanceKm": null,
+   "distanceEstimee": false,
+   "structure": "5 min marche, 6 × (3 min course + 2 min marche), 6-7 min marche.",
+   "difficulte": null,
+   "essoufflement": null,
+   "fatigue": null,
+   "douleur": "",
+   "commentaire": ""
+  }
+ ]
+}

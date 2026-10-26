@@ -12,6 +12,34 @@ const mmss = (sec) => {
 };
 const minutesLabel = (sec) => (sec % 60 ? `${Math.floor(sec / 60)} min ${sec % 60} s` : `${sec / 60} min`);
 const total = (steps) => steps.reduce((a, s) => a + s.duration, 0);
+const today = () => new Date().toLocaleDateString('sv-SE'); // AAAA-MM-JJ, heure locale
+const dateLabel = (d) => new Date(String(d).length === 10 ? `${d}T12:00` : d).toLocaleDateString('fr-FR', { weekday: 'long', day: 'numeric', month: 'long' });
+const allure = (secKm) => `${Math.floor(secKm / 60)}'${String(Math.round(secKm % 60)).padStart(2, '0')}/km`;
+
+function journalCard(h) {
+  const sport = h.sport || 'course';
+  const parts = [];
+  if (h.elapsedSec) parts.push(`${Math.round(h.elapsedSec / 60)} min`);
+  if (sport === 'natation' && h.swim?.longueurs) parts.push(`${h.swim.longueurs} × ${h.swim.bassinM} m = ${h.swim.longueurs * h.swim.bassinM} m`);
+  if (h.distanceKm && sport !== 'natation') parts.push(`${h.distanceKm.toLocaleString('fr-FR')} km${h.distanceEstimee ? ' (estimé)' : ''}`);
+  if (h.allureSecKm) parts.push(`allure ${allure(h.allureSecKm)}`);
+  if (h.steps && h.source === 'guidee') parts.push(`${h.completedSteps}/${h.steps.length} étapes`);
+  const feel = [
+    h.difficulte && `difficulté ${h.difficulte}/5`,
+    h.essoufflement && `essoufflement ${h.essoufflement}/5`,
+    h.fatigue && `fatigue ${h.fatigue}/5`,
+    h.douleur && `douleur : ${esc(h.douleur)}`,
+  ].filter(Boolean);
+  return `
+    <div class="card">
+      <p><span class="pill">${sport === 'natation' ? 'Natation' : 'Course'}</span> <strong>${dateLabel(h.date)}</strong></p>
+      <p class="muted">${parts.join(' · ')}</p>
+      ${sport === 'natation' && h.swim?.nages?.length ? `<p class="small">${esc(h.swim.nages.join(', '))}${h.swim.detail ? ` · ${esc(h.swim.detail)}` : ''}</p>` : ''}
+      ${h.structure ? `<p class="small">${esc(h.structure)}</p>` : ''}
+      ${feel.length ? `<p class="muted small">${feel.join(' · ')}</p>` : ''}
+      ${h.commentaire ? `<p>« ${esc(h.commentaire)} »</p>` : ''}
+    </div>`;
+}
 
 // --- Sons -------------------------------------------------------------------
 
@@ -253,17 +281,56 @@ const screens = {
 
   journal() {
     const d = load();
+    const sorted = [...d.history].sort((a, b) => String(b.date).localeCompare(String(a.date)));
     return `
       <h1>Journal</h1>
-      ${d.history.length === 0 ? '<p class="muted">Aucune séance pour l\'instant.</p>' : ''}
-      ${d.history.map((h) => `
-        <div class="card">
-          <p><strong>${new Date(h.date).toLocaleDateString('fr-FR', { weekday: 'long', day: 'numeric', month: 'long' })}</strong> · ${esc(h.sessionName)}</p>
-          <p class="muted">${mmss(h.elapsedSec)} · ${h.completedSteps}/${h.steps.length} étapes${h.distanceKm ? ` · ${h.distanceKm} km${h.distanceEstimee ? ' (estimé)' : ''}` : ''}</p>
-          <p class="muted small">Difficulté ${h.difficulte ?? '–'}/5 · fatigue ${h.fatigue ?? '–'}/5${h.douleur ? ` · douleur : ${esc(h.douleur)}` : ''}</p>
-          ${h.commentaire ? `<p>« ${esc(h.commentaire)} »</p>` : ''}
-        </div>`).join('')}
-      ${d.history.length ? '<button data-export style="width:100%">Exporter mes données (JSON)</button>' : ''}`;
+      <div class="row" style="margin-bottom:14px"><button data-manual="natation">+ Natation</button><button data-manual="course">+ Course libre</button></div>
+      ${sorted.length === 0 ? '<p class="muted">Aucune séance pour l\'instant.</p>' : ''}
+      ${sorted.map(journalCard).join('')}
+      ${sorted.length ? '<button data-export style="width:100%">Exporter mes données (JSON)</button>' : ''}`;
+  },
+
+  saisie() {
+    const b = bilan;
+    const swim = b.sport === 'natation';
+    const scale = (field, labels) => `<div class="scale">${[1, 2, 3, 4, 5].map((n) => `<button data-scale="${field}" data-v="${n}" class="${b[field] === n ? 'on' : ''}">${n}</button>`).join('')}</div><p class="muted small">${labels}</p>`;
+    const nages = ['crawl', 'brasse', 'dos', 'papillon'];
+    return `
+      <h1>${swim ? 'Séance de natation' : 'Course libre'}</h1>
+      <div class="card">
+        <label for="date">Date</label>
+        <input id="date" type="date" value="${esc(b.date)}">
+        <label for="duree">Durée (minutes)</label>
+        <input id="duree" type="number" inputmode="numeric" min="1" max="600" value="${b.elapsedSec ? Math.round(b.elapsedSec / 60) : ''}">
+        ${swim ? `
+          <label for="bassin">Longueur du bassin (m)</label>
+          <select id="bassin">${[25, 50, 33].map((m) => `<option value="${m}" ${b.swim.bassinM === m ? 'selected' : ''}>${m} m</option>`).join('')}</select>
+          <label for="longueurs">Nombre de longueurs</label>
+          <input id="longueurs" type="number" inputmode="numeric" min="0" max="400" value="${b.swim.longueurs ?? ''}">
+          <p class="muted small" id="swimdist">${b.swim.longueurs ? `Distance : ${b.swim.longueurs * b.swim.bassinM} m` : ''}</p>
+          <label>Nages</label>
+          ${nages.map((n) => `<label style="font-weight:400;margin:4px 0"><input type="checkbox" data-nage="${n}" style="width:auto" ${b.swim.nages.includes(n) ? 'checked' : ''}> ${n}</label>`).join('')}
+          <label for="detail">Détail (nages, éducatifs, pauses)</label>
+          <textarea id="detail" placeholder="Ex. : les 10 dernières longueurs en dos, pauses de 30 s au bord">${esc(b.swim.detail)}</textarea>
+        ` : `
+          <label for="structure">Déroulé</label>
+          <textarea id="structure" placeholder="Ex. : 5 min marche, 6 × (3 min course + 2 min marche), 6 min marche">${esc(b.structure)}</textarea>
+          <label for="dist">Distance (km)</label>
+          <input id="dist" type="number" inputmode="decimal" step="0.01" min="0" value="${b.distanceKm ?? ''}">
+          <label style="font-weight:400"><input id="estim" type="checkbox" style="width:auto" ${b.distanceEstimee ? 'checked' : ''}> C'est une estimation</label>
+        `}
+        <label>Difficulté</label>
+        ${scale('difficulte', '1 = très facile · 5 = très dur')}
+        <label>Essoufflement</label>
+        ${scale('essoufflement', '1 = je pouvais parler · 5 = à bout de souffle')}
+        <label>Fatigue</label>
+        ${scale('fatigue', '1 = en forme · 5 = épuisé')}
+        <label for="douleur">Une douleur ?</label>
+        <input id="douleur" placeholder="Ex. : épaule gauche, légère" value="${esc(b.douleur)}">
+        <label for="comm">Ton ressenti</label>
+        <textarea id="comm">${esc(b.commentaire)}</textarea>
+      </div>
+      <div class="row"><button data-tab="journal">Annuler</button><button class="btn-dark" data-savemanual>Enregistrer</button></div>`;
   },
 
   reglages() {
@@ -280,6 +347,12 @@ const screens = {
         <label style="font-weight:400"><input type="radio" name="mode" value="exclusif" style="width:auto" ${d.settings.audioMode !== 'melange' ? 'checked' : ''}> <strong>Guidage prioritaire</strong> : continue écran verrouillé, met ta musique en pause.</label>
         <label style="font-weight:400"><input type="radio" name="mode" value="melange" style="width:auto" ${d.settings.audioMode === 'melange' ? 'checked' : ''}> <strong>Avec ma musique</strong> (à tester) : se mélange à ta musique, peut s'arrêter écran verrouillé.</label>
         ${supported ? '' : '<p class="muted small">Ce navigateur ne permet pas de choisir : le mode par défaut s\'applique.</p>'}
+      </div>
+      <div class="card">
+        <h2>Mes données</h2>
+        <p class="muted small">Importer un fichier d'export Foulée ou un historique préparé. Les séances déjà présentes ne sont pas dupliquées.</p>
+        <button data-import style="width:100%">Importer des données (JSON)</button>
+        <input id="importfile" type="file" accept="application/json,.json" hidden>
       </div>
       <p class="muted small">Voix : modèle libre « siwis » (Piper, licence CC-BY 4.0, Université d'Édimbourg).</p>`;
   },
@@ -304,6 +377,8 @@ function go(screen) {
     const completed = lastIdx >= steps.length ? steps.length : Math.max(0, lastIdx);
     bilan = {
       id: uid(),
+      sport: 'course',
+      source: 'guidee',
       date: live.startedAt,
       sessionName: live.session.name,
       steps: steps,
@@ -337,6 +412,52 @@ function readEditor() {
     const s = parseInt(document.querySelector(`[data-sec="${i}"]`)?.value, 10) || 0;
     return { kind, duration: Math.max(10, Math.min(4 * 3600, m * 60 + Math.min(59, s))) };
   });
+}
+
+function newManual(sport) {
+  return {
+    id: uid(), sport, source: 'manuelle', date: today(), sessionName: sport === 'natation' ? 'Natation' : 'Course libre',
+    elapsedSec: null, distanceKm: null, distanceEstimee: false, structure: '',
+    swim: { bassinM: 25, longueurs: null, nages: [], detail: '' },
+    difficulte: null, essoufflement: null, fatigue: null, douleur: '', commentaire: '',
+  };
+}
+
+function readSaisie() {
+  const v = (id) => document.getElementById(id);
+  if (!v('date')) return;
+  bilan.date = v('date').value || today();
+  const min = parseInt(v('duree').value, 10);
+  bilan.elapsedSec = Number.isFinite(min) && min > 0 ? min * 60 : null;
+  bilan.douleur = v('douleur').value.trim();
+  bilan.commentaire = v('comm').value.trim();
+  if (bilan.sport === 'natation') {
+    bilan.swim.bassinM = Number(v('bassin').value);
+    const n = parseInt(v('longueurs').value, 10);
+    bilan.swim.longueurs = Number.isFinite(n) && n >= 0 ? n : null;
+    bilan.swim.nages = [...document.querySelectorAll('[data-nage]')].filter((c) => c.checked).map((c) => c.dataset.nage);
+    bilan.swim.detail = v('detail').value.trim();
+    bilan.distanceKm = bilan.swim.longueurs ? (bilan.swim.longueurs * bilan.swim.bassinM) / 1000 : null;
+  } else {
+    bilan.structure = v('structure').value.trim();
+    const dist = parseFloat(String(v('dist').value).replace(',', '.'));
+    bilan.distanceKm = Number.isFinite(dist) && dist > 0 ? Math.round(dist * 100) / 100 : null;
+    bilan.distanceEstimee = v('estim').checked;
+  }
+}
+
+// Fusionne un export (ou un historique préparé) avec les données du téléphone, sans doublon.
+function mergeImport(d, data) {
+  const ids = new Set(d.history.map((h) => h.id));
+  let added = 0;
+  for (const h of data.history || []) {
+    if (h && h.id && !ids.has(h.id)) { d.history.push(h); ids.add(h.id); added++; }
+  }
+  if (data.profile) {
+    if (!d.profile.prenom && data.profile.prenom) d.profile.prenom = data.profile.prenom;
+    if (data.profile.objectifs) d.profile.objectifs = data.profile.objectifs;
+  }
+  return added;
 }
 
 function readBilan() {
@@ -394,8 +515,19 @@ document.addEventListener('click', (e) => {
     nextStep();
   } else if ('finish' in ds) {
     go('bilan');
+  } else if (ds.manual) {
+    bilan = newManual(ds.manual);
+    go('saisie');
+  } else if ('savemanual' in ds) {
+    readSaisie();
+    const entry = bilan;
+    update((d) => { d.history.push(entry); });
+    bilan = null;
+    go('journal');
+  } else if ('import' in ds) {
+    document.getElementById('importfile').click();
   } else if (ds.scale) {
-    readBilan();
+    if (current === 'saisie') readSaisie(); else readBilan();
     bilan[ds.scale] = Number(ds.v);
     render();
   } else if ('savebilan' in ds) {
@@ -421,6 +553,24 @@ document.addEventListener('change', (e) => {
   if (e.target.name === 'mode') {
     update((d) => { d.settings.audioMode = e.target.value; });
     applyAudioMode();
+  } else if (e.target.id === 'importfile') {
+    const file = e.target.files[0];
+    if (!file) return;
+    file.text().then((txt) => {
+      let added = 0;
+      try {
+        const data = JSON.parse(txt);
+        update((d) => { added = mergeImport(d, data); });
+      } catch {
+        alert('Fichier illisible.');
+        return;
+      }
+      alert(`${added} séance(s) ajoutée(s).`);
+      go('journal');
+    });
+  } else if (current === 'saisie') {
+    readSaisie();
+    if (e.target.id === 'longueurs' || e.target.id === 'bassin') render();
   } else if (e.target.id === 'prenom') {
     update((d) => { d.profile.prenom = e.target.value.trim(); });
   } else if (current === 'edit') {

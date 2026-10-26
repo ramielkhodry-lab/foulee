@@ -45,6 +45,27 @@ await page.fill('#comm', 'Test automatique');
 await page.click('[data-savebilan]');
 const journal = await page.textContent('#app');
 await page.screenshot({ path: '/tmp/foulee-journal.png', fullPage: true });
+
+// Import d'un historique, puis saisie manuelle d'une séance de natation.
+await page.click('[data-tab="reglages"]');
+await page.setInputFiles('#importfile', new URL('../fixtures/historique.json', import.meta.url).pathname);
+await page.waitForSelector('[data-manual="natation"]');
+await page.click('[data-manual="natation"]');
+await page.fill('#date', '2026-10-28');
+await page.fill('#duree', '50');
+await page.fill('#longueurs', '30');
+await page.dispatchEvent('#longueurs', 'change');
+const swimdist = await page.textContent('#swimdist');
+await page.check('[data-nage="crawl"]');
+await page.click('[data-scale="essoufflement"][data-v="4"]');
+await page.click('[data-savemanual]');
+const journal2 = await page.textContent('#app');
+await page.screenshot({ path: '/tmp/foulee-journal2.png', fullPage: true });
+// Réimporter ne doit rien dupliquer.
+await page.click('[data-tab="reglages"]');
+await page.setInputFiles('#importfile', new URL('../fixtures/historique.json', import.meta.url).pathname);
+await page.waitForSelector('[data-manual="natation"]');
+const count = await page.locator('#app .card').count();
 await browser.close();
 server.close();
 
@@ -53,9 +74,13 @@ const checks = {
   'intro affichée': now1 === 'Prépare-toi',
   'étape suivante': now2 === "Marche d'échauffement",
   'durée de piste ≈ 4 min + intro + fin': dur > 250 && dur < 262,
-  'bilan au journal': journal.includes('Test automatique') && journal.includes('Difficulté 2/5'),
-  'aucune erreur': errors.length === 0,
+  'bilan au journal': journal.includes('Test automatique') && journal.includes('difficulté 2/5'),
+  'distance natation calculée': swimdist.includes('750 m'),
+  'natation saisie au journal': journal2.includes('30 × 25 m = 750 m') && journal2.includes('essoufflement 4/5'),
+  'historique importé': journal2.includes('3,35 km') && journal2.includes('28 × 25 m = 700 m'),
+  'pas de doublon à la réimport': count === 7,
+  'aucune erreur hors alertes d\u2019import': errors.filter((e) => !e.includes('séance(s) ajoutée(s)')).length === 0,
 };
-console.log({ t1, now1, now2, dur, errors });
+console.log({ t1, now1, now2, dur, swimdist, count, errors });
 for (const [k, v] of Object.entries(checks)) console.log(v ? 'ok  ' : 'FAIL', k);
 process.exit(Object.values(checks).every(Boolean) ? 0 : 1);
