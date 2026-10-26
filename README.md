@@ -34,5 +34,7 @@ python3 tools/gen_audio.py <dossier-voix>  # régénère les clips après une mo
 - GPS mesuré tant que l'écran reste allumé (l'app empêche la mise en veille et propose un verrou
   tactile pour la poche). Écran verrouillé : la voix continue, le GPS s'arrête, la distance est
   marquée incomplète.
-- Mode « Guidage prioritaire » : met la musique en pause. Mode « Avec ma musique » : à tester.
+- Son « Avec ma musique » (défaut, audioSession ambient) : se mélange à la musique, écran allumé
+  requis. « Sans musique » (playback) : tient l'écran verrouillé, coupe la musique. Pas de vibration :
+  Safari sur iPhone ne l'expose pas.
 - Rien de tout cela n'est validé tant que les tests en vraie course sur iPhone n'ont pas été faits.

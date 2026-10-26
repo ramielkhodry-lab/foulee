@@ -58,11 +58,11 @@ async function loadAudio() {
 loadAudio().catch(() => {});
 
 function applyAudioMode() {
-  // Exclusif : la séance continue écran verrouillé mais met la musique en pause.
-  // Mélange : se superpose à la musique, mais risque de s'arrêter écran verrouillé.
+  // Musique (défaut) : se superpose à la musique ; écran allumé requis.
+  // Exclusif : continue écran verrouillé mais met la musique en pause.
   if (!('audioSession' in navigator)) return;
   try {
-    navigator.audioSession.type = load().settings.audioMode === 'melange' ? 'ambient' : 'playback';
+    navigator.audioSession.type = load().settings.son === 'exclusif' ? 'playback' : 'ambient';
   } catch {}
 }
 
@@ -435,8 +435,8 @@ const screens = {
       </div>
       <div class="card">
         <h2>Son pendant la séance</h2>
-        <label style="font-weight:400"><input type="radio" name="mode" value="exclusif" style="width:auto" ${d.settings.audioMode !== 'melange' ? 'checked' : ''}> <strong>Guidage prioritaire</strong> : continue écran verrouillé, met ta musique en pause.</label>
-        <label style="font-weight:400"><input type="radio" name="mode" value="melange" style="width:auto" ${d.settings.audioMode === 'melange' ? 'checked' : ''}> <strong>Avec ma musique</strong> (à tester) : se mélange à ta musique, peut s'arrêter écran verrouillé.</label>
+        <label style="font-weight:400"><input type="radio" name="mode" value="musique" style="width:auto" ${d.settings.son !== 'exclusif' ? 'checked' : ''}> <strong>Avec ma musique</strong> : les signaux passent par-dessus ta musique. Garde l'écran allumé.</label>
+        <label style="font-weight:400"><input type="radio" name="mode" value="exclusif" style="width:auto" ${d.settings.son === 'exclusif' ? 'checked' : ''}> <strong>Sans musique</strong> : continue même écran verrouillé, mais met ta musique en pause.</label>
         ${supported ? '' : '<p class="muted small">Ce navigateur ne permet pas de choisir : le mode par défaut s\'applique.</p>'}
       </div>
       <div class="card">
@@ -660,7 +660,7 @@ document.addEventListener('change', (e) => {
   if (e.target.name === 'annonces') {
     update((d) => { d.settings.annonces = e.target.value; });
   } else if (e.target.name === 'mode') {
-    update((d) => { d.settings.audioMode = e.target.value; });
+    update((d) => { d.settings.son = e.target.value; });
     applyAudioMode();
   } else if (e.target.id === 'importfile') {
     const file = e.target.files[0];
