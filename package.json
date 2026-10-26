@@ -1,0 +1,9 @@
+{
+  "name": "foulee",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "test": "node --test test/*.test.js",
+    "build": "node tools/build.js"
+  }
+}
