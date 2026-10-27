@@ -20,6 +20,9 @@ const base = `http://localhost:${server.address().port}/`;
 const browser = await chromium.launch({ args: ['--autoplay-policy=no-user-gesture-required'] });
 const context = await browser.newContext({ viewport: { width: 390, height: 844 }, permissions: ['geolocation'], geolocation: { latitude: 48.897, longitude: 2.253, accuracy: 5 } });
 const page = await context.newPage();
+// Fond de carte : tuiles servies vides en test (pas d'accès réseau garanti).
+const PNG = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNkYAAAAAYAAjCB0C8AAAAASUVORK5CYII=', 'base64');
+await page.route('**/*.basemaps.cartocdn.com/**', (r) => r.fulfill({ status: 200, contentType: 'image/png', body: PNG }));
 const errors = [];
 page.on('pageerror', (e) => errors.push(e.message));
 page.on('console', (m) => m.type() === 'error' && errors.push(m.text()));
@@ -59,10 +62,17 @@ await page.screenshot({ path: '/tmp/foulee-live.png', fullPage: true });
 const dur = await page.evaluate(() => document.getElementById('player').duration);
 await page.click('[data-finish]');
 const bilanText = await page.textContent('#app');
+await page.waitForSelector('.map.leaflet-container', { timeout: 5000 }).catch(() => {});
+const bilanMap = await page.locator('.map.leaflet-container path.leaflet-interactive').count();
+await page.screenshot({ path: '/tmp/foulee-bilan.png', fullPage: true });
 await page.click('[data-scale="difficulte"][data-v="2"]');
 await page.fill('#comm', 'Test automatique');
 await page.click('[data-savebilan]');
 const journal = await page.textContent('#app');
+await page.click('details.hist summary');
+await page.waitForTimeout(800);
+const histMap = await page.locator('details.hist[open] .map.leaflet-container').count();
+const stored = await page.evaluate(() => JSON.parse(localStorage.getItem('foulee.v1')).history[0]);
 await page.screenshot({ path: '/tmp/foulee-journal.png', fullPage: true });
 
 // Import d'un historique, puis saisie manuelle d'une séance de natation.
@@ -125,6 +135,9 @@ const checks = {
   'intro affichée': now1 === 'Prépare-toi',
   'étape suivante': now2.endsWith("Marche d'échauffement"),
   'durée de piste ≈ 4 min + intro + fin': dur > 250 && dur < 262,
+  'tracé affiché au bilan': bilanMap >= 2,
+  'tracé enregistré compact': Boolean(stored.trace?.seg?.length) && !stored.gpsPoints,
+  'tracé dans l\u2019historique': histMap === 1,
   'bilan au journal': journal.includes('Test automatique') && journal.includes('difficulté 2/5'),
   'distance natation calculée': swimdist.includes('750 m'),
   'natation saisie au journal': journal2.includes('30 × 25 m = 750 m') && journal2.includes('essoufflement 4/5'),
