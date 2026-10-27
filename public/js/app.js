@@ -2,6 +2,7 @@ import { KINDS } from './phrases.js';
 import { assemble, stepAt } from './track.js';
 import { load, update, uid, PRESETS } from './store.js';
 import { createTrack, addPoint, markGap, summary } from './gps.js';
+import { upcoming } from './plan.js';
 
 const app = document.getElementById('app');
 const audio = document.getElementById('player');
@@ -13,9 +14,48 @@ const mmss = (sec) => {
 };
 const minutesLabel = (sec) => (sec < 60 ? `${sec} s` : sec % 60 ? `${Math.floor(sec / 60)} min ${sec % 60} s` : `${sec / 60} min`);
 const total = (steps) => steps.reduce((a, s) => a + s.duration, 0);
+const JOURS = [[1, 'L'], [2, 'M'], [3, 'M'], [4, 'J'], [5, 'V'], [6, 'S'], [0, 'D']];
 const today = () => new Date().toLocaleDateString('sv-SE'); // AAAA-MM-JJ, heure locale
 const dateLabel = (d) => new Date(String(d).length === 10 ? `${d}T12:00` : d).toLocaleDateString('fr-FR', { weekday: 'long', day: 'numeric', month: 'long' });
 const allure = (secKm) => `${Math.floor(secKm / 60)}'${String(Math.round(secKm % 60)).padStart(2, '0')}/km`;
+
+// Résumé court d'une séance : « 5 min marche · 6 × (3 min course + 2 min marche) · 5 min marche ».
+function stepsSummary(steps) {
+  const runs = steps.filter((s) => KINDS[s.kind].effort === 'course');
+  const first = steps[0];
+  const lastStep = steps.at(-1);
+  const middle = steps.slice(1, -1);
+  const body = runs.length > 1 && new Set(runs.map((r) => r.duration)).size === 1
+    ? `${runs.length} × ${minutesLabel(runs[0].duration)} de course`
+    : middle.map((s) => `${minutesLabel(s.duration)} ${KINDS[s.kind].effort}`).join(', ');
+  return `${minutesLabel(first.duration)} marche · ${body} · ${minutesLabel(lastStep.duration)} marche`;
+}
+
+function planCard(p, isToday, showNow = false) {
+  const label = isToday ? "Aujourd'hui" : dateLabel(p.date);
+  if (p.sport === 'repos') {
+    return `<div class="card"><p><span class="pill" style="background:#E2E9E3">Repos</span> <strong>${label}</strong></p><p class="muted small">${esc(p.reason)}</p></div>`;
+  }
+  if (p.sport === 'natation') {
+    return `
+      <div class="card${isToday ? ' dark' : ''}">
+        <p><span class="pill">Natation</span> <strong>${label}</strong></p>
+        <h2 style="margin-top:8px">${p.longueurs} longueurs · ${p.distance} m</h2>
+        ${isToday ? `<ul class="steps">${p.plan.map((l) => `<li><span>${esc(l)}</span></li>`).join('')}</ul>` : ''}
+        <p class="muted small" style="margin-top:8px">${esc(p.reason)}</p>
+        ${isToday ? `<p style="margin-top:12px"><button class="btn-primary" data-manual="natation">Noter ma séance</button></p>` : ''}
+      </div>`;
+  }
+  const mins = Math.round(total(p.steps) / 60);
+  return `
+    <div class="card${isToday ? ' dark' : ''}">
+      <p><span class="pill">Course</span> <strong>${label}</strong> <span class="muted small">· palier ${p.level}/12</span></p>
+      <h2 style="margin-top:8px">${mins} min · ${esc(p.title)}</h2>
+      <p class="small">${esc(stepsSummary(p.steps))}</p>
+      <p class="muted small">${esc(p.reason)}</p>
+      ${isToday ? `<p style="margin-top:12px"><button class="btn-primary" data-startplan="${esc(p.date)}">Démarrer la séance</button></p>` : showNow ? `<p style="margin-top:10px"><button data-startplan="${esc(p.date)}" style="width:100%">La faire maintenant</button></p>` : ''}
+    </div>`;
+}
 
 function journalCard(h) {
   const sport = h.sport || 'course';
@@ -45,12 +85,18 @@ function journalCard(h) {
 
 // --- Sons -------------------------------------------------------------------
 
+// À changer à chaque régénération des clips : l'URL change, donc aucun ancien cache ne sert.
+const AUDIO_VERSION = '3';
 let audioAssets = null;
 async function loadAudio() {
   if (audioAssets) return audioAssets;
+  const get = (f) => fetch(`audio/${f}?v=${AUDIO_VERSION}`).then((r) => {
+    if (!r.ok) throw new Error(`${f} : ${r.status}`);
+    return r;
+  });
   const [index, pack] = await Promise.all([
-    fetch('audio/index.json').then((r) => r.json()),
-    fetch('audio/pack.mp3').then((r) => r.arrayBuffer()),
+    get('index.json').then((r) => r.json()),
+    get('pack.mp3').then((r) => r.arrayBuffer()),
   ]);
   audioAssets = { index, pack: new Uint8Array(pack) };
   return audioAssets;
@@ -70,27 +116,64 @@ function applyAudioMode() {
 
 let live = null; // { session, track, url, skipped:Set, maxTime, lastStep }
 
-function startSession(session) {
+const localNow = () => new Date().toLocaleString('sv-SE').replace(' ', 'T'); // AAAA-MM-JJTHH:MM:SS, heure locale
+
+function startSession(session, resume = null) {
   if (!audioAssets) {
-    alert('Les sons ne sont pas encore chargés. Réessaie dans quelques secondes.');
-    loadAudio();
+    alert('Les sons ne sont pas encore chargés. Vérifie ta connexion et réessaie dans quelques secondes.');
+    loadAudio().catch(() => {});
     return;
   }
   // Tout se fait sans attente pour rester dans le geste de l'utilisateur :
   // iOS refuse de lancer l'audio sinon.
-  const track = assemble(session.steps, audioAssets.index, audioAssets.pack, { voice: load().settings.annonces === 'voix' });
+  let track;
+  try {
+    track = assemble(session.steps, audioAssets.index, audioAssets.pack, { voice: load().settings.annonces === 'voix' });
+  } catch (e) {
+    alert(`Impossible de préparer la séance : ${e.message}. Ferme et rouvre Foulée pour la mettre à jour.`);
+    return;
+  }
   if (live) URL.revokeObjectURL(live.url);
   const url = URL.createObjectURL(new Blob([track.bytes], { type: 'audio/mpeg' }));
   stopLiveExtras();
-  live = { session, track, url, skipped: new Set(), maxTime: 0, lastStep: null, startedAt: new Date().toISOString(), gps: createTrack(), gpsError: null };
+  live = {
+    session, track, url, skipped: new Set(resume?.skipped || []), maxTime: resume?.pos || 0, lastStep: null,
+    startedAt: resume?.startedAt || localNow(), gps: createTrack(), gpsError: null, userPaused: false,
+  };
+  if (resume) live.gps.gaps = 1; // la mesure d'avant l'interruption est perdue
   applyAudioMode();
   audio.src = url;
-  audio.currentTime = 0;
+  audio.currentTime = resume?.pos || 0;
   audio.play().catch((e) => alert(`Lecture impossible : ${e.message}`));
-  setupMediaSession();
+  if (load().settings.son === 'exclusif') setupMediaSession();
   startGps();
   keepAwake();
+  saveLive();
   go('live');
+}
+
+// Si iOS ferme l'app pendant la séance (mémoire, appel, fausse manip), on peut reprendre.
+const LIVE_KEY = 'foulee.live';
+let lastLiveSave = 0;
+function saveLive() {
+  if (!live) return;
+  lastLiveSave = Date.now();
+  try {
+    localStorage.setItem(LIVE_KEY, JSON.stringify({
+      session: live.session, startedAt: live.startedAt, pos: audio.currentTime || live.maxTime, skipped: [...live.skipped], savedAt: Date.now(),
+    }));
+  } catch {}
+}
+function clearLive() {
+  try { localStorage.removeItem(LIVE_KEY); } catch {}
+}
+function savedLive() {
+  try {
+    const s = JSON.parse(localStorage.getItem(LIVE_KEY));
+    return s && Date.now() - s.savedAt < 3 * 3600 * 1000 ? s : null;
+  } catch {
+    return null;
+  }
 }
 
 // GPS : actif tant que la page est à l'écran. Écran verrouillé = coupure notée.
@@ -111,11 +194,26 @@ function startGps() {
 }
 
 // Empêche l'iPhone de verrouiller l'écran pendant la séance (Safari 16.4+).
+// Repli (anciennes versions d'iOS, webapp d'écran d'accueil) : une vidéo muette en boucle
+// empêche aussi la mise en veille, sans toucher à la musique.
 let wakeLock = null;
+let wakeVideo = null;
 async function keepAwake() {
+  if (document.visibilityState !== 'visible') return;
   try {
-    if ('wakeLock' in navigator && document.visibilityState === 'visible') wakeLock = await navigator.wakeLock.request('screen');
+    if ('wakeLock' in navigator) {
+      wakeLock = await navigator.wakeLock.request('screen');
+      return;
+    }
   } catch {}
+  if (!wakeVideo) {
+    wakeVideo = document.createElement('video');
+    Object.assign(wakeVideo, { src: 'media/veille.mp4', muted: true, loop: true, playsInline: true });
+    wakeVideo.setAttribute('playsinline', '');
+    wakeVideo.style.cssText = 'position:fixed;width:1px;height:1px;opacity:0.01;pointer-events:none;bottom:0;left:0';
+    document.body.appendChild(wakeVideo);
+  }
+  wakeVideo.play().catch(() => {});
 }
 
 function stopLiveExtras() {
@@ -123,6 +221,7 @@ function stopLiveExtras() {
   gpsWatch = null;
   wakeLock?.release().catch(() => {});
   wakeLock = null;
+  wakeVideo?.pause();
   touchLocked = false;
 }
 
@@ -200,6 +299,7 @@ function updateMediaMetadata(i) {
 audio.addEventListener('timeupdate', () => {
   if (!live) return;
   live.maxTime = Math.max(live.maxTime, audio.currentTime);
+  if (Date.now() - lastLiveSave > 5000) saveLive();
   const i = stepAt(live.track.starts, live.track.end, audio.currentTime);
   if (i !== live.lastStep) {
     live.lastStep = i;
@@ -209,8 +309,14 @@ audio.addEventListener('timeupdate', () => {
 audio.addEventListener('ended', () => {
   if (live && current === 'live') go('bilan');
 });
-audio.addEventListener('pause', () => current === 'live' && render());
-audio.addEventListener('play', () => current === 'live' && render());
+audio.addEventListener('pause', () => {
+  saveLive();
+  if (current === 'live') render();
+});
+audio.addEventListener('play', () => {
+  if (live) live.userPaused = false;
+  if (current === 'live') render();
+});
 
 // Affichage du lecteur : relu à chaque image depuis la position de la piste, donc sans dérive.
 function tick() {
@@ -267,26 +373,37 @@ const screens = {
     const d = load();
     const last = [...d.history].sort((a, b) => String(b.date).localeCompare(String(a.date)))[0];
     const installed = navigator.standalone === true || matchMedia('(display-mode: standalone)').matches;
-    const next = d.sessions[0];
+    const plan = upcoming(d.history, d.settings, today(), 14);
+    const todayItem = plan.find((p) => p.date === today());
+    const resumable = live ? null : savedLive();
+    const next = plan.filter((p) => p.sport !== 'repos' && p.date !== today()).slice(0, 2);
     const hello = d.profile.prenom ? `Bonjour ${esc(d.profile.prenom)} !` : 'Bonjour !';
     return `
       <h1>${hello}</h1>
       ${installed ? '' : '<div class="notice"><strong>Installe Foulée :</strong> dans Safari, touche Partager puis « Sur l\'écran d\'accueil », et ouvre l\'app depuis son icône. Le guidage est plus fiable ainsi.</div>'}
-      <div class="card dark">
-        <span class="pill">Prochaine séance</span>
-        <h2 style="margin-top:10px">${esc(next.name)}</h2>
-        <p class="muted">${minutesLabel(total(next.steps))} · ${next.steps.length} étapes. Reste à une intensité où tu peux parler.</p>
-        <ul class="steps">${next.steps.map((s) => `<li><span>${KINDS[s.kind].label}</span><span>${minutesLabel(s.duration)}</span></li>`).join('')}</ul>
-        <p style="margin-top:14px"><button class="btn-primary" data-start="${esc(next.id)}">Démarrer la séance</button></p>
-      </div>
-      ${last ? `<h2 style="margin:4px 0 10px">Dernière séance</h2>${journalCard(last)}` : ''}
-      <div class="notice">Prototype de test : tes séances sont enregistrées sur ce téléphone uniquement. Les comptes et le coach arrivent ensuite.</div>`;
+      ${resumable ? `<div class="alert">Séance interrompue : « ${esc(resumable.session.name)} », arrêtée à ${mmss(resumable.pos)}.
+        <div class="row" style="margin-top:10px"><button class="btn-dark" data-resume>Reprendre</button><button data-dropresume>Abandonner</button></div></div>` : ''}
+      ${todayItem ? planCard(todayItem, true) : `<div class="card dark"><span class="pill">Aujourd'hui</span><h2 style="margin-top:10px">Repos</h2><p class="muted">Le repos fait partie de l'entraînement : c'est là que le corps progresse.</p></div>`}
+      ${next.length ? `<h2 style="margin:4px 0 10px">Ensuite</h2>${next.map((p) => planCard(p, false, !todayItem?.steps && p === next.find((x) => x.sport === 'course'))).join('')}` : ''}
+      ${last ? `<h2 style="margin:4px 0 10px">Dernière séance</h2>${journalCard(last)}` : ''}`;
   },
 
-  seance() {
+  programme() {
+    const d = load();
+    const plan = upcoming(d.history, d.settings, today(), 14);
+    const firstRun = plan.some((p) => p.date === today() && p.sport === 'course') ? null : plan.find((p) => p.sport === 'course');
+    return `
+      <h1>Programme</h1>
+      <p class="muted">Les 2 prochaines semaines, recalculées après chaque bilan selon ton ressenti. Jours modifiables dans Réglages.</p>
+      ${plan.length ? plan.map((p) => planCard(p, p.date === today(), p === firstRun)).join('') : '<p class="muted">Aucune séance prévue : choisis tes jours dans Réglages.</p>'}
+      <h2 style="margin:20px 0 10px">Séances perso</h2>
+      ${screens.seance(true)}`;
+  },
+
+  seance(embedded) {
     const d = load();
     return `
-      <h1>Séances</h1>
+      ${embedded ? '' : '<h1>Séances</h1>'}
       ${d.sessions.map((s) => `
         <div class="card">
           <h2>${esc(s.name)}</h2>
@@ -321,8 +438,11 @@ const screens = {
 
   live() {
     const playing = !audio.paused;
+    const interrupted = !playing && live && !live.userPaused && audio.currentTime < live.track.end;
     return `
-      <div class="card dark live" style="margin-top:20px">
+      ${interrupted ? '<div class="alert">Séance interrompue (appel, Siri ou autre app). Touche « Reprendre ».</div>' : ''}
+      ${load().settings.son !== 'exclusif' ? '<p class="muted small" style="margin:12px 0 0">Mode musique : vérifie que ton iPhone n\'est pas en silencieux, sinon les signaux sont coupés.</p>' : ''}
+      <div class="card dark live" style="margin-top:12px">
         <p class="muted small" id="stepno"></p>
         <p class="now" id="now"></p>
         <p class="count" id="count"></p>
@@ -429,6 +549,14 @@ const screens = {
         <input id="prenom" value="${esc(d.profile.prenom)}" maxlength="40">
       </div>
       <div class="card">
+        <h2>Mes jours d'entraînement</h2>
+        <label>Course</label>
+        <div class="days">${JOURS.map(([n, l]) => `<button data-day="joursCourse" data-v="${n}" class="${(d.settings.joursCourse ?? [1, 5]).includes(n) ? 'on' : ''}">${l}</button>`).join('')}</div>
+        <label>Natation</label>
+        <div class="days">${JOURS.map(([n, l]) => `<button data-day="joursNatation" data-v="${n}" class="${(d.settings.joursNatation ?? [3]).includes(n) ? 'on' : ''}">${l}</button>`).join('')}</div>
+        <p class="muted small" style="margin-top:8px">Laisse au moins un jour entre deux courses : sinon la seconde devient un jour de repos.</p>
+      </div>
+      <div class="card">
         <h2>Signal de changement d'étape</h2>
         <label style="font-weight:400"><input type="radio" name="annonces" value="signaux" style="width:auto" ${d.settings.annonces !== 'voix' ? 'checked' : ''}> <strong>Signaux sonores</strong> : notes qui montent = cours, notes qui descendent = marche, 3 bips avant chaque changement.</label>
         <label style="font-weight:400"><input type="radio" name="annonces" value="voix" style="width:auto" ${d.settings.annonces === 'voix' ? 'checked' : ''}> <strong>Voix</strong> : annonce chaque étape et sa durée.</label>
@@ -453,7 +581,7 @@ function render() {
   app.innerHTML = screens[current]();
   for (const b of document.querySelectorAll('#tabs button')) {
     const tab = b.dataset.tab;
-    b.classList.toggle('on', tab === current || (tab === 'seance' && ['edit', 'live', 'bilan'].includes(current)));
+    b.classList.toggle('on', tab === current || (tab === 'programme' && ['edit', 'live', 'bilan'].includes(current)));
   }
   if (current === 'live') requestAnimationFrame(tick);
 }
@@ -476,6 +604,7 @@ function go(screen) {
       source: 'guidee',
       date: live.startedAt,
       sessionName: live.session.name,
+      level: live.session.level ?? null,
       steps: steps,
       plannedSec: total(steps),
       elapsedSec,
@@ -583,6 +712,15 @@ document.addEventListener('click', (e) => {
     go(ds.tab);
   } else if (ds.start) {
     startSession(findSession(ds.start));
+  } else if ('resume' in ds) {
+    const r = savedLive();
+    if (r) startSession(r.session, r);
+  } else if ('dropresume' in ds) {
+    clearLive();
+    render();
+  } else if (ds.startplan) {
+    const p = upcoming(load().history, load().settings, today(), 14).find((x) => x.date === ds.startplan && x.sport === 'course');
+    if (p) startSession({ id: `plan-${p.date}`, name: `Palier ${p.level} · ${p.title}`, steps: p.steps, level: p.level });
   } else if (ds.edit) {
     editing = structuredClone(findSession(ds.edit));
     go('edit');
@@ -598,7 +736,7 @@ document.addEventListener('click', (e) => {
     if (editing.steps.length > 1) editing.steps.splice(Number(ds.del), 1);
     render();
   } else if ('cancel' in ds) {
-    go('seance');
+    go('programme');
   } else if ('save' in ds) {
     readEditor();
     const { isNew, ...s } = editing;
@@ -607,16 +745,29 @@ document.addEventListener('click', (e) => {
       if (i >= 0) d.sessions[i] = s;
       else d.sessions.push(s);
     });
-    go('seance');
+    go('programme');
   } else if ('remove' in ds) {
     if (!confirm('Supprimer cette séance ?')) return;
     update((d) => { d.sessions = d.sessions.filter((x) => x.id !== editing.id); });
     if (load().sessions.length === 0) update((d) => { d.sessions = structuredClone(PRESETS); });
-    go('seance');
+    go('programme');
   } else if ('toggle' in ds) {
-    if (audio.paused) audio.play(); else audio.pause();
+    if (audio.paused) audio.play();
+    else {
+      live.userPaused = true;
+      audio.pause();
+    }
   } else if ('skip' in ds) {
     nextStep();
+  } else if (ds.day) {
+    const key = ds.day;
+    const n = Number(ds.v);
+    update((d) => {
+      const cur = new Set(d.settings[key] ?? (key === 'joursCourse' ? [1, 5] : [3]));
+      if (cur.has(n)) cur.delete(n); else cur.add(n);
+      d.settings[key] = [...cur].sort();
+    });
+    render();
   } else if ('touchlock' in ds) {
     touchLocked = true;
     renderTouchLock();
@@ -641,6 +792,7 @@ document.addEventListener('click', (e) => {
     readBilan();
     const entry = bilan;
     update((d) => { d.history.unshift(entry); });
+    clearLive();
     if (live) URL.revokeObjectURL(live.url);
     live = null;
     audio.removeAttribute('src');

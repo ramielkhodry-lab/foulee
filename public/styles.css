@@ -80,3 +80,7 @@ body.flash-course { animation: flash-course 1.5s ease-out; }
 body.flash-marche { animation: flash-marche 1.5s ease-out; }
 @keyframes flash-course { 0%, 40% { background: var(--lime); } 100% { background: var(--bg); } }
 @keyframes flash-marche { 0%, 40% { background: #FFFFFF; } 100% { background: var(--bg); } }
+.days { display: grid; grid-template-columns: repeat(7, 1fr); gap: 6px; }
+.days button { min-height: 46px; padding: 0; }
+.days button.on { background: var(--green); color: #fff; }
+.alert { background: #FDE2DF; color: #5C1410; border-radius: 16px; padding: 14px; margin: 14px 0; font-weight: 600; }

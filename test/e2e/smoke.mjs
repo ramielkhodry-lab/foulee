@@ -28,7 +28,7 @@ await page.goto(base);
 await page.waitForFunction(() => navigator.serviceWorker?.controller || true);
 await page.screenshot({ path: '/tmp/foulee-accueil.png', fullPage: true });
 
-await page.click('[data-tab="seance"]');
+await page.click('[data-tab="programme"]');
 await page.waitForTimeout(800); // chargement des sons
 await page.click('[data-start="test-4"]');
 await page.waitForSelector('#count');
@@ -87,6 +87,26 @@ await page.waitForSelector('[data-manual="natation"]');
 const count = await page.locator('#app .card').count();
 await page.click('[data-tab="accueil"]');
 const accueil = await page.textContent('#app');
+await page.screenshot({ path: '/tmp/foulee-accueil2.png', fullPage: true });
+await page.click('[data-tab="programme"]');
+const programme = await page.textContent('#app');
+await page.screenshot({ path: '/tmp/foulee-programme.png', fullPage: true });
+// Reprise après fermeture de l'app en pleine séance.
+await page.click('[data-tab="programme"]');
+await page.click('[data-start="test-4"]');
+await page.waitForTimeout(6500);
+await page.reload();
+await page.waitForSelector('[data-resume]');
+const resumeText = await page.textContent('#app');
+await page.waitForTimeout(800);
+await page.click('[data-resume]');
+await page.waitForSelector('#count');
+await page.waitForTimeout(500);
+const resumedAt = await page.evaluate(() => document.getElementById('player').currentTime);
+// Pause non voulue (simulée) : bandeau d'interruption.
+await page.evaluate(() => document.getElementById('player').pause());
+await page.waitForTimeout(300);
+const interruptedText = await page.textContent('#app');
 await browser.close();
 server.close();
 
@@ -104,9 +124,13 @@ const checks = {
   'natation saisie au journal': journal2.includes('30 × 25 m = 750 m') && journal2.includes('essoufflement 4/5'),
   'historique importé': journal2.includes('3,35 km') && journal2.includes('28 × 25 m = 700 m'),
   'pas de doublon à la réimport': count === 7,
+  'reprise proposée après fermeture': resumeText.includes('Séance interrompue') && resumeText.includes('Test du guidage'),
+  'reprise au bon endroit': resumedAt > 5,
+  'bandeau si pause non voulue': interruptedText.includes('Séance interrompue (appel'),
+  'programme calculé (course + natation)': /palier [23]\/12/.test(programme) && programme.includes('32 longueurs'),
   'accueil : dernière séance = la plus récente': accueil.includes('mercredi 28 octobre') && !accueil.includes('30 septembre'),
   'aucune erreur hors alertes d\u2019import': errors.filter((e) => !e.includes('séance(s) ajoutée(s)')).length === 0,
 };
-console.log({ t1, now1, now2, dur, gpsLine, swimdist, count, errors });
+console.log({ resumedAt, t1, now1, now2, dur, gpsLine, swimdist, count, errors });
 for (const [k, v] of Object.entries(checks)) console.log(v ? 'ok  ' : 'FAIL', k);
 process.exit(Object.values(checks).every(Boolean) ? 0 : 1);

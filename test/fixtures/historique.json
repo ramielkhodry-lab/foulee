@@ -94,7 +94,8 @@
    "essoufflement": null,
    "fatigue": null,
    "douleur": "",
-   "commentaire": ""
+   "commentaire": "",
+   "level": 1
   },
   {
    "id": "fixture-run-2026-10-26",
@@ -110,7 +111,8 @@
    "essoufflement": null,
    "fatigue": null,
    "douleur": "",
-   "commentaire": ""
+   "commentaire": "",
+   "level": 2
   }
  ]
 }

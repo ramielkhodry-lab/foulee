@@ -53,15 +53,15 @@ def main(voice_dir):
         silence = ffmpeg_mp3(["-f", "lavfi", "-i", "anullsrc=r=24000:cl=mono", "-t", "2"], tmp / "s.mp3")
         add("silence", silence[20 * FRAME_BYTES:21 * FRAME_BYTES])
         add("bip", ffmpeg_mp3(["-f", "lavfi", "-i", "sine=frequency=880:duration=0.15",
-                               "-af", "volume=4,afade=t=out:st=0.12:d=0.03"], tmp / "b.mp3"))
+                               "-af", "volume=7,afade=t=out:st=0.12:d=0.03"], tmp / "b.mp3"))
         add("bip_long", ffmpeg_mp3(["-f", "lavfi", "-i", "sine=frequency=1320:duration=0.6",
-                                    "-af", "volume=4,afade=t=out:st=0.45:d=0.15"], tmp / "bl.mp3"))
+                                    "-af", "volume=7,afade=t=out:st=0.45:d=0.15"], tmp / "bl.mp3"))
 
         # Signaux sans voix : montée = course, descente = marche, trois notes = fin.
         def tones(name, notes):
             parts = "".join(f"sine=frequency={f}:duration=0.22[t{i}];" for i, f in enumerate(notes))
             chain = "".join(f"[t{i}]" for i in range(len(notes)))
-            graph = f"{parts}{chain}concat=n={len(notes)}:v=0:a=1,volume=4,afade=t=out:st={0.22 * len(notes) - 0.08}:d=0.08"
+            graph = f"{parts}{chain}concat=n={len(notes)}:v=0:a=1,volume=7,afade=t=out:st={0.22 * len(notes) - 0.08}:d=0.08"
             add(name, ffmpeg_mp3(["-f", "lavfi", "-i", "anullsrc=r=24000:cl=mono", "-filter_complex", graph, "-t", str(0.22 * len(notes))],
                                  tmp / f"{name}.mp3"))
 
