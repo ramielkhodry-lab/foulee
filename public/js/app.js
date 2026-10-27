@@ -32,34 +32,60 @@ function stepsSummary(steps) {
   return `${minutesLabel(first.duration)} marche · ${body} · ${minutesLabel(lastStep.duration)} marche`;
 }
 
-function planCard(p, isToday, showNow = false) {
-  const label = isToday ? "Aujourd'hui" : dateLabel(p.date);
-  if (p.sport === 'repos') {
-    return `<div class="card"><p><span class="pill">Repos</span> <strong>${label}</strong></p><p class="muted small">${esc(p.reason)}</p></div>`;
-  }
+// --- Éléments visuels ---------------------------------------------------------
+
+const ICONS = {
+  course: '<path d="M5 6l6 6-6 6M13 6l6 6-6 6"/>',
+  natation: '<path d="M2 9c2.5-2 4.5-2 7 0s4.5 2 7 0 4.5-2 6 0M2 15c2.5-2 4.5-2 7 0s4.5 2 7 0 4.5-2 6 0"/>',
+  repos: '<path d="M20 14.5A8 8 0 0 1 9.5 4a8 8 0 1 0 10.5 10.5z"/>',
+};
+const icon = (sport) => `<span class="ico ${sport}"><svg viewBox="0 0 24 24">${ICONS[sport] || ICONS.course}</svg></span>`;
+const shortDate = (d) => new Date(`${String(d).slice(0, 10)}T12:00`).toLocaleDateString('fr-FR', { weekday: 'short', day: 'numeric', month: 'short' });
+
+// Séance du jour : le seul bloc mis en vedette de l'accueil et du programme.
+function todayHero(p) {
   if (p.sport === 'natation') {
     return `
-      <div class="card${isToday ? ' hero natation' : ''}">
-        <p><span class="pill natation">Natation</span> <strong>${label}</strong></p>
-        ${isToday ? `<h2><span class="big">${p.longueurs}</span> longueurs · ${p.distance} m</h2>` : `<h2 style="margin-top:8px">${p.longueurs} longueurs · ${p.distance} m</h2>`}
-        ${isToday ? `<ul class="steps">${p.plan.map((l) => `<li><span>${esc(l)}</span></li>`).join('')}</ul>` : ''}
-        <p class="muted small" style="margin-top:8px">${esc(p.reason)}</p>
-        ${isToday ? '<p style="margin-top:12px"><button class="btn-swim" data-logplan="natation">Noter ma séance</button></p>' : ''}
-      </div>`;
+      <section class="hero natation">
+        <p class="eyebrow">Aujourd'hui · natation</p>
+        <p class="hero-num">${p.longueurs}<small>longueurs</small></p>
+        <p class="hero-sub">${p.distance} m en bassin de ${p.bassin} m</p>
+        <ol class="hero-steps">${p.plan.map((l) => `<li>${esc(l)}</li>`).join('')}</ol>
+        <p class="muted small">${esc(p.reason)}</p>
+        <button class="btn-swim" data-logplan="natation">Noter ma séance</button>
+      </section>`;
   }
   const mins = Math.round(total(p.steps) / 60);
+  const runs = p.steps.filter((s) => KINDS[s.kind].effort === 'course');
   return `
-    <div class="card${isToday ? ' hero course' : ''}">
-      <p><span class="pill course">Course</span> <strong>${label}</strong> <span class="muted small">· palier ${p.level}/12</span></p>
-      ${isToday ? `<h2><span class="big">${mins}</span> min</h2><p style="font-weight:700">${esc(p.title)}</p>` : `<h2 style="margin-top:8px">${mins} min · ${esc(p.title)}</h2>`}
-      <p class="small">${esc(stepsSummary(p.steps))}</p>
-      <p class="muted small">${esc(p.reason)}</p>
-      ${isToday ? `<p style="margin-top:14px"><button class="btn-primary" data-startplan="${esc(p.date)}">Démarrer la séance</button></p><p style="margin:8px 0 0"><button class="btn-ghost" data-logplan="course" style="width:100%">Faite sans l'app : la noter</button></p>` : showNow ? `<p style="margin-top:10px"><button data-startplan="${esc(p.date)}" style="width:100%">La faire maintenant</button></p>` : ''}
-    </div>`;
+    <section class="hero course">
+      <p class="eyebrow">Aujourd'hui · course · palier ${p.level}/12</p>
+      <p class="hero-num">${mins}<small>min</small></p>
+      <p class="hero-sub">${esc(p.title)}</p>
+      <div class="effort-bar">${p.steps.map((s) => `<i class="${KINDS[s.kind].effort}" style="flex:${s.duration}"></i>`).join('')}</div>
+      <p class="muted small">${runs.length} fois en course, ${Math.round(runs.reduce((a, s) => a + s.duration, 0) / 60)} min au total. ${esc(p.reason)}</p>
+      <button class="btn-primary" data-startplan="${esc(p.date)}">Démarrer la séance</button>
+      <button class="btn-ghost" data-logplan="course" style="width:100%;margin-top:6px">Faite sans l'app : la noter</button>
+    </section>`;
 }
 
-function journalCard(h) {
-  const sport = h.sport || 'course';
+// Séance à venir : une ligne légère, sans cadre.
+function planRow(p, showNow = false) {
+  if (p.sport === 'repos') {
+    return `<div class="li">${icon('repos')}<div class="li-main"><b>${shortDate(p.date)} · repos</b><span>${esc(p.reason)}</span></div></div>`;
+  }
+  const main = p.sport === 'natation'
+    ? `<b>${shortDate(p.date)}</b><span>${p.longueurs} longueurs · ${p.distance} m</span>`
+    : `<b>${shortDate(p.date)} <em>palier ${p.level}/12</em></b><span>${esc(p.title)}</span>`;
+  const side = p.sport === 'natation' ? `${p.distance}<small>m</small>` : `${Math.round(total(p.steps) / 60)}<small>min</small>`;
+  return `
+    <div class="li">${icon(p.sport)}<div class="li-main">${main}</div><span class="li-side ${p.sport}">${side}</span></div>
+    ${showNow ? `<button class="btn-ghost small-btn" data-startplan="${esc(p.date)}">La faire maintenant ›</button>` : ''}`;
+}
+
+// Séance passée : ligne dépliable, le détail reste à un toucher.
+function historyRow(h) {
+  const sport = sportOf(h);
   const parts = [];
   if (h.elapsedSec) parts.push(`${Math.round(h.elapsedSec / 60)} min`);
   if (sport === 'natation' && h.swim?.longueurs) parts.push(`${h.swim.longueurs} × ${h.swim.bassinM} m = ${h.swim.longueurs * h.swim.bassinM} m`);
@@ -73,15 +99,20 @@ function journalCard(h) {
     h.fatigue && `fatigue ${h.fatigue}/5`,
     h.douleur && `douleur : ${esc(h.douleur)}`,
   ].filter(Boolean);
+  const side = sport === 'natation'
+    ? (swimMeters(h) ? `${swimMeters(h)}<small>m</small>` : '')
+    : h.distanceKm ? `${h.distanceKm.toLocaleString('fr-FR')}<small>km</small>` : h.elapsedSec ? `${Math.round(h.elapsedSec / 60)}<small>min</small>` : '';
   return `
-    <div class="card">
-      <p><span class="pill ${sport === 'natation' ? 'natation' : 'course'}">${sport === 'natation' ? 'Natation' : 'Course'}</span> <strong>${dateLabel(h.date)}</strong></p>
-      <p class="muted">${parts.join(' · ')}</p>
-      ${sport === 'natation' && h.swim?.nages?.length ? `<p class="small">${esc(h.swim.nages.join(', '))}${h.swim.detail ? ` · ${esc(h.swim.detail)}` : ''}</p>` : ''}
-      ${h.structure ? `<p class="small">${esc(h.structure)}</p>` : ''}
-      ${feel.length ? `<p class="muted small">${feel.join(' · ')}</p>` : ''}
-      ${h.commentaire ? `<p>« ${esc(h.commentaire)} »</p>` : ''}
-    </div>`;
+    <details class="hist">
+      <summary class="li">${icon(sport)}<div class="li-main"><b>${dateLabel(h.date)}</b><span>${parts.length ? parts.join(' · ') : esc(h.structure || h.sessionName || (sport === 'natation' ? 'Natation' : 'Course'))}</span></div><span class="li-side ${sport}">${side}</span></summary>
+      <div class="li-more">
+        ${sport === 'natation' && h.swim?.nages?.length ? `<p class="small">${esc(h.swim.nages.join(', '))}${h.swim.detail ? ` · ${esc(h.swim.detail)}` : ''}</p>` : ''}
+        ${h.structure ? `<p class="small">${esc(h.structure)}</p>` : ''}
+        ${feel.length ? `<p class="muted small">${feel.join(' · ')}</p>` : ''}
+        ${h.commentaire ? `<p class="small">« ${esc(h.commentaire)} »</p>` : ''}
+        ${!feel.length && !h.commentaire && !h.structure ? '<p class="muted small">Pas de ressenti noté.</p>' : ''}
+      </div>
+    </details>`;
 }
 
 // --- Chiffres de progression ---------------------------------------------------
@@ -107,6 +138,27 @@ function weekTotals(history, monday) {
   };
 }
 
+// Séances de la semaine : faites / prévues (faites + encore au programme d'ici dimanche).
+function weekGoal(history, plan) {
+  const monday = mondayOf(today());
+  const sunday = addDays(monday, 6);
+  const done = history.filter((h) => { const d = String(h.date).slice(0, 10); return d >= monday && d <= sunday; }).length;
+  const left = plan.filter((p) => p.sport !== 'repos' && p.date <= sunday).length;
+  return { done, goal: done + left };
+}
+
+function ring(done, goal) {
+  const r = 50;
+  const c = 2 * Math.PI * r;
+  const frac = goal ? Math.min(1, done / goal) : 0;
+  return `
+    <svg class="ring" viewBox="0 0 120 120" aria-hidden="true">
+      <defs><linearGradient id="ringg" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#E6FF8A"/><stop offset="1" stop-color="#9BE000"/></linearGradient></defs>
+      <circle cx="60" cy="60" r="${r}" class="ring-bg"/>
+      ${frac ? `<circle cx="60" cy="60" r="${r}" class="ring-fg" stroke="url(#ringg)" stroke-dasharray="${(frac * c).toFixed(1)} ${c.toFixed(1)}"/>` : ''}
+    </svg>`;
+}
+
 function weekStrip(history, plan) {
   const t = today();
   const monday = mondayOf(t);
@@ -114,18 +166,38 @@ function weekStrip(history, plan) {
   return `<div class="week">${days.map((d, i) => {
     const done = history.filter((h) => String(h.date).slice(0, 10) === d).map(sportOf);
     const planned = plan.filter((p) => p.date === d && p.sport !== 'repos').map((p) => p.sport);
-    const dots = [...new Set([...done, ...planned])].map((sp) => `<span class="dot ${sp}${done.includes(sp) ? ' done' : ''}"></span>`).join(' ');
-    return `<div class="${d === t ? 'today' : ''}">${'LMMJVSD'[i]}<b>${Number(d.slice(8))}</b>${dots || '<span class="dot"></span>'}</div>`;
+    const dots = [...new Set([...done, ...planned])].map((sp) => `<span class="dot ${sp}${done.includes(sp) ? ' done' : ''}"></span>`).join('');
+    return `<div class="${d === t ? 'today' : d < t ? 'past' : ''}">${'LMMJVSD'[i]}<b>${Number(d.slice(8))}</b><span class="dots">${dots}</span></div>`;
   }).join('')}</div>`;
 }
 
-function weekBars(history, kind) {
+// Courbe des 8 dernières semaines (km de course ou mètres nagés).
+function weekCurve(history, kind) {
   const monday = mondayOf(today());
   const weeks = Array.from({ length: 8 }, (_, i) => addDays(monday, (i - 7) * 7));
   const vals = weeks.map((w) => weekTotals(history, w)[kind === 'course' ? 'km' : 'm']);
   const max = Math.max(...vals) || 1;
-  return `<div class="bars ${kind}">${weeks.map((w, i) => `
-    <div>${vals[i] ? (kind === 'course' ? fmtKm(vals[i]) : vals[i]) : ''}<i class="${vals[i] ? 'v' : ''}" style="height:${Math.max(3, (vals[i] / max) * 80)}%"></i>${Number(w.slice(8))}/${Number(w.slice(5, 7))}</div>`).join('')}</div>`;
+  const W = 320;
+  const H = 130;
+  const pts = vals.map((v, i) => [12 + (i * (W - 24)) / 7, 112 - (v / max) * 92]);
+  let d = `M${pts[0][0]},${pts[0][1]}`;
+  for (let i = 1; i < pts.length; i++) {
+    const [x0, y0] = pts[i - 1];
+    const [x1, y1] = pts[i];
+    const mx = (x0 + x1) / 2;
+    d += ` C${mx},${y0} ${mx},${y1} ${x1},${y1}`;
+  }
+  const color = kind === 'course' ? 'var(--run)' : 'var(--swim)';
+  const [lx, ly] = pts.at(-1);
+  return `
+    <svg class="curve" viewBox="0 0 ${W} ${H}" preserveAspectRatio="none" aria-hidden="true">
+      <defs><linearGradient id="area-${kind}" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="${color}" stop-opacity="0.35"/><stop offset="1" stop-color="${color}" stop-opacity="0"/></linearGradient></defs>
+      <path d="${d} L${lx},${H} L${pts[0][0]},${H} Z" fill="url(#area-${kind})"/>
+      <path d="${d}" fill="none" stroke="${color}" stroke-width="3" stroke-linecap="round"/>
+      ${pts.map(([x, y], i) => (vals[i] ? `<circle cx="${x}" cy="${y}" r="3.5" fill="${color}"/>` : '')).join('')}
+      <circle cx="${lx}" cy="${ly}" r="9" fill="${color}" opacity="0.25"/>
+    </svg>
+    <div class="curve-x">${weeks.map((w, i) => `<span>${vals[i] ? `<b>${kind === 'course' ? fmtKm(vals[i]) : vals[i]}</b>` : '<b>·</b>'}${Number(w.slice(8))}/${Number(w.slice(5, 7))}</span>`).join('')}</div>`;
 }
 
 // --- Sons -------------------------------------------------------------------
@@ -414,6 +486,7 @@ function tick() {
 // --- Écrans -------------------------------------------------------------------
 
 let current = 'accueil';
+let progSport = 'course'; // courbe affichée dans Progression
 let editing = null; // séance en cours d'édition (copie)
 let bilan = null; // formulaire de bilan en cours
 
@@ -425,36 +498,51 @@ const screens = {
     const plan = upcoming(d.history, d.settings, today(), 14);
     const todayItem = plan.find((p) => p.date === today());
     const resumable = live ? null : savedLive();
-    const next = plan.filter((p) => p.sport !== 'repos' && p.date !== today()).slice(0, 2);
-    const hello = d.profile.prenom ? `Salut ${esc(d.profile.prenom)}` : 'Salut';
+    const next = plan.filter((p) => p.sport !== 'repos' && p.date !== today()).slice(0, 3);
+    const prenom = d.profile.prenom || account.session()?.user?.prenom || '';
     const wk = weekTotals(d.history, mondayOf(today()));
+    const goal = weekGoal(d.history, plan);
     return `
-      <p class="eyebrow">${new Date().toLocaleDateString('fr-FR', { weekday: 'long', day: 'numeric', month: 'long' })}</p>
-      <h1>${hello}</h1>
+      <header class="top">
+        <div><p class="eyebrow">${new Date().toLocaleDateString('fr-FR', { weekday: 'long', day: 'numeric', month: 'long' })}</p>
+        <h1>${prenom ? `Salut ${esc(prenom)}` : 'Salut'}</h1></div>
+        <button class="avatar sm" data-tab="profil" aria-label="Profil">${esc((prenom[0] || '?').toUpperCase())}</button>
+      </header>
       ${installed ? '' : '<div class="notice"><strong>Installe Foulée :</strong> dans Safari, touche Partager puis « Sur l\'écran d\'accueil », et ouvre l\'app depuis son icône. Le guidage est plus fiable ainsi.</div>'}
       ${resumable ? `<div class="alert">Séance interrompue : « ${esc(resumable.session.name)} », arrêtée à ${mmss(resumable.pos)}.
         <div class="row" style="margin-top:10px"><button class="btn-dark" data-resume>Reprendre</button><button data-dropresume>Abandonner</button></div></div>` : ''}
+      <section class="goal">
+        <div class="goal-ring">${ring(goal.done, goal.goal)}<div><b>${goal.done}<small>/${goal.goal}</small></b><span>séances</span></div></div>
+        <div class="goal-side">
+          <p class="eyebrow" style="margin:0 0 6px">Cette semaine</p>
+          <p class="kpi course">${fmtKm(wk.km)}<small>km courus</small></p>
+          <p class="kpi natation">${wk.m}<small>m nagés</small></p>
+        </div>
+      </section>
       ${weekStrip(d.history, plan)}
-      ${todayItem ? planCard(todayItem, true) : `<div class="card hero"><span class="pill">Aujourd'hui</span><h2>Repos</h2><p class="muted">Le repos fait partie de l'entraînement : c'est là que le corps progresse.</p></div>`}
-      <h3>Cette semaine</h3>
-      <div class="stats">
-        <div class="stat course"><b>${fmtKm(wk.km)} <small>km</small></b><span>course</span></div>
-        <div class="stat natation"><b>${wk.m} <small>m</small></b><span>natation</span></div>
-        <div class="stat"><b>${wk.n}</b><span>séance${wk.n > 1 ? 's' : ''}</span></div>
-      </div>
-      ${next.length ? `<h3>Ensuite</h3>${next.map((p) => planCard(p, false, !todayItem?.steps && p === next.find((x) => x.sport === 'course'))).join('')}` : ''}
-      ${last ? `<h3>Dernière séance</h3>${journalCard(last)}` : ''}`;
+      ${todayItem && todayItem.sport !== 'repos' ? todayHero(todayItem) : `<section class="hero rest"><p class="eyebrow">Aujourd'hui</p><p class="hero-num">Repos</p><p class="muted">${todayItem ? esc(todayItem.reason) : "Le repos fait partie de l'entraînement : c'est là que le corps progresse."}</p></section>`}
+      ${next.length ? `<h3>Ensuite</h3><div class="list">${next.map((p) => planRow(p, !todayItem?.steps && p === next.find((x) => x.sport === 'course'))).join('')}</div>` : ''}
+      ${last ? `<h3>Dernière séance</h3><div class="list">${historyRow(last)}</div>` : ''}`;
   },
 
   programme() {
     const d = load();
     const plan = upcoming(d.history, d.settings, today(), 14);
-    const firstRun = plan.some((p) => p.date === today() && p.sport === 'course') ? null : plan.find((p) => p.sport === 'course');
+    const todayItem = plan.find((p) => p.date === today() && p.sport !== 'repos');
+    const firstRun = todayItem?.sport === 'course' ? null : plan.find((p) => p.sport === 'course');
+    const rest = plan.filter((p) => p !== todayItem);
+    const run = plan.find((p) => p.sport === 'course');
     return `
       <h1>Programme</h1>
-      <h3 style="margin-top:0">Ton plan · 2 semaines</h3>
-      <p class="muted small">Recalculé après chaque bilan selon ta difficulté, ta fatigue et tes douleurs (règles fixes, pas un coach humain). Jours modifiables dans Profil.</p>
-      ${plan.length ? plan.map((p) => planCard(p, p.date === today(), p === firstRun)).join('') : '<p class="muted">Aucune séance prévue : choisis tes jours dans Profil.</p>'}
+      ${run ? `<section class="level">
+        <p class="eyebrow" style="margin:0">Ton palier de course</p>
+        <p class="level-num">${run.level}<small>/12</small></p>
+        <div class="level-track">${Array.from({ length: 12 }, (_, i) => `<i class="${i < run.level ? 'on' : ''}"></i>`).join('')}</div>
+        <p class="muted small" style="margin:8px 0 0">Palier 12 = 30 min de course sans marcher. Recalculé après chaque bilan selon ta difficulté, ta fatigue et tes douleurs : des règles fixes, pas un coach humain.</p>
+      </section>` : ''}
+      ${todayItem ? todayHero(todayItem) : ''}
+      <h3>Les 2 prochaines semaines</h3>
+      ${rest.length ? `<div class="timeline">${rest.map((p) => planRow(p, p === firstRun)).join('')}</div>` : '<p class="muted">Aucune séance prévue : choisis tes jours dans Profil.</p>'}
       <h3>Mes séances</h3>
       <p class="muted small">Des séances guidées à faire quand tu veux, en dehors du plan.</p>
       ${screens.seance(true)}`;
@@ -481,13 +569,15 @@ const screens = {
     const d = load();
     return `
       ${embedded ? '' : '<h1>Séances</h1>'}
+      <div class="list">
       ${d.sessions.map((s) => `
-        <div class="card">
-          <h2>${esc(s.name)}</h2>
-          <p class="muted">${minutesLabel(total(s.steps))} · ${s.steps.length} étapes</p>
-          <div class="row"><button class="btn-dark" data-start="${esc(s.id)}">Démarrer</button><button data-edit="${esc(s.id)}">Modifier</button></div>
+        <div class="li">
+          <button class="ico course play" data-start="${esc(s.id)}" aria-label="Démarrer ${esc(s.name)}"><svg viewBox="0 0 24 24"><path d="M8 5v14l11-7z"/></svg></button>
+          <div class="li-main"><b>${esc(s.name)}</b><span>${minutesLabel(total(s.steps))} · ${s.steps.length} étapes</span></div>
+          <button class="btn-ghost small-btn" data-edit="${esc(s.id)}">Modifier</button>
         </div>`).join('')}
-      <button data-new style="width:100%">+ Nouvelle séance</button>`;
+      </div>
+      <button data-new class="btn-ghost" style="width:100%;margin-top:8px">+ Nouvelle séance</button>`;
   },
 
   edit() {
@@ -575,34 +665,34 @@ const screens = {
     const longest = Math.max(0, ...runs.map((h) => h.distanceKm || 0));
     const paces = runs.map((h) => h.allureSecKm || (h.distanceKm && h.elapsedSec && !h.distanceEstimee ? h.elapsedSec / h.distanceKm : 0)).filter(Boolean);
     const bestSwim = Math.max(0, ...swims.map(swimMeters));
-    const wk = weekTotals(d.history, mondayOf(today()));
-    const prev = weekTotals(d.history, addDays(mondayOf(today()), -7));
+    const sp = progSport;
+    const key = sp === 'course' ? 'km' : 'm';
+    const wk = weekTotals(d.history, mondayOf(today()))[key];
+    const prev = weekTotals(d.history, addDays(mondayOf(today()), -7))[key];
+    const diff = wk - prev;
+    const fmt = (v) => (sp === 'course' ? fmtKm(v) : String(Math.round(v)));
     return `
       <h1>Progression</h1>
       ${d.history.length ? `
-        <div class="card">
-          <p class="eyebrow" style="margin:0">Course · km par semaine</p>
-          <p style="margin:6px 0 0"><span style="font-size:34px;font-weight:800;color:var(--run)">${fmtKm(wk.km)}</span> <span class="muted">km cette semaine · ${fmtKm(prev.km)} la précédente</span></p>
-          ${weekBars(d.history, 'course')}
-        </div>
-        <div class="card">
-          <p class="eyebrow" style="margin:0">Natation · mètres par semaine</p>
-          <p style="margin:6px 0 0"><span style="font-size:34px;font-weight:800;color:var(--swim)">${wk.m}</span> <span class="muted">m cette semaine · ${prev.m} la précédente</span></p>
-          ${weekBars(d.history, 'natation')}
-        </div>
+        <div class="seg"><button data-progsport="course" class="${sp === 'course' ? 'on course' : ''}">Course</button><button data-progsport="natation" class="${sp === 'natation' ? 'on natation' : ''}">Natation</button></div>
+        <section class="prog ${sp}">
+          <p class="eyebrow" style="margin:0">Cette semaine</p>
+          <p class="hero-num">${fmt(wk)}<small>${key}</small></p>
+          <p class="delta ${diff > 0 ? 'up' : diff < 0 ? 'down' : ''}">${diff > 0 ? '▲' : diff < 0 ? '▼' : '='} ${fmt(Math.abs(diff))} ${key} par rapport à la semaine dernière</p>
+          ${weekCurve(d.history, sp)}
+        </section>
         <h3>Records</h3>
-        <div class="stats">
-          <div class="stat course"><b>${longest ? fmtKm(longest) : '–'} <small>km</small></b><span>plus longue course</span></div>
-          <div class="stat course"><b>${paces.length ? allure(Math.min(...paces)).replace('/km', '') : '–'}</b><span>meilleure allure moyenne</span></div>
-          <div class="stat natation"><b>${bestSwim || '–'} <small>m</small></b><span>plus longue nage</span></div>
+        <div class="records">
+          <div class="course"><b>${longest ? fmtKm(longest) : '–'}<small>km</small></b><span>plus longue course</span></div>
+          <div class="course"><b>${paces.length ? allure(Math.min(...paces)).replace('/km', '') : '–'}</b><span>meilleure allure</span></div>
+          <div class="natation"><b>${bestSwim || '–'}<small>m</small></b><span>plus longue nage</span></div>
         </div>
         <p class="muted small" style="margin-top:8px">Allure moyenne marche comprise : elle baisse quand tu cours plus longtemps.</p>` : ''}
       <h3>Historique</h3>
-      <div class="row" style="margin-bottom:14px"><button data-manual="natation" style="color:var(--swim)">+ Natation</button><button data-manual="course" style="color:var(--run)">+ Course libre</button></div>
-      ${sorted.length === 0 ? '<p class="muted">Aucune séance pour l\'instant.</p>' : ''}
-      ${sorted.map(journalCard).join('')}
+      <div class="row" style="margin-bottom:10px"><button data-manual="natation" class="btn-ghost" style="color:var(--swim)">+ Natation</button><button data-manual="course" class="btn-ghost" style="color:var(--run)">+ Course libre</button></div>
+      ${sorted.length === 0 ? '<p class="muted">Aucune séance pour l\'instant.</p>' : `<div class="list">${sorted.map(historyRow).join('')}</div>`}
       <h3>Proches</h3>
-      <div class="card"><p class="small">Le partage de séances avec tes proches n'existe pas encore : pour l'instant, chacun a son compte et ses données. Inviter quelqu'un : Profil.</p></div>`;
+      <p class="muted small">Le partage de séances avec tes proches n'existe pas encore : pour l'instant, chacun a son compte et ses données. Inviter quelqu'un : Profil.</p>`;
   },
 
   saisie() {
@@ -953,6 +1043,9 @@ document.addEventListener('click', (e) => {
     renderTouchLock();
   } else if ('finish' in ds) {
     go('bilan');
+  } else if (ds.progsport) {
+    progSport = ds.progsport;
+    render();
   } else if (ds.manual) {
     bilan = newManual(ds.manual);
     go('saisie');

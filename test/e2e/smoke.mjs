@@ -84,7 +84,7 @@ await page.screenshot({ path: '/tmp/foulee-journal2.png', fullPage: true });
 await page.click('[data-tab="profil"]');
 await page.setInputFiles('#importfile', new URL('../fixtures/historique.json', import.meta.url).pathname);
 await page.waitForSelector('[data-manual="natation"]');
-const count = await page.locator('#app .card:has(.pill)').count();
+const count = await page.locator('#app details.hist').count();
 await page.click('[data-tab="accueil"]');
 const accueil = await page.textContent('#app');
 await page.screenshot({ path: '/tmp/foulee-accueil2.png', fullPage: true });

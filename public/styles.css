@@ -34,13 +34,7 @@ p { margin: 0 0 10px; }
 .small { font-size: 14px; }
 .eyebrow { font-size: 12px; text-transform: uppercase; letter-spacing: 0.1em; color: var(--muted); font-weight: 700; margin: 10px 0 0; }
 
-.card { background: var(--surface); border: 1px solid var(--line); border-radius: var(--radius); padding: 18px; margin: 0 0 12px; }
-.hero { position: relative; overflow: hidden; padding: 22px 18px; }
-.hero.course { border-color: rgba(200, 255, 46, 0.35); background: radial-gradient(120% 90% at 100% 0%, rgba(200, 255, 46, 0.16), transparent 60%), var(--surface); }
-.hero.natation { border-color: rgba(47, 140, 255, 0.45); background: radial-gradient(120% 90% at 100% 0%, rgba(47, 140, 255, 0.22), transparent 60%), var(--surface); }
-.hero h2 { font-size: 26px; line-height: 1.15; margin: 10px 0 6px; letter-spacing: -0.02em; }
-.hero .big { font-size: 44px; font-weight: 800; letter-spacing: -0.03em; line-height: 1; }
-
+.card { background: var(--surface); border-radius: var(--radius); padding: 18px; margin: 0 0 12px; }
 .pill { display: inline-block; font-weight: 800; font-size: 12px; text-transform: uppercase; letter-spacing: 0.06em; padding: 4px 10px; border-radius: 99px; background: var(--surface-2); color: var(--muted); vertical-align: 2px; }
 .pill.course { background: var(--run); color: var(--on-accent); }
 .pill.natation { background: var(--swim); color: #fff; }
@@ -79,37 +73,8 @@ textarea { min-height: 90px; }
 .choice { display: flex; gap: 10px; align-items: flex-start; font-weight: 400; margin: 10px 0; }
 .choice input { width: auto; margin-top: 5px; }
 
-/* Bande de la semaine (accueil). */
-.week { display: grid; grid-template-columns: repeat(7, 1fr); gap: 6px; margin: 0 0 16px; }
-.week div { text-align: center; padding: 8px 0 10px; border-radius: 14px; color: var(--muted); font-size: 12px; font-weight: 700; }
-.week div b { display: block; font-size: 17px; color: var(--ink); margin: 2px 0 6px; }
-.week div.today { background: var(--ink); color: var(--on-accent); }
-.week div.today b { color: var(--on-accent); }
-.dot { display: inline-block; width: 8px; height: 8px; border-radius: 50%; border: 2px solid transparent; }
-.dot.course { border-color: var(--run); }
-.dot.natation { border-color: var(--swim); }
-.dot.done.course { background: var(--run); }
-.dot.done.natation { background: var(--swim); }
-
-/* Chiffres clés. */
-.stats { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; }
-.stats.two { grid-template-columns: 1fr 1fr; }
-.stat { background: var(--surface); border: 1px solid var(--line); border-radius: 16px; padding: 14px 12px; min-width: 0; }
-.stat b { display: block; font-size: 26px; font-weight: 800; letter-spacing: -0.02em; line-height: 1.1; }
-.stat b small { font-size: 14px; font-weight: 600; color: var(--muted); }
-.stat span { font-size: 12px; color: var(--muted); }
-.stat.course b { color: var(--run); }
-.stat.natation b { color: var(--swim); }
-
-/* Histogramme hebdomadaire. */
-.bars { display: flex; align-items: flex-end; gap: 6px; height: 120px; margin-top: 12px; }
-.bars div { flex: 1; display: flex; flex-direction: column; justify-content: flex-end; align-items: center; height: 100%; gap: 4px; font-size: 11px; color: var(--muted); }
-.bars i { display: block; width: 100%; border-radius: 6px 6px 2px 2px; min-height: 3px; background: var(--surface-2); }
-.bars.course i.v { background: var(--run); }
-.bars.natation i.v { background: var(--swim); }
-
 /* Liste de choix (démarrer). */
-.option { display: flex; align-items: center; justify-content: space-between; gap: 12px; width: 100%; text-align: left; padding: 16px 18px; margin: 0 0 10px; border-radius: var(--radius); background: var(--surface); }
+.option { display: flex; align-items: center; justify-content: space-between; gap: 12px; width: 100%; text-align: left; padding: 16px 18px; margin: 0 0 10px; border-radius: var(--radius); background: var(--surface); border: 0; }
 .option span { display: block; }
 .option .muted { font-weight: 400; font-size: 14px; }
 .option .go { flex: none; width: 40px; height: 40px; border-radius: 50%; display: grid; place-items: center; background: var(--run); color: var(--on-accent); font-weight: 900; }
@@ -179,3 +144,117 @@ body.flash-marche { animation: flash-marche 1.5s ease-out; }
 .tabs .start { color: var(--ink); }
 .tabs .start i { display: grid; place-items: center; width: 54px; height: 54px; margin-top: -22px; border-radius: 50%; background: var(--run); color: var(--on-accent); box-shadow: 0 0 0 5px var(--bg); }
 .tabs .start svg { fill: currentColor; stroke: none; width: 22px; height: 22px; margin-left: 3px; }
+
+/* --- Hiérarchie : un élément vedette par écran, le reste en lignes légères. --- */
+.top { display: flex; justify-content: space-between; align-items: flex-end; gap: 12px; }
+.top h1 { margin: 2px 0 18px; font-size: 36px; }
+.avatar.sm { width: 44px; height: 44px; font-size: 18px; min-height: 0; padding: 0; border: 0; margin-bottom: 18px; }
+
+/* Anneau de la semaine. */
+.goal { display: flex; align-items: center; gap: 22px; margin: 0 0 20px; }
+.goal-ring { position: relative; width: 132px; height: 132px; flex: none; }
+.goal-ring > div { position: absolute; inset: 0; display: flex; flex-direction: column; align-items: center; justify-content: center; }
+.goal-ring b { font-size: 40px; font-weight: 900; letter-spacing: -0.04em; line-height: 1; }
+.goal-ring b small { font-size: 20px; color: var(--muted); font-weight: 700; }
+.goal-ring span { font-size: 12px; color: var(--muted); font-weight: 700; text-transform: uppercase; letter-spacing: 0.08em; margin-top: 4px; }
+.ring { width: 100%; height: 100%; transform: rotate(-90deg); }
+.ring circle { fill: none; stroke-width: 11; }
+.ring-bg { stroke: var(--surface-2); }
+.ring-fg { stroke-linecap: round; filter: drop-shadow(0 0 6px rgba(200, 255, 46, 0.45)); }
+.goal-side { min-width: 0; }
+.kpi { font-size: 34px; font-weight: 900; letter-spacing: -0.03em; line-height: 1.05; margin: 0 0 6px; }
+.kpi small, .hero-num small, .li-side small, .records b small, .level-num small { font-size: 0.42em; font-weight: 700; color: var(--muted); margin-left: 4px; letter-spacing: 0; }
+.kpi.course { color: var(--run); }
+.kpi.natation { color: var(--swim); }
+
+/* Bande de la semaine, sans cases. */
+.week { display: grid; grid-template-columns: repeat(7, 1fr); gap: 4px; margin: 0 0 18px; }
+.week div { text-align: center; padding: 8px 0; border-radius: 99px; color: var(--muted); font-size: 11px; font-weight: 700; }
+.week div b { display: block; font-size: 17px; color: var(--ink); margin: 2px 0 4px; }
+.week div.past b { color: var(--muted); }
+.week div.today { background: var(--surface-2); box-shadow: inset 0 0 0 1.5px var(--ink); }
+.week .dots { display: flex; justify-content: center; gap: 3px; height: 8px; }
+.dot { display: inline-block; width: 7px; height: 7px; border-radius: 50%; border: 1.5px solid transparent; }
+.dot.course { border-color: var(--run); }
+.dot.natation { border-color: var(--swim); }
+.dot.done.course { background: var(--run); }
+.dot.done.natation { background: var(--swim); }
+
+/* Séance vedette. */
+.hero { position: relative; overflow: hidden; border-radius: 26px; padding: 22px 20px 20px; margin: 0 0 8px; background: var(--surface); }
+.hero.course { background: radial-gradient(140% 100% at 100% 0%, rgba(200, 255, 46, 0.28), rgba(200, 255, 46, 0.04) 55%, transparent 75%), linear-gradient(180deg, #17190F, #0E0F0B); box-shadow: inset 0 0 0 1px rgba(200, 255, 46, 0.25); }
+.hero.natation { background: radial-gradient(140% 100% at 100% 0%, rgba(47, 140, 255, 0.4), rgba(47, 140, 255, 0.06) 55%, transparent 75%), linear-gradient(180deg, #0E1726, #0A0E15); box-shadow: inset 0 0 0 1px rgba(47, 140, 255, 0.3); }
+.hero.rest { background: var(--surface); }
+.hero .eyebrow { margin: 0; }
+.hero-num { font-size: 76px; font-weight: 900; letter-spacing: -0.05em; line-height: 0.95; margin: 8px 0 4px; }
+.hero.course .hero-num { color: var(--run); }
+.hero.natation .hero-num { color: #fff; }
+.hero.rest .hero-num { font-size: 48px; }
+.hero-sub { font-size: 19px; font-weight: 750; margin: 0 0 14px; }
+.hero-steps { margin: 0 0 12px; padding-left: 20px; font-size: 15px; }
+.hero-steps li { margin: 0 0 6px; }
+.hero .btn-primary, .hero .btn-swim { margin-top: 6px; }
+.effort-bar { display: flex; gap: 3px; height: 34px; align-items: flex-end; margin: 0 0 12px; }
+.effort-bar i { display: block; border-radius: 4px; }
+.effort-bar i.course { height: 100%; background: var(--run); }
+.effort-bar i.marche { height: 35%; background: rgba(255, 255, 255, 0.28); }
+
+/* Listes légères. */
+.list { margin: 0; }
+.li { display: flex; align-items: center; gap: 14px; padding: 12px 0; border-bottom: 1px solid var(--line); min-height: 64px; }
+.list > .li:last-child, .list > details:last-child > .li { border-bottom: 0; }
+.ico { flex: none; width: 42px; height: 42px; border-radius: 14px; display: grid; place-items: center; background: var(--surface-2); color: var(--muted); }
+.ico svg { width: 22px; height: 22px; fill: none; stroke: currentColor; stroke-width: 2.2; stroke-linecap: round; stroke-linejoin: round; }
+.ico.course { background: #1E2410; color: var(--run); }
+.ico.natation { background: #0D1A2E; color: var(--swim); }
+.ico.play { border: 0; padding: 0; min-height: 0; background: var(--run); color: var(--on-accent); border-radius: 50%; }
+.ico.play svg { fill: currentColor; stroke: none; margin-left: 2px; }
+.li-main { flex: 1; min-width: 0; }
+.li-main b { display: block; font-size: 16px; font-weight: 700; }
+.li-main b em { font-style: normal; font-weight: 600; color: var(--muted); font-size: 13px; margin-left: 4px; }
+.li-main span { display: block; font-size: 14px; color: var(--muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.li-side { flex: none; font-size: 22px; font-weight: 850; letter-spacing: -0.02em; }
+.li-side.course { color: var(--run); }
+.li-side.natation { color: var(--swim); }
+.small-btn { min-height: 38px; padding: 6px 12px; font-size: 14px; border: 0; color: var(--run); }
+.list > .small-btn, .timeline > .small-btn { display: block; margin: -4px 0 6px 56px; padding-left: 0; }
+details.hist summary { list-style: none; cursor: pointer; }
+details.hist summary::-webkit-details-marker { display: none; }
+details.hist[open] .li { border-bottom: 0; }
+.li-more { padding: 0 0 12px 56px; border-bottom: 1px solid var(--line); }
+.li-more p { margin: 0 0 6px; }
+
+/* Frise du programme. */
+.timeline { position: relative; }
+.timeline::before { content: ""; position: absolute; left: 20px; top: 20px; bottom: 20px; width: 2px; background: var(--line); }
+.timeline .li { border-bottom: 0; position: relative; }
+
+/* Palier de course. */
+.level { margin: 0 0 18px; }
+.level-num { font-size: 64px; font-weight: 900; letter-spacing: -0.05em; line-height: 1; margin: 6px 0 12px; color: var(--run); }
+.level-track { display: grid; grid-template-columns: repeat(12, 1fr); gap: 4px; }
+.level-track i { display: block; height: 10px; border-radius: 3px; background: var(--surface-2); }
+.level-track i.on { background: var(--run); box-shadow: 0 0 8px rgba(200, 255, 46, 0.35); }
+
+/* Progression. */
+.seg { display: grid; grid-template-columns: 1fr 1fr; gap: 4px; background: var(--surface); border-radius: 14px; padding: 4px; margin: 0 0 18px; }
+.seg button { min-height: 40px; padding: 0; border: 0; background: transparent; color: var(--muted); border-radius: 10px; font-size: 15px; }
+.seg button.on.course { background: var(--run); color: var(--on-accent); }
+.seg button.on.natation { background: var(--swim); color: #fff; }
+.prog .hero-num { margin-top: 6px; }
+.prog.course .hero-num { color: var(--run); }
+.prog.natation .hero-num { color: var(--swim); }
+.delta { font-size: 14px; font-weight: 700; color: var(--muted); margin: 0 0 6px; }
+.delta.up { color: var(--run); }
+.prog.natation .delta.up { color: var(--swim); }
+.curve { display: block; width: 100%; height: 140px; overflow: visible; margin-top: 8px; }
+.curve-x { display: flex; justify-content: space-between; font-size: 10px; color: var(--muted); margin-top: 4px; }
+.curve-x span { flex: 1; text-align: center; }
+.curve-x b { display: block; font-size: 11px; color: var(--ink); }
+.records { display: grid; grid-template-columns: repeat(3, 1fr); }
+.records div { padding: 4px 10px; border-left: 1px solid var(--line); min-width: 0; }
+.records div:first-child { border-left: 0; padding-left: 0; }
+.records b { display: block; font-size: 28px; font-weight: 900; letter-spacing: -0.03em; line-height: 1.1; }
+.records .course b { color: var(--run); }
+.records .natation b { color: var(--swim); }
+.records span { font-size: 12px; color: var(--muted); }
