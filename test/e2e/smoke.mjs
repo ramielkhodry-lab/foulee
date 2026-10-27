@@ -97,6 +97,14 @@ await page.waitForSelector('[data-manual="natation"]');
 const count = await page.locator('#app details.hist').count();
 await page.click('[data-tab="accueil"]');
 const accueil = await page.textContent('#app');
+// Calendrier : un jour passé montre la séance faite, un jour à venir la séance prévue.
+await page.click('[data-pickday="2026-10-23"]');
+const dayPast = await page.textContent('#app');
+const futureRun = page.locator('.week button:not(.past):has(.dot.course:not(.done))').last();
+await futureRun.click();
+const dayFuture = await page.textContent('#app');
+await page.screenshot({ path: '/tmp/foulee-calendrier.png', fullPage: true });
+await page.click('[data-tab="accueil"]');
 await page.screenshot({ path: '/tmp/foulee-accueil2.png', fullPage: true });
 await page.click('[data-tab="programme"]');
 const programme = await page.textContent('#app');
@@ -146,6 +154,8 @@ const checks = {
   'reprise proposée après fermeture': resumeText.includes('Séance interrompue') && resumeText.includes('Test du guidage'),
   'reprise au bon endroit': resumedAt > 5,
   'bandeau si pause non voulue': interruptedText.includes('Séance interrompue (appel'),
+  'calendrier : jour passé = séance faite': dayPast.includes('3,35 km') && dayPast.includes('vendredi 23 octobre'),
+  'calendrier : jour à venir = séance prévue': /course · palier \d+\/12/.test(dayFuture) && dayFuture.includes('La faire maintenant'),
   'programme calculé (course + natation)': /palier [23]\/12/.test(programme) && programme.includes('32 longueurs'),
   'accueil : dernière séance = la plus récente': accueil.includes('mercredi 28 octobre') && !accueil.includes('30 septembre'),
   'aucune erreur hors alertes d\u2019import': errors.filter((e) => !e.includes('séance(s) ajoutée(s)')).length === 0,
