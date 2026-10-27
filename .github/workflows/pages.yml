@@ -28,7 +28,9 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: 22
-      - run: sudo apt-get update && sudo apt-get install -y ffmpeg
+      - name: Installer ffmpeg
+        timeout-minutes: 6
+        run: sudo apt-get update && sudo apt-get install -y --no-install-recommends ffmpeg
       - run: npm test
 
       # Serveur des comptes : déployé seulement quand les deux secrets Cloudflare existent.
