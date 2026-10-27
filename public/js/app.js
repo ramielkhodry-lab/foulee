@@ -44,7 +44,7 @@ function planCard(p, isToday, showNow = false) {
         <h2 style="margin-top:8px">${p.longueurs} longueurs · ${p.distance} m</h2>
         ${isToday ? `<ul class="steps">${p.plan.map((l) => `<li><span>${esc(l)}</span></li>`).join('')}</ul>` : ''}
         <p class="muted small" style="margin-top:8px">${esc(p.reason)}</p>
-        ${isToday ? `<p style="margin-top:12px"><button class="btn-primary" data-manual="natation">Noter ma séance</button></p>` : ''}
+        ${isToday ? `<p style="margin-top:12px"><button class="btn-primary" data-logplan="natation">Noter ma séance</button></p>` : ''}
       </div>`;
   }
   const mins = Math.round(total(p.steps) / 60);
@@ -54,7 +54,7 @@ function planCard(p, isToday, showNow = false) {
       <h2 style="margin-top:8px">${mins} min · ${esc(p.title)}</h2>
       <p class="small">${esc(stepsSummary(p.steps))}</p>
       <p class="muted small">${esc(p.reason)}</p>
-      ${isToday ? `<p style="margin-top:12px"><button class="btn-primary" data-startplan="${esc(p.date)}">Démarrer la séance</button></p>` : showNow ? `<p style="margin-top:10px"><button data-startplan="${esc(p.date)}" style="width:100%">La faire maintenant</button></p>` : ''}
+      ${isToday ? `<p style="margin-top:12px"><button class="btn-primary" data-startplan="${esc(p.date)}">Démarrer la séance</button></p><p style="margin:8px 0 0"><button data-logplan="course" style="width:100%">Faite sans l'app : la noter</button></p>` : showNow ? `<p style="margin-top:10px"><button data-startplan="${esc(p.date)}" style="width:100%">La faire maintenant</button></p>` : ''}
     </div>`;
 }
 
@@ -503,7 +503,8 @@ const screens = {
     const scale = (field, labels) => `<div class="scale">${[1, 2, 3, 4, 5].map((n) => `<button data-scale="${field}" data-v="${n}" class="${b[field] === n ? 'on' : ''}">${n}</button>`).join('')}</div><p class="muted small">${labels}</p>`;
     const nages = ['crawl', 'brasse', 'dos', 'papillon'];
     return `
-      <h1>${swim ? 'Séance de natation' : 'Course libre'}</h1>
+      <h1>${swim ? 'Séance de natation' : b.fromPlan ? 'Course du programme' : 'Course libre'}</h1>
+      ${b.fromPlan ? '<p class="muted">Prérempli avec le programme du jour. Corrige ce qui a changé, puis note ton ressenti.</p>' : ''}
       <div class="card">
         <label for="date">Date</label>
         <input id="date" type="date" value="${esc(b.date)}">
@@ -840,6 +841,22 @@ document.addEventListener('click', (e) => {
     go('bilan');
   } else if (ds.manual) {
     bilan = newManual(ds.manual);
+    go('saisie');
+  } else if (ds.logplan) {
+    // Saisie préremplie avec la séance prévue aujourd'hui ; tout reste modifiable.
+    const p = upcoming(load().history, load().settings, today(), 1).find((x) => x.sport === ds.logplan);
+    bilan = newManual(ds.logplan);
+    bilan.fromPlan = Boolean(p);
+    if (p?.sport === 'natation') {
+      bilan.sessionName = 'Natation (programme)';
+      bilan.swim.bassinM = p.bassin;
+      bilan.swim.longueurs = p.longueurs;
+      bilan.swim.nages = ['crawl', 'brasse', 'dos'].filter((n) => p.plan.some((l) => l.includes(n)));
+    } else if (p?.sport === 'course') {
+      bilan.sessionName = `Palier ${p.level} · ${p.title}`;
+      bilan.structure = stepsSummary(p.steps).replace(/ · /g, ', ').replace(/\d+ × [^,]+ de course/, p.title);
+      bilan.elapsedSec = Math.round(total(p.steps) / 60) * 60;
+    }
     go('saisie');
   } else if ('savemanual' in ds) {
     readSaisie();
