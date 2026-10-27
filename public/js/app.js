@@ -519,7 +519,7 @@ function updateMediaMetadata(i) {
     navigator.mediaSession.metadata = new MediaMetadata({
       title,
       artist: `Foulée · ${live.session.name}`,
-      artwork: [{ src: 'icons/icon-512.png', sizes: '512x512', type: 'image/png' }],
+      artwork: [{ src: 'icons/f-512.png', sizes: '512x512', type: 'image/png' }],
     });
   } catch {}
 }
