@@ -1,0 +1,15 @@
+name = "foulee-api"
+main = "src/index.js"
+compatibility_date = "2026-09-01"
+compatibility_flags = ["nodejs_compat"]
+
+[vars]
+# Le site qui affiche l'app : seul autorisé à appeler l'API et à utiliser les passkeys.
+APP_ORIGIN = "https://ramielkhodry-lab.github.io"
+RP_ID = "ramielkhodry-lab.github.io"
+
+[[d1_databases]]
+binding = "DB"
+database_name = "foulee"
+database_id = "REMPLACE_PAR_LE_DEPLOIEMENT"
+migrations_dir = "migrations"

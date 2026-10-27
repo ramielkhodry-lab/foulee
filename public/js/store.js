@@ -50,13 +50,24 @@ export function load() {
   return cache;
 }
 
+const listeners = [];
+export const onSave = (fn) => listeners.push(fn);
+
 export function save() {
+  let ok = true;
   try {
     localStorage.setItem(KEY, JSON.stringify(cache));
-    return true;
   } catch {
-    return false;
+    ok = false;
   }
+  for (const fn of listeners) fn(cache);
+  return ok;
+}
+
+// Remplace toutes les données (après fusion avec le serveur).
+export function replace(data) {
+  cache = { ...empty(), ...data };
+  return save();
 }
 
 export function update(fn) {

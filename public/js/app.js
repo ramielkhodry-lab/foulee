@@ -1,6 +1,7 @@
 import { KINDS } from './phrases.js';
 import { assemble, stepAt } from './track.js';
-import { load, update, uid, PRESETS } from './store.js';
+import { load, update, uid, PRESETS, onSave, replace } from './store.js';
+import * as account from './account.js';
 import { createTrack, addPoint, markGap, summary } from './gps.js';
 import { upcoming } from './plan.js';
 
@@ -539,11 +540,75 @@ const screens = {
       <div class="row"><button data-tab="journal">Annuler</button><button class="btn-dark" data-savemanual>Enregistrer</button></div>`;
   },
 
+  compte() {
+    const sess = account.session();
+    const a = accountUi;
+    if (!account.serverEnabled()) {
+      return `
+        <h1>Mon compte</h1>
+        <div class="card"><h2>Bientôt disponible</h2>
+        <p>Les comptes sont prêts, mais le serveur n'est pas encore en service. En attendant, tes séances restent sur ce téléphone.</p></div>
+        <button data-tab="reglages" style="width:100%">Retour</button>`;
+    }
+    if (!account.passkeysSupported()) {
+      return `<h1>Mon compte</h1><div class="alert">Ce navigateur ne gère pas les passkeys. Mets à jour ton téléphone ou ouvre Foulée dans Safari (iPhone) ou Chrome (Android).</div>`;
+    }
+    const msg = a.error ? `<div class="alert">${esc(a.error)}</div>` : a.info ? `<div class="notice">${esc(a.info)}</div>` : '';
+    if (sess) {
+      return `
+        <h1>Mon compte</h1>
+        ${msg}
+        <div class="card">
+          <p class="muted small">Connecté</p>
+          <h2>${esc(sess.user?.prenom ?? '')}</h2>
+          <p class="muted small">${a.sync ? esc(a.sync) : 'Tes séances sont sauvegardées sur ton compte.'}</p>
+        </div>
+        <div class="card">
+          <h2>Inviter un proche</h2>
+          <p class="muted small">Un lien à usage unique, valable 14 jours. La personne crée son propre compte : elle ne voit pas tes données.</p>
+          <button class="btn-dark" data-invite="join" style="width:100%" ${a.busy ? 'disabled' : ''}>Créer un lien d'invitation</button>
+          ${a.lastInvite ? `<p class="small" id="invite-link" style="margin-top:10px;word-break:break-all">${esc(a.lastInvite)}</p><button data-share style="width:100%">Envoyer le lien</button>` : ''}
+          ${a.invites?.length ? `<ul class="steps" style="margin-top:10px">${a.invites.map((i) => `<li><span>${i.kind === 'recover' ? 'Nouvel appareil' : 'Invitation'} du ${new Date(i.created_at).toLocaleDateString('fr-FR')}</span><span class="muted small">${i.used_at ? `utilisée${i.used_by_prenom ? ` par ${esc(i.used_by_prenom)}` : ''}` : i.expires_at < Date.now() ? 'expirée' : 'en attente'}</span></li>`).join('')}</ul>` : ''}
+        </div>
+        <div class="card">
+          <h2>Nouveau téléphone</h2>
+          <p class="muted small">Sur iPhone, ta passkey passe d'un appareil à l'autre avec le trousseau iCloud. Sinon, crée ici un lien à ouvrir sur le nouvel appareil.</p>
+          <button data-invite="recover" style="width:100%" ${a.busy ? 'disabled' : ''}>Lien pour un nouvel appareil</button>
+        </div>
+        <button class="btn-danger" data-logout style="width:100%">Se déconnecter</button>`;
+    }
+    const needsInvite = !a.firstAccount;
+    return `
+      <h1>${a.invite ? 'Bienvenue sur Foulée' : 'Mon compte'}</h1>
+      ${msg}
+      ${a.invite && a.inviteFrom ? `<p>${esc(a.inviteFrom)} t'invite à rejoindre Foulée.</p>` : ''}
+      ${a.invite || a.firstAccount ? '' : `
+        <div class="card">
+          <h2>J'ai déjà un compte</h2>
+          <button class="btn-primary" data-login ${a.busy ? 'disabled' : ''}>Me connecter</button>
+          <p class="muted small" style="margin-top:8px">Avec Face ID, Touch ID ou ton empreinte. Pas de mot de passe.</p>
+        </div>`}
+      <div class="card">
+        <h2>${a.invite?.kind === 'recover' ? 'Ajouter ce téléphone à mon compte' : 'Créer mon compte'}</h2>
+        ${a.firstAccount ? '<p class="muted small">Premier compte : il sera administrateur et pourra inviter les autres.</p>' : ''}
+        ${a.invite?.kind === 'recover' ? '' : `<label for="acc-prenom">Prénom</label><input id="acc-prenom" maxlength="40" value="${esc(load().profile.prenom)}">`}
+        ${needsInvite && !a.invite ? `<label for="acc-invite">Code ou lien d'invitation</label><input id="acc-invite" autocapitalize="off" autocomplete="off">` : ''}
+        <p style="margin-top:12px"><button class="btn-dark" data-register style="width:100%" ${a.busy ? 'disabled' : ''}>${a.invite?.kind === 'recover' ? 'Ajouter ce téléphone' : 'Créer mon compte'}</button></p>
+        <p class="muted small">Ton téléphone crée une passkey protégée par Face ID ou ton empreinte. Tes séances déjà enregistrées ici rejoignent ton compte.</p>
+      </div>`;
+  },
+
   reglages() {
     const d = load();
+    const sess = account.session();
     const supported = 'audioSession' in navigator;
     return `
       <h1>Réglages</h1>
+      <div class="card">
+        <h2>Mon compte</h2>
+        <p class="muted small">${!account.serverEnabled() ? 'Pas encore en service : tes séances restent sur ce téléphone.' : sess ? `Connecté : ${esc(sess.user?.prenom ?? '')}` : 'Non connecté : tes séances restent sur ce téléphone.'}</p>
+        <button data-tab="compte" style="width:100%">${sess ? 'Gérer mon compte et inviter' : 'Connexion / créer mon compte'}</button>
+      </div>
       <div class="card">
         <label for="prenom">Ton prénom</label>
         <input id="prenom" value="${esc(d.profile.prenom)}" maxlength="40">
@@ -581,7 +646,7 @@ function render() {
   app.innerHTML = screens[current]();
   for (const b of document.querySelectorAll('#tabs button')) {
     const tab = b.dataset.tab;
-    b.classList.toggle('on', tab === current || (tab === 'programme' && ['edit', 'live', 'bilan'].includes(current)));
+    b.classList.toggle('on', tab === current || (tab === 'programme' && ['edit', 'live', 'bilan'].includes(current)) || (tab === 'reglages' && current === 'compte'));
   }
   if (current === 'live') requestAnimationFrame(tick);
 }
@@ -839,6 +904,131 @@ document.addEventListener('change', (e) => {
     render();
   }
 });
+
+// --- Compte et synchronisation -----------------------------------------------
+
+let accountUi = { busy: false, error: null, info: null, invite: null, inviteFrom: null, firstAccount: false, invites: null, lastInvite: null, sync: null };
+let syncing = false;
+let pushTimer = null;
+
+async function syncNow() {
+  if (!account.serverEnabled() || !account.session()) return;
+  syncing = true;
+  try {
+    const { data } = await account.pullData();
+    const merged = account.mergeData(load(), data);
+    const user = account.session()?.user;
+    if (user?.prenom && !merged.profile?.prenom) merged.profile = { ...merged.profile, prenom: user.prenom };
+    replace(merged);
+    await account.pushData(load());
+    accountUi.sync = `Synchronisé à ${new Date().toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' })}.`;
+  } catch (e) {
+    accountUi.sync = `Synchronisation en attente : ${e.message}`;
+  } finally {
+    syncing = false;
+  }
+  if (current !== 'live') render();
+}
+
+onSave(() => {
+  if (syncing || !account.serverEnabled() || !account.session()) return;
+  clearTimeout(pushTimer);
+  pushTimer = setTimeout(() => {
+    account.pushData(load())
+      .then(() => { accountUi.sync = `Synchronisé à ${new Date().toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' })}.`; })
+      .catch((e) => { accountUi.sync = `Synchronisation en attente : ${e.message}`; });
+  }, 2000);
+});
+
+async function refreshAccount() {
+  if (!account.serverEnabled()) return;
+  try {
+    accountUi.firstAccount = (await account.status()).firstAccount;
+    if (account.session()) accountUi.invites = (await account.listInvites()).invites;
+  } catch (e) {
+    accountUi.error = e.message;
+  }
+  if (current === 'compte') render();
+}
+
+async function accountAction(fn) {
+  accountUi.busy = true;
+  accountUi.error = null;
+  accountUi.info = null;
+  render();
+  try {
+    await fn();
+  } catch (e) {
+    accountUi.error = e.message;
+  }
+  accountUi.busy = false;
+  render();
+}
+
+const inviteFromText = (txt) => {
+  const t = String(txt || '').trim();
+  const m = /[?&]invite=([A-Za-z0-9_-]+)/.exec(t);
+  return m ? m[1] : t;
+};
+
+document.addEventListener('click', (e) => {
+  const t = e.target.closest('button');
+  if (!t) return;
+  const ds = t.dataset;
+  if ('register' in ds) {
+    const prenom = document.getElementById('acc-prenom')?.value.trim() || load().profile.prenom;
+    const code = accountUi.invite?.code || inviteFromText(document.getElementById('acc-invite')?.value);
+    accountAction(async () => {
+      const user = await account.register(prenom, code || undefined);
+      accountUi.invite = null;
+      update((d) => { d.profile.prenom = user.prenom; });
+      await syncNow();
+      const installed = navigator.standalone === true || matchMedia('(display-mode: standalone)').matches;
+      accountUi.info = installed
+        ? `Compte créé. Bienvenue ${user.prenom} !`
+        : `Compte créé. Installe maintenant Foulée sur ton écran d'accueil (Partager > Sur l'écran d'accueil sur iPhone, menu ⋮ > Installer sur Android), ouvre-la et touche « Me connecter ».`;
+      await refreshAccount();
+    });
+  } else if ('login' in ds) {
+    accountAction(async () => {
+      const user = await account.login();
+      await syncNow();
+      accountUi.info = `Bon retour ${user.prenom} !`;
+      await refreshAccount();
+    });
+  } else if ('logout' in ds) {
+    accountAction(async () => {
+      await account.logout();
+      accountUi.invites = null;
+      accountUi.lastInvite = null;
+      accountUi.info = 'Déconnecté. Tes séances restent sur ce téléphone.';
+    });
+  } else if (ds.invite) {
+    accountAction(async () => {
+      const inv = await account.createInvite(ds.invite);
+      accountUi.lastInvite = inv.url;
+      accountUi.info = ds.invite === 'recover' ? 'Ouvre ce lien sur ton nouvel appareil.' : 'Lien prêt : envoie-le à ton proche.';
+      accountUi.invites = (await account.listInvites()).invites;
+    });
+  } else if ('share' in ds) {
+    const url = accountUi.lastInvite;
+    if (navigator.share) navigator.share({ title: 'Foulée', text: 'Rejoins-moi sur Foulée, mon coach de course et de natation :', url }).catch(() => {});
+    else navigator.clipboard?.writeText(url).then(() => { accountUi.info = 'Lien copié.'; render(); });
+  }
+});
+
+// Lien d'invitation : ?invite=CODE ouvre directement la création de compte.
+const inviteParam = new URLSearchParams(location.search).get('invite');
+if (inviteParam && account.serverEnabled()) {
+  history.replaceState(null, '', location.pathname);
+  current = 'compte';
+  account.inviteInfo(inviteParam)
+    .then((info) => { accountUi.invite = { code: inviteParam, kind: info.kind }; accountUi.inviteFrom = info.from; })
+    .catch((e) => { accountUi.error = e.message; })
+    .finally(() => render());
+}
+refreshAccount();
+syncNow();
 
 if ('serviceWorker' in navigator) navigator.serviceWorker.register('sw.js').catch(() => {});
 navigator.storage?.persist?.().catch(() => {});

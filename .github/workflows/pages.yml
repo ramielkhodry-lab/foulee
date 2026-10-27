@@ -20,6 +20,9 @@ jobs:
     environment:
       name: github-pages
       url: ${{ steps.deployment.outputs.page_url }}
+    env:
+      CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+      CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -27,6 +30,26 @@ jobs:
           node-version: 22
       - run: sudo apt-get update && sudo apt-get install -y ffmpeg
       - run: npm test
+
+      # Serveur des comptes : déployé seulement quand les deux secrets Cloudflare existent.
+      - name: Serveur Cloudflare (base D1 + API)
+        if: env.CLOUDFLARE_API_TOKEN != '' && env.CLOUDFLARE_ACCOUNT_ID != ''
+        working-directory: worker
+        run: |
+          npm ci
+          id=$(npx wrangler d1 list --json | node -e "const l=JSON.parse(require('fs').readFileSync(0,'utf8'));const d=l.find(x=>x.name==='foulee');console.log(d?d.uuid:'')")
+          if [ -z "$id" ]; then
+            npx wrangler d1 create foulee
+            id=$(npx wrangler d1 list --json | node -e "const l=JSON.parse(require('fs').readFileSync(0,'utf8'));console.log(l.find(x=>x.name==='foulee').uuid)")
+          fi
+          sed -i "s/REMPLACE_PAR_LE_DEPLOIEMENT/$id/" wrangler.toml
+          npx wrangler d1 migrations apply foulee --remote
+          npx wrangler deploy | tee deploy.log
+          url=$(grep -o 'https://[A-Za-z0-9.-]*workers\.dev' deploy.log | head -1)
+          if [ -z "$url" ]; then echo "Adresse du serveur introuvable dans la sortie de wrangler deploy"; exit 1; fi
+          echo "export const API_URL = '$url';" > ../public/js/config.js
+          echo "Serveur : $url"
+
       - uses: actions/configure-pages@v5
       - uses: actions/upload-pages-artifact@v3
         with:

@@ -1,8 +1,8 @@
 // Hors connexion : l'app et les sons sont mis en cache à l'installation.
-const VERSION = 'foulee-v7';
+const VERSION = 'foulee-v8';
 const FILES = [
   './', 'index.html', 'styles.css', 'manifest.webmanifest',
-  'js/app.js', 'js/phrases.js', 'js/track.js', 'js/store.js', 'js/gps.js',
+  'js/app.js', 'js/phrases.js', 'js/track.js', 'js/store.js', 'js/gps.js', 'js/account.js', 'js/config.js', 'vendor/simplewebauthn-browser.js',
   'audio/index.json?v=3', 'audio/pack.mp3?v=3', 'media/veille.mp4', 'js/plan.js',
   'icons/icon-180.png', 'icons/icon-192.png', 'icons/icon-512.png',
 ];
