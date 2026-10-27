@@ -70,7 +70,7 @@ try {
   await rami.page.goto(APP);
   await rami.page.evaluate(() => localStorage.setItem('foulee.v1', JSON.stringify({ profile: { prenom: '' }, history: [{ id: 'r1', sport: 'course', date: '2026-10-26', elapsedSec: 2447, distanceKm: 4.44, douleur: 'mollet', commentaire: 'privé' }] })));
   await rami.page.goto(`${APP}/`);
-  await rami.page.click('[data-tab="reglages"]');
+  await rami.page.click('[data-tab="profil"]');
   await rami.page.click('[data-tab="compte"]');
   await rami.page.waitForSelector('[data-register]');
   checks['premier compte proposé sans invitation'] = (await text(rami.page)).includes('Premier compte');

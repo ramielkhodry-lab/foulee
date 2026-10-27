@@ -11,7 +11,7 @@ bips, silences) dans **un seul MP3**, assemblé sur le téléphone en recopiant 
 pré-encodées (`public/js/track.js`). Le minutage est dans la piste : rien ne peut dériver.
 Pause et « étape suivante » passent par la Media Session API (écran verrouillé, écouteurs).
 Par défaut, pas de voix : notes montantes = course, descendantes = marche, 3 bips avant
-chaque changement, et l'écran clignote. La voix est une option dans Réglages.
+chaque changement, et l'écran clignote. La voix est une option dans Profil.
 
 ## Arborescence
 

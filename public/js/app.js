@@ -35,26 +35,26 @@ function stepsSummary(steps) {
 function planCard(p, isToday, showNow = false) {
   const label = isToday ? "Aujourd'hui" : dateLabel(p.date);
   if (p.sport === 'repos') {
-    return `<div class="card"><p><span class="pill" style="background:#E2E9E3">Repos</span> <strong>${label}</strong></p><p class="muted small">${esc(p.reason)}</p></div>`;
+    return `<div class="card"><p><span class="pill">Repos</span> <strong>${label}</strong></p><p class="muted small">${esc(p.reason)}</p></div>`;
   }
   if (p.sport === 'natation') {
     return `
-      <div class="card${isToday ? ' dark' : ''}">
+      <div class="card${isToday ? ' hero natation' : ''}">
         <p><span class="pill natation">Natation</span> <strong>${label}</strong></p>
-        <h2 style="margin-top:8px">${p.longueurs} longueurs · ${p.distance} m</h2>
+        ${isToday ? `<h2><span class="big">${p.longueurs}</span> longueurs · ${p.distance} m</h2>` : `<h2 style="margin-top:8px">${p.longueurs} longueurs · ${p.distance} m</h2>`}
         ${isToday ? `<ul class="steps">${p.plan.map((l) => `<li><span>${esc(l)}</span></li>`).join('')}</ul>` : ''}
         <p class="muted small" style="margin-top:8px">${esc(p.reason)}</p>
-        ${isToday ? `<p style="margin-top:12px"><button class="btn-primary" data-logplan="natation">Noter ma séance</button></p>` : ''}
+        ${isToday ? '<p style="margin-top:12px"><button class="btn-swim" data-logplan="natation">Noter ma séance</button></p>' : ''}
       </div>`;
   }
   const mins = Math.round(total(p.steps) / 60);
   return `
-    <div class="card${isToday ? ' dark' : ''}">
+    <div class="card${isToday ? ' hero course' : ''}">
       <p><span class="pill course">Course</span> <strong>${label}</strong> <span class="muted small">· palier ${p.level}/12</span></p>
-      <h2 style="margin-top:8px">${mins} min · ${esc(p.title)}</h2>
+      ${isToday ? `<h2><span class="big">${mins}</span> min</h2><p style="font-weight:700">${esc(p.title)}</p>` : `<h2 style="margin-top:8px">${mins} min · ${esc(p.title)}</h2>`}
       <p class="small">${esc(stepsSummary(p.steps))}</p>
       <p class="muted small">${esc(p.reason)}</p>
-      ${isToday ? `<p style="margin-top:12px"><button class="btn-primary" data-startplan="${esc(p.date)}">Démarrer la séance</button></p><p style="margin:8px 0 0"><button data-logplan="course" style="width:100%">Faite sans l'app : la noter</button></p>` : showNow ? `<p style="margin-top:10px"><button data-startplan="${esc(p.date)}" style="width:100%">La faire maintenant</button></p>` : ''}
+      ${isToday ? `<p style="margin-top:14px"><button class="btn-primary" data-startplan="${esc(p.date)}">Démarrer la séance</button></p><p style="margin:8px 0 0"><button class="btn-ghost" data-logplan="course" style="width:100%">Faite sans l'app : la noter</button></p>` : showNow ? `<p style="margin-top:10px"><button data-startplan="${esc(p.date)}" style="width:100%">La faire maintenant</button></p>` : ''}
     </div>`;
 }
 
@@ -82,6 +82,50 @@ function journalCard(h) {
       ${feel.length ? `<p class="muted small">${feel.join(' · ')}</p>` : ''}
       ${h.commentaire ? `<p>« ${esc(h.commentaire)} »</p>` : ''}
     </div>`;
+}
+
+// --- Chiffres de progression ---------------------------------------------------
+
+const addDays = (iso, n) => {
+  const d = new Date(`${iso}T12:00:00`);
+  d.setDate(d.getDate() + n);
+  return d.toLocaleDateString('sv-SE');
+};
+const mondayOf = (iso) => addDays(iso, -((new Date(`${iso}T12:00:00`).getDay() + 6) % 7));
+const sportOf = (h) => h.sport || 'course';
+const swimMeters = (h) => (h.swim?.longueurs ? h.swim.longueurs * (h.swim.bassinM || 25) : Math.round((h.distanceKm || 0) * 1000));
+const fmtKm = (km) => (Math.round(km * 10) / 10).toLocaleString('fr-FR');
+
+// Totaux d'une semaine (lundi → dimanche) : km de course, mètres nagés, nombre de séances.
+function weekTotals(history, monday) {
+  const end = addDays(monday, 7);
+  const inWeek = history.filter((h) => { const d = String(h.date).slice(0, 10); return d >= monday && d < end; });
+  return {
+    km: inWeek.filter((h) => sportOf(h) === 'course').reduce((a, h) => a + (h.distanceKm || 0), 0),
+    m: inWeek.filter((h) => sportOf(h) === 'natation').reduce((a, h) => a + swimMeters(h), 0),
+    n: inWeek.length,
+  };
+}
+
+function weekStrip(history, plan) {
+  const t = today();
+  const monday = mondayOf(t);
+  const days = Array.from({ length: 7 }, (_, i) => addDays(monday, i));
+  return `<div class="week">${days.map((d, i) => {
+    const done = history.filter((h) => String(h.date).slice(0, 10) === d).map(sportOf);
+    const planned = plan.filter((p) => p.date === d && p.sport !== 'repos').map((p) => p.sport);
+    const dots = [...new Set([...done, ...planned])].map((sp) => `<span class="dot ${sp}${done.includes(sp) ? ' done' : ''}"></span>`).join(' ');
+    return `<div class="${d === t ? 'today' : ''}">${'LMMJVSD'[i]}<b>${Number(d.slice(8))}</b>${dots || '<span class="dot"></span>'}</div>`;
+  }).join('')}</div>`;
+}
+
+function weekBars(history, kind) {
+  const monday = mondayOf(today());
+  const weeks = Array.from({ length: 8 }, (_, i) => addDays(monday, (i - 7) * 7));
+  const vals = weeks.map((w) => weekTotals(history, w)[kind === 'course' ? 'km' : 'm']);
+  const max = Math.max(...vals) || 1;
+  return `<div class="bars ${kind}">${weeks.map((w, i) => `
+    <div>${vals[i] ? (kind === 'course' ? fmtKm(vals[i]) : vals[i]) : ''}<i class="${vals[i] ? 'v' : ''}" style="height:${Math.max(3, (vals[i] / max) * 80)}%"></i>${Number(w.slice(8))}/${Number(w.slice(5, 7))}</div>`).join('')}</div>`;
 }
 
 // --- Sons -------------------------------------------------------------------
@@ -328,7 +372,7 @@ function tick() {
   const i = stepAt(starts, end, t);
   const el = (id) => document.getElementById(id);
   if (!el('count')) return;
-  // Changement d'étape : l'écran clignote (citron = course, blanc = marche).
+  // Changement d'étape : l'écran clignote (vert = course, blanc = marche).
   if (live.shownStep !== undefined && i !== live.shownStep && i >= 0 && i < steps.length) {
     const flash = KINDS[steps[i].kind].effort === 'course' ? 'flash-course' : 'flash-marche';
     document.body.classList.remove('flash-course', 'flash-marche');
@@ -337,29 +381,33 @@ function tick() {
     setTimeout(() => document.body.classList.remove(flash), 1500);
   }
   live.shownStep = i;
+  const effort = i >= 0 && i < steps.length ? KINDS[steps[i].kind].effort : 'marche';
+  el('live').dataset.effort = effort;
   if (i < 0) {
     el('now').textContent = 'Prépare-toi';
     el('count').textContent = mmss(starts[0] - t);
-    el('next').textContent = `Ensuite : ${KINDS[steps[0].kind].label}`;
+    el('next').innerHTML = `<span class="muted">Ensuite</span> ${esc(KINDS[steps[0].kind].label)}`;
   } else if (i >= steps.length) {
     el('now').textContent = 'Terminé !';
     el('count').textContent = '0:00';
     el('next').textContent = '';
   } else {
-    el('now').textContent = KINDS[steps[i].kind].label;
+    el('now').textContent = effort === 'course' ? 'Cours' : 'Marche';
     el('count').textContent = mmss(starts[i] + steps[i].duration - t);
     const n = steps[i + 1];
-    el('next').textContent = n ? `Ensuite : ${KINDS[n.kind].label} · ${minutesLabel(n.duration)}` : 'Dernière étape';
+    el('next').innerHTML = n ? `<span class="muted">Ensuite</span> ${esc(KINDS[n.kind].label)} · ${minutesLabel(n.duration)}` : 'Dernière étape';
   }
-  el('stepno').textContent = i < 0 ? '' : `Étape ${Math.min(i + 1, steps.length)} sur ${steps.length}`;
+  el('stepno').textContent = i < 0 ? 'Départ' : i >= steps.length ? 'Fin' : `Étape ${i + 1}/${steps.length} · ${KINDS[steps[i].kind].label}`;
   el('progress').style.width = `${Math.min(100, ((t - starts[0]) / (end - starts[0])) * 100)}%`;
-  el('elapsed').textContent = `${mmss(Math.max(0, t - starts[0]))} / ${mmss(end - starts[0])}`;
+  el('elapsed').textContent = mmss(Math.max(0, t - starts[0]));
   const g = summary(live.gps, Math.max(0, t - starts[0]));
+  el('dist').textContent = g.distanceKm ? g.distanceKm.toLocaleString('fr-FR', { minimumFractionDigits: 2 }) : '0,00';
+  el('pace').textContent = g.allureSecKm ? allure(g.allureSecKm).replace('/km', '') : '–';
+  el('gpsdot').classList.toggle('ok', !live.gpsError && Boolean(g.distanceKm));
+  el('gpsstate').textContent = live.gpsError || (g.distanceKm ? 'GPS' : 'GPS…');
   el('gps').textContent = live.gpsError
-    ? live.gpsError
-    : g.distanceKm
-      ? `${g.distanceKm.toLocaleString('fr-FR')} km${g.allureSecKm ? ` · ${allure(g.allureSecKm)}` : ''}${g.gpsIncomplet ? ' · GPS coupé un moment' : ''}`
-      : 'GPS : recherche…';
+    ? `${live.gpsError} : la distance ne sera pas mesurée.`
+    : g.gpsIncomplet ? 'GPS coupé un moment : distance incomplète.' : '';
   requestAnimationFrame(tick);
 }
 
@@ -378,15 +426,24 @@ const screens = {
     const todayItem = plan.find((p) => p.date === today());
     const resumable = live ? null : savedLive();
     const next = plan.filter((p) => p.sport !== 'repos' && p.date !== today()).slice(0, 2);
-    const hello = d.profile.prenom ? `Bonjour ${esc(d.profile.prenom)} !` : 'Bonjour !';
+    const hello = d.profile.prenom ? `Salut ${esc(d.profile.prenom)}` : 'Salut';
+    const wk = weekTotals(d.history, mondayOf(today()));
     return `
+      <p class="eyebrow">${new Date().toLocaleDateString('fr-FR', { weekday: 'long', day: 'numeric', month: 'long' })}</p>
       <h1>${hello}</h1>
       ${installed ? '' : '<div class="notice"><strong>Installe Foulée :</strong> dans Safari, touche Partager puis « Sur l\'écran d\'accueil », et ouvre l\'app depuis son icône. Le guidage est plus fiable ainsi.</div>'}
       ${resumable ? `<div class="alert">Séance interrompue : « ${esc(resumable.session.name)} », arrêtée à ${mmss(resumable.pos)}.
         <div class="row" style="margin-top:10px"><button class="btn-dark" data-resume>Reprendre</button><button data-dropresume>Abandonner</button></div></div>` : ''}
-      ${todayItem ? planCard(todayItem, true) : `<div class="card dark"><span class="pill">Aujourd'hui</span><h2 style="margin-top:10px">Repos</h2><p class="muted">Le repos fait partie de l'entraînement : c'est là que le corps progresse.</p></div>`}
-      ${next.length ? `<h2 style="margin:4px 0 10px">Ensuite</h2>${next.map((p) => planCard(p, false, !todayItem?.steps && p === next.find((x) => x.sport === 'course'))).join('')}` : ''}
-      ${last ? `<h2 style="margin:4px 0 10px">Dernière séance</h2>${journalCard(last)}` : ''}`;
+      ${weekStrip(d.history, plan)}
+      ${todayItem ? planCard(todayItem, true) : `<div class="card hero"><span class="pill">Aujourd'hui</span><h2>Repos</h2><p class="muted">Le repos fait partie de l'entraînement : c'est là que le corps progresse.</p></div>`}
+      <h3>Cette semaine</h3>
+      <div class="stats">
+        <div class="stat course"><b>${fmtKm(wk.km)} <small>km</small></b><span>course</span></div>
+        <div class="stat natation"><b>${wk.m} <small>m</small></b><span>natation</span></div>
+        <div class="stat"><b>${wk.n}</b><span>séance${wk.n > 1 ? 's' : ''}</span></div>
+      </div>
+      ${next.length ? `<h3>Ensuite</h3>${next.map((p) => planCard(p, false, !todayItem?.steps && p === next.find((x) => x.sport === 'course'))).join('')}` : ''}
+      ${last ? `<h3>Dernière séance</h3>${journalCard(last)}` : ''}`;
   },
 
   programme() {
@@ -395,10 +452,29 @@ const screens = {
     const firstRun = plan.some((p) => p.date === today() && p.sport === 'course') ? null : plan.find((p) => p.sport === 'course');
     return `
       <h1>Programme</h1>
-      <p class="muted">Les 2 prochaines semaines, recalculées après chaque bilan selon ton ressenti. Jours modifiables dans Réglages.</p>
-      ${plan.length ? plan.map((p) => planCard(p, p.date === today(), p === firstRun)).join('') : '<p class="muted">Aucune séance prévue : choisis tes jours dans Réglages.</p>'}
-      <h2 style="margin:20px 0 10px">Séances perso</h2>
+      <h3 style="margin-top:0">Ton plan · 2 semaines</h3>
+      <p class="muted small">Recalculé après chaque bilan selon ta difficulté, ta fatigue et tes douleurs (règles fixes, pas un coach humain). Jours modifiables dans Profil.</p>
+      ${plan.length ? plan.map((p) => planCard(p, p.date === today(), p === firstRun)).join('') : '<p class="muted">Aucune séance prévue : choisis tes jours dans Profil.</p>'}
+      <h3>Mes séances</h3>
+      <p class="muted small">Des séances guidées à faire quand tu veux, en dehors du plan.</p>
       ${screens.seance(true)}`;
+  },
+
+  demarrer() {
+    const d = load();
+    const todayItem = upcoming(d.history, d.settings, today(), 1).find((p) => p.date === today() && p.sport !== 'repos');
+    const resumable = savedLive();
+    return `
+      <h1>Démarrer</h1>
+      ${resumable ? `<button class="option" data-resume><span><span>Reprendre « ${esc(resumable.session.name)} »</span><span class="muted">Arrêtée à ${mmss(resumable.pos)}</span></span><span class="go">▶</span></button>` : ''}
+      ${todayItem?.sport === 'course' ? `<h3 style="margin-top:0">Prévu aujourd'hui</h3>
+        <button class="option" data-startplan="${esc(todayItem.date)}"><span><span>Palier ${todayItem.level} · ${Math.round(total(todayItem.steps) / 60)} min</span><span class="muted">${esc(todayItem.title)}</span></span><span class="go">▶</span></button>` : ''}
+      ${todayItem?.sport === 'natation' ? `<h3 style="margin-top:0">Prévu aujourd'hui</h3>
+        <button class="option natation" data-logplan="natation"><span><span>Natation · ${todayItem.longueurs} longueurs</span><span class="muted">Pas de téléphone dans l'eau : note-la en sortant.</span></span><span class="go">+</span></button>` : ''}
+      <h3>Course guidée</h3>
+      ${d.sessions.map((x) => `<button class="option" data-start="${esc(x.id)}"><span><span>${esc(x.name)}</span><span class="muted">${minutesLabel(total(x.steps))} · ${x.steps.length} étapes</span></span><span class="go">▶</span></button>`).join('')}
+      <h3>Noter une séance faite</h3>
+      <div class="row"><button data-manual="natation" style="color:var(--swim)">+ Natation</button><button data-manual="course" style="color:var(--run)">+ Course</button></div>`;
   },
 
   seance(embedded) {
@@ -441,24 +517,29 @@ const screens = {
     const playing = !audio.paused;
     const interrupted = !playing && live && !live.userPaused && audio.currentTime < live.track.end;
     return `
-      ${interrupted ? '<div class="alert">Séance interrompue (appel, Siri ou autre app). Touche « Reprendre ».</div>' : ''}
-      ${load().settings.son !== 'exclusif' ? '<p class="muted small" style="margin:12px 0 0">Mode musique : vérifie que ton iPhone n\'est pas en silencieux, sinon les signaux sont coupés.</p>' : ''}
-      <div class="card dark live" style="margin-top:12px">
-        <p class="muted small" id="stepno"></p>
+      <div class="live" id="live" data-effort="marche">
+        <div class="live-top"><span id="stepno"></span><span><span class="gpsdot" id="gpsdot"></span><span id="gpsstate"></span></span></div>
+        ${interrupted ? '<div class="alert">Séance interrompue (appel, Siri ou autre app). Touche « Reprendre ».</div>' : ''}
         <p class="now" id="now"></p>
         <p class="count" id="count"></p>
-        <p class="next muted" id="next"></p>
+        <p class="next" id="next"></p>
         <div class="bar"><div id="progress"></div></div>
-        <p class="muted small" id="elapsed"></p>
+        <div class="live-stats">
+          <div><b id="dist">0,00</b><span>km</span></div>
+          <div><b id="pace">–</b><span>allure /km</span></div>
+          <div><b id="elapsed">0:00</b><span>temps</span></div>
+        </div>
         <p class="gpsline" id="gps"></p>
-      </div>
-      <div class="live-controls">
-        <button class="btn-dark" data-toggle>${playing ? 'Pause' : 'Reprendre'}</button>
-        <button data-skip>Étape suivante</button>
-      </div>
-      <p style="margin-top:10px"><button class="btn-primary" data-touchlock>Verrouiller l'écran (poche)</button></p>
-      <p style="margin-top:10px"><button data-finish style="width:100%">Terminer et faire le bilan</button></p>
-      <p class="muted small" style="margin-top:12px">Garde l'écran allumé pour mesurer la distance. Si l'iPhone se verrouille, la voix continue mais le GPS s'arrête.</p>`;
+        ${load().settings.son !== 'exclusif' ? '<p class="muted small" style="margin:0">Mode musique : iPhone hors silencieux, sinon pas de signaux.</p>' : ''}
+        <div class="live-controls">
+          <button class="toggle${playing ? '' : ' paused'}" data-toggle>${playing ? 'Pause' : 'Reprendre'}</button>
+          <button data-skip>Étape suivante</button>
+        </div>
+        <div class="live-extra">
+          <button data-touchlock>Verrouiller (poche)</button>
+          <button data-finish>Terminer</button>
+        </div>
+      </div>`;
   },
 
   bilan() {
@@ -486,15 +567,42 @@ const screens = {
       <p class="muted small" style="margin-top:10px">La douleur et ton ressenti restent privés.</p>`;
   },
 
-  journal() {
+  progression() {
     const d = load();
     const sorted = [...d.history].sort((a, b) => String(b.date).localeCompare(String(a.date)));
+    const runs = d.history.filter((h) => sportOf(h) === 'course');
+    const swims = d.history.filter((h) => sportOf(h) === 'natation');
+    const longest = Math.max(0, ...runs.map((h) => h.distanceKm || 0));
+    const paces = runs.map((h) => h.allureSecKm || (h.distanceKm && h.elapsedSec && !h.distanceEstimee ? h.elapsedSec / h.distanceKm : 0)).filter(Boolean);
+    const bestSwim = Math.max(0, ...swims.map(swimMeters));
+    const wk = weekTotals(d.history, mondayOf(today()));
+    const prev = weekTotals(d.history, addDays(mondayOf(today()), -7));
     return `
-      <h1>Journal</h1>
-      <div class="row" style="margin-bottom:14px"><button data-manual="natation">+ Natation</button><button data-manual="course">+ Course libre</button></div>
+      <h1>Progression</h1>
+      ${d.history.length ? `
+        <div class="card">
+          <p class="eyebrow" style="margin:0">Course · km par semaine</p>
+          <p style="margin:6px 0 0"><span style="font-size:34px;font-weight:800;color:var(--run)">${fmtKm(wk.km)}</span> <span class="muted">km cette semaine · ${fmtKm(prev.km)} la précédente</span></p>
+          ${weekBars(d.history, 'course')}
+        </div>
+        <div class="card">
+          <p class="eyebrow" style="margin:0">Natation · mètres par semaine</p>
+          <p style="margin:6px 0 0"><span style="font-size:34px;font-weight:800;color:var(--swim)">${wk.m}</span> <span class="muted">m cette semaine · ${prev.m} la précédente</span></p>
+          ${weekBars(d.history, 'natation')}
+        </div>
+        <h3>Records</h3>
+        <div class="stats">
+          <div class="stat course"><b>${longest ? fmtKm(longest) : '–'} <small>km</small></b><span>plus longue course</span></div>
+          <div class="stat course"><b>${paces.length ? allure(Math.min(...paces)).replace('/km', '') : '–'}</b><span>meilleure allure moyenne</span></div>
+          <div class="stat natation"><b>${bestSwim || '–'} <small>m</small></b><span>plus longue nage</span></div>
+        </div>
+        <p class="muted small" style="margin-top:8px">Allure moyenne marche comprise : elle baisse quand tu cours plus longtemps.</p>` : ''}
+      <h3>Historique</h3>
+      <div class="row" style="margin-bottom:14px"><button data-manual="natation" style="color:var(--swim)">+ Natation</button><button data-manual="course" style="color:var(--run)">+ Course libre</button></div>
       ${sorted.length === 0 ? '<p class="muted">Aucune séance pour l\'instant.</p>' : ''}
       ${sorted.map(journalCard).join('')}
-      ${sorted.length ? '<button data-export style="width:100%">Exporter mes données (JSON)</button>' : ''}`;
+      <h3>Proches</h3>
+      <div class="card"><p class="small">Le partage de séances avec tes proches n'existe pas encore : pour l'instant, chacun a son compte et ses données. Inviter quelqu'un : Profil.</p></div>`;
   },
 
   saisie() {
@@ -538,7 +646,7 @@ const screens = {
         <label for="comm">Ton ressenti</label>
         <textarea id="comm">${esc(b.commentaire)}</textarea>
       </div>
-      <div class="row"><button data-tab="journal">Annuler</button><button class="btn-dark" data-savemanual>Enregistrer</button></div>`;
+      <div class="row"><button data-tab="progression">Annuler</button><button class="btn-dark" data-savemanual>Enregistrer</button></div>`;
   },
 
   compte() {
@@ -549,7 +657,7 @@ const screens = {
         <h1>Mon compte</h1>
         <div class="card"><h2>Bientôt disponible</h2>
         <p>Les comptes sont prêts, mais le serveur n'est pas encore en service. En attendant, tes séances restent sur ce téléphone.</p></div>
-        <button data-tab="reglages" style="width:100%">Retour</button>`;
+        <button data-tab="profil" style="width:100%">Retour</button>`;
     }
     if (!account.passkeysSupported()) {
       return `<h1>Mon compte</h1><div class="alert">Ce navigateur ne gère pas les passkeys. Mets à jour ton téléphone ou ouvre Foulée dans Safari (iPhone) ou Chrome (Android).</div>`;
@@ -599,19 +707,23 @@ const screens = {
       </div>`;
   },
 
-  reglages() {
+  profil() {
     const d = load();
     const sess = account.session();
     const supported = 'audioSession' in navigator;
+    const prenom = d.profile.prenom || sess?.user?.prenom || '';
     return `
-      <h1>Réglages</h1>
+      <div class="profile-head">
+        <div class="avatar">${esc((prenom[0] || '?').toUpperCase())}</div>
+        <div><h1>${esc(prenom) || 'Profil'}</h1><p class="muted small" style="margin:4px 0 0">${!account.serverEnabled() ? 'Séances sur ce téléphone' : sess ? 'Compte connecté' : 'Non connecté : séances sur ce téléphone'}</p></div>
+      </div>
       <div class="card">
-        <h2>Mon compte</h2>
-        <p class="muted small">${!account.serverEnabled() ? 'Pas encore en service : tes séances restent sur ce téléphone.' : sess ? `Connecté : ${esc(sess.user?.prenom ?? '')}` : 'Non connecté : tes séances restent sur ce téléphone.'}</p>
+        <h2>Compte et proches</h2>
+        <p class="muted small">${sess ? 'Sauvegarde de tes séances, invitations, nouveau téléphone.' : 'Crée ton compte ou connecte-toi pour sauvegarder tes séances et inviter tes proches.'}</p>
         <button data-tab="compte" style="width:100%">${sess ? 'Gérer mon compte et inviter' : 'Connexion / créer mon compte'}</button>
       </div>
       <div class="card">
-        <label for="prenom">Ton prénom</label>
+        <label for="prenom" style="margin-top:0">Ton prénom</label>
         <input id="prenom" value="${esc(d.profile.prenom)}" maxlength="40">
       </div>
       <div class="card">
@@ -619,36 +731,37 @@ const screens = {
         <label>Course</label>
         <div class="days">${JOURS.map(([n, l]) => `<button data-day="joursCourse" data-v="${n}" class="${(d.settings.joursCourse ?? [1, 5]).includes(n) ? 'on' : ''}">${l}</button>`).join('')}</div>
         <label>Natation</label>
-        <div class="days">${JOURS.map(([n, l]) => `<button data-day="joursNatation" data-v="${n}" class="${(d.settings.joursNatation ?? [3]).includes(n) ? 'on' : ''}">${l}</button>`).join('')}</div>
+        <div class="days natation">${JOURS.map(([n, l]) => `<button data-day="joursNatation" data-v="${n}" class="${(d.settings.joursNatation ?? [3]).includes(n) ? 'on' : ''}">${l}</button>`).join('')}</div>
         <p class="muted small" style="margin-top:8px">Laisse au moins un jour entre deux courses : sinon la seconde devient un jour de repos.</p>
       </div>
       <div class="card">
         <h2>Signal de changement d'étape</h2>
-        <label style="font-weight:400"><input type="radio" name="annonces" value="signaux" style="width:auto" ${d.settings.annonces !== 'voix' ? 'checked' : ''}> <strong>Signaux sonores</strong> : notes qui montent = cours, notes qui descendent = marche, 3 bips avant chaque changement.</label>
-        <label style="font-weight:400"><input type="radio" name="annonces" value="voix" style="width:auto" ${d.settings.annonces === 'voix' ? 'checked' : ''}> <strong>Voix</strong> : annonce chaque étape et sa durée.</label>
+        <label class="choice"><input type="radio" name="annonces" value="signaux" ${d.settings.annonces !== 'voix' ? 'checked' : ''}><span><strong>Signaux sonores</strong> : notes qui montent = cours, notes qui descendent = marche, 3 bips avant chaque changement.</span></label>
+        <label class="choice"><input type="radio" name="annonces" value="voix" ${d.settings.annonces === 'voix' ? 'checked' : ''}><span><strong>Voix</strong> : annonce chaque étape et sa durée.</span></label>
       </div>
       <div class="card">
         <h2>Son pendant la séance</h2>
-        <label style="font-weight:400"><input type="radio" name="mode" value="musique" style="width:auto" ${d.settings.son !== 'exclusif' ? 'checked' : ''}> <strong>Avec ma musique</strong> : les signaux passent par-dessus ta musique. Garde l'écran allumé.</label>
-        <label style="font-weight:400"><input type="radio" name="mode" value="exclusif" style="width:auto" ${d.settings.son === 'exclusif' ? 'checked' : ''}> <strong>Sans musique</strong> : continue même écran verrouillé, mais met ta musique en pause.</label>
+        <label class="choice"><input type="radio" name="mode" value="musique" ${d.settings.son !== 'exclusif' ? 'checked' : ''}><span><strong>Avec ma musique</strong> : les signaux passent par-dessus ta musique. Garde l'écran allumé.</span></label>
+        <label class="choice"><input type="radio" name="mode" value="exclusif" ${d.settings.son === 'exclusif' ? 'checked' : ''}><span><strong>Sans musique</strong> : continue même écran verrouillé, mais met ta musique en pause.</span></label>
         ${supported ? '' : '<p class="muted small">Ce navigateur ne permet pas de choisir : le mode par défaut s\'applique.</p>'}
       </div>
       <div class="card">
         <h2>Mes données</h2>
         <p class="muted small">Importer un fichier d'export Foulée ou un historique préparé. Les séances déjà présentes ne sont pas dupliquées.</p>
-        <button data-import style="width:100%">Importer des données (JSON)</button>
+        <div class="row"><button data-import>Importer</button>${d.history.length ? '<button data-export>Exporter</button>' : ''}</div>
         <input id="importfile" type="file" accept="application/json,.json" hidden>
       </div>
       <p class="muted small">Voix : modèle libre « siwis » (Piper, licence CC-BY 4.0, Université d'Édimbourg).</p>`;
   },
 };
 
+// Onglet allumé pour chaque écran.
+const TAB_OF = { edit: 'programme', live: 'demarrer', bilan: 'progression', saisie: 'progression', compte: 'profil' };
+
 function render() {
   app.innerHTML = screens[current]();
-  for (const b of document.querySelectorAll('#tabs button')) {
-    const tab = b.dataset.tab;
-    b.classList.toggle('on', tab === current || (tab === 'programme' && ['edit', 'live', 'bilan'].includes(current)) || (tab === 'reglages' && current === 'compte'));
-  }
+  for (const b of document.querySelectorAll('#tabs button')) b.classList.toggle('on', b.dataset.tab === (TAB_OF[current] || current));
+  document.body.classList.toggle('is-live', current === 'live');
   if (current === 'live') requestAnimationFrame(tick);
 }
 
@@ -664,6 +777,7 @@ function go(screen) {
     const gps = summary(live.gps, elapsedSec);
     stopLiveExtras();
     renderTouchLock();
+    live.done = true;
     bilan = {
       id: uid(),
       sport: 'course',
@@ -775,7 +889,7 @@ document.addEventListener('click', (e) => {
   const ds = t.dataset;
   if (ds.tab) {
     if (current === 'live' && !audio.paused && !confirm('La séance continue en arrière-plan. Quitter l\'écran ?')) return;
-    go(ds.tab);
+    go(ds.tab === 'demarrer' && live && !live.done ? 'live' : ds.tab);
   } else if (ds.start) {
     startSession(findSession(ds.start));
   } else if ('resume' in ds) {
@@ -863,7 +977,7 @@ document.addEventListener('click', (e) => {
     const entry = bilan;
     update((d) => { d.history.push(entry); });
     bilan = null;
-    go('journal');
+    go('progression');
   } else if ('import' in ds) {
     document.getElementById('importfile').click();
   } else if (ds.scale) {
@@ -880,7 +994,7 @@ document.addEventListener('click', (e) => {
     audio.removeAttribute('src');
     audio.load();
     bilan = null;
-    go('journal');
+    go('progression');
   } else if ('export' in ds) {
     const blob = new Blob([JSON.stringify(load(), null, 2)], { type: 'application/json' });
     const a = document.createElement('a');
@@ -909,7 +1023,7 @@ document.addEventListener('change', (e) => {
         return;
       }
       alert(`${added} séance(s) ajoutée(s).`);
-      go('journal');
+      go('progression');
     });
   } else if (current === 'saisie') {
     readSaisie();
