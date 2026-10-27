@@ -28,9 +28,12 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: 22
+      # Le miroir Ubuntu d'Azure est parfois très lent : on passe par le miroir officiel.
       - name: Installer ffmpeg
-        timeout-minutes: 6
-        run: sudo apt-get update && sudo apt-get install -y --no-install-recommends ffmpeg
+        timeout-minutes: 10
+        run: |
+          sudo sed -i 's#http://azure.archive.ubuntu.com#http://archive.ubuntu.com#g' /etc/apt/sources.list.d/*.sources /etc/apt/sources.list 2>/dev/null || true
+          sudo apt-get update && sudo apt-get install -y --no-install-recommends ffmpeg
       - run: npm test
 
       # Serveur des comptes : déployé seulement quand les deux secrets Cloudflare existent.
