@@ -167,12 +167,17 @@ body.flash-marche { animation: flash-marche 1.5s ease-out; }
 .kpi.course { color: var(--run); }
 .kpi.natation { color: var(--swim); }
 
-/* Bande de la semaine, sans cases. */
-.week { display: grid; grid-template-columns: repeat(7, 1fr); gap: 4px; margin: 0 0 18px; }
-.week div { text-align: center; padding: 8px 0; border-radius: 99px; color: var(--muted); font-size: 11px; font-weight: 700; }
-.week div b { display: block; font-size: 17px; color: var(--ink); margin: 2px 0 4px; }
-.week div.past b { color: var(--muted); }
-.week div.today { background: var(--surface-2); box-shadow: inset 0 0 0 1.5px var(--ink); }
+/* Calendrier : une semaine par écran, on glisse pour changer de semaine. */
+.week { display: grid; grid-auto-flow: column; grid-auto-columns: calc((100% - 24px) / 7); gap: 4px; margin: 0 0 18px; overflow-x: auto; scroll-snap-type: x mandatory; scrollbar-width: none; -webkit-overflow-scrolling: touch; }
+.week::-webkit-scrollbar { display: none; }
+.week button { text-align: center; padding: 8px 0; min-height: 0; border: 0; background: transparent; border-radius: 99px; color: var(--muted); font-size: 11px; font-weight: 700; }
+.week button.monday { scroll-snap-align: start; }
+.week button b { display: block; font-size: 17px; color: var(--ink); margin: 2px 0 4px; }
+.week button.past b { color: var(--muted); }
+.week button.today { box-shadow: inset 0 0 0 1.5px var(--ink); }
+.week button.sel { background: var(--ink); color: var(--on-accent); }
+.week button.sel b { color: var(--on-accent); }
+.week button:active { transform: none; }
 .week .dots { display: flex; justify-content: center; gap: 3px; height: 8px; }
 .dot { display: inline-block; width: 7px; height: 7px; border-radius: 50%; border: 1.5px solid transparent; }
 .dot.course { border-color: var(--run); }

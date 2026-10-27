@@ -45,28 +45,30 @@ const shortDate = (d) => new Date(`${String(d).slice(0, 10)}T12:00`).toLocaleDat
 
 // Séance du jour : le seul bloc mis en vedette de l'accueil et du programme.
 function todayHero(p) {
+  const isToday = p.date === today();
+  const when = isToday ? "Aujourd'hui" : dateLabel(p.date);
   if (p.sport === 'natation') {
     return `
       <section class="hero natation">
-        <p class="eyebrow">Aujourd'hui · natation</p>
+        <p class="eyebrow">${when} · natation</p>
         <p class="hero-num">${p.longueurs}<small>longueurs</small></p>
         <p class="hero-sub">${p.distance} m en bassin de ${p.bassin} m</p>
         <ol class="hero-steps">${p.plan.map((l) => `<li>${esc(l)}</li>`).join('')}</ol>
         <p class="muted small">${esc(p.reason)}</p>
-        <button class="btn-swim" data-logplan="natation">Noter ma séance</button>
+        ${isToday ? '<button class="btn-swim" data-logplan="natation">Noter ma séance</button>' : ''}
       </section>`;
   }
   const mins = Math.round(total(p.steps) / 60);
   const runs = p.steps.filter((s) => KINDS[s.kind].effort === 'course');
   return `
     <section class="hero course">
-      <p class="eyebrow">Aujourd'hui · course · palier ${p.level}/12</p>
+      <p class="eyebrow">${when} · course · palier ${p.level}/12</p>
       <p class="hero-num">${mins}<small>min</small></p>
       <p class="hero-sub">${esc(p.title)}</p>
       <div class="effort-bar">${p.steps.map((s) => `<i class="${KINDS[s.kind].effort}" style="flex:${s.duration}"></i>`).join('')}</div>
       <p class="muted small">${runs.length} fois en course, ${Math.round(runs.reduce((a, s) => a + s.duration, 0) / 60)} min au total. ${esc(p.reason)}</p>
-      <button class="btn-primary" data-startplan="${esc(p.date)}">Démarrer la séance</button>
-      <button class="btn-ghost" data-logplan="course" style="width:100%;margin-top:6px">Faite sans l'app : la noter</button>
+      ${isToday ? `<button class="btn-primary" data-startplan="${esc(p.date)}">Démarrer la séance</button>
+      <button class="btn-ghost" data-logplan="course" style="width:100%;margin-top:6px">Faite sans l'app : la noter</button>` : `<button data-startplan="${esc(p.date)}" style="width:100%">La faire maintenant</button>`}
     </section>`;
 }
 
@@ -98,7 +100,7 @@ function mountMaps() {
 document.addEventListener('toggle', (e) => { if (e.target.open) mountMaps(); }, true);
 
 // Séance passée : ligne dépliable, le détail reste à un toucher.
-function historyRow(h) {
+function historyRow(h, open = false) {
   const sport = sportOf(h);
   const parts = [];
   if (h.elapsedSec) parts.push(`${Math.round(h.elapsedSec / 60)} min`);
@@ -117,7 +119,7 @@ function historyRow(h) {
     ? (swimMeters(h) ? `${swimMeters(h)}<small>m</small>` : '')
     : h.distanceKm ? `${h.distanceKm.toLocaleString('fr-FR')}<small>km</small>` : h.elapsedSec ? `${Math.round(h.elapsedSec / 60)}<small>min</small>` : '';
   return `
-    <details class="hist">
+    <details class="hist"${open ? ' open' : ''}>
       <summary class="li">${icon(sport)}<div class="li-main"><b>${dateLabel(h.date)}</b><span>${parts.length ? parts.join(' · ') : esc(h.structure || h.sessionName || (sport === 'natation' ? 'Natation' : 'Course'))}</span></div><span class="li-side ${sport}">${side}</span></summary>
       <div class="li-more">
         ${traceOf(h).length ? `<div class="map" data-map="${esc(h.id)}"></div>` : ''}
@@ -174,16 +176,36 @@ function ring(done, goal) {
     </svg>`;
 }
 
-function weekStrip(history, plan) {
+// Calendrier : 2 semaines passées → 2 à venir, une semaine par écran, chaque jour se touche.
+function weekStrip(history, plan, sel) {
   const t = today();
-  const monday = mondayOf(t);
-  const days = Array.from({ length: 7 }, (_, i) => addDays(monday, i));
-  return `<div class="week">${days.map((d, i) => {
+  const first = addDays(mondayOf(t), -14);
+  const days = Array.from({ length: 35 }, (_, i) => addDays(first, i));
+  return `<div class="week" id="week">${days.map((d, i) => {
     const done = history.filter((h) => String(h.date).slice(0, 10) === d).map(sportOf);
     const planned = plan.filter((p) => p.date === d && p.sport !== 'repos').map((p) => p.sport);
     const dots = [...new Set([...done, ...planned])].map((sp) => `<span class="dot ${sp}${done.includes(sp) ? ' done' : ''}"></span>`).join('');
-    return `<div class="${d === t ? 'today' : d < t ? 'past' : ''}">${'LMMJVSD'[i]}<b>${Number(d.slice(8))}</b><span class="dots">${dots}</span></div>`;
+    const cls = [d === t && 'today', d < t && 'past', d === sel && 'sel', i % 7 === 0 && 'monday'].filter(Boolean).join(' ');
+    return `<button data-pickday="${d}" class="${cls}">${'LMMJVSD'[i % 7]}<b>${Number(d.slice(8))}</b><span class="dots">${dots}</span></button>`;
   }).join('')}</div>`;
+}
+
+// Ce que montre le jour choisi : la séance faite, la séance prévue, ou rien.
+function dayPanel(history, plan, sel) {
+  const t = today();
+  if (sel < t) {
+    const done = history.filter((h) => String(h.date).slice(0, 10) === sel);
+    if (done.length) return `<div class="list">${done.map((h) => historyRow(h, true)).join('')}</div>`;
+    return `<section class="hero rest"><p class="eyebrow">${dateLabel(sel)}</p><p class="hero-num">Rien</p><p class="muted">Aucune séance notée ce jour-là.</p>
+      <div class="row"><button data-manual="natation" data-mdate="${sel}" class="btn-ghost" style="color:var(--swim)">+ Natation</button><button data-manual="course" data-mdate="${sel}" class="btn-ghost" style="color:var(--run)">+ Course</button></div></section>`;
+  }
+  const p = plan.find((x) => x.date === sel);
+  const label = sel === t ? "Aujourd'hui" : dateLabel(sel);
+  if (p && p.sport !== 'repos') return todayHero(p);
+  const doneToday = sel === t ? history.filter((h) => String(h.date).slice(0, 10) === sel) : [];
+  if (doneToday.length) return `<h3 style="margin-top:0">Aujourd'hui</h3><div class="list">${doneToday.map((h) => historyRow(h, true)).join('')}</div>`;
+  const inPlan = sel <= addDays(t, 13);
+  return `<section class="hero rest"><p class="eyebrow">${label}</p><p class="hero-num">Repos</p><p class="muted">${p ? esc(p.reason) : inPlan ? "Le repos fait partie de l'entraînement : c'est là que le corps progresse." : 'Programme pas encore calculé : il se construit 2 semaines à l\'avance, selon tes bilans.'}</p></section>`;
 }
 
 // Courbe des 8 dernières semaines (km de course ou mètres nagés).
@@ -502,6 +524,8 @@ function tick() {
 
 let current = 'accueil';
 let progSport = 'course'; // courbe affichée dans Progression
+let selDay = today(); // jour choisi dans le calendrier de l'accueil
+let weekScroll = null; // position du calendrier, gardée entre deux affichages
 let editing = null; // séance en cours d'édition (copie)
 let bilan = null; // formulaire de bilan en cours
 
@@ -534,8 +558,8 @@ const screens = {
           <p class="kpi natation">${wk.m}<small>m nagés</small></p>
         </div>
       </section>
-      ${weekStrip(d.history, plan)}
-      ${todayItem && todayItem.sport !== 'repos' ? todayHero(todayItem) : `<section class="hero rest"><p class="eyebrow">Aujourd'hui</p><p class="hero-num">Repos</p><p class="muted">${todayItem ? esc(todayItem.reason) : "Le repos fait partie de l'entraînement : c'est là que le corps progresse."}</p></section>`}
+      ${weekStrip(d.history, plan, selDay)}
+      ${dayPanel(d.history, plan, selDay)}
       ${next.length ? `<h3>Ensuite</h3><div class="list">${next.map((p) => planRow(p, !todayItem?.steps && p === next.find((x) => x.sport === 'course'))).join('')}</div>` : ''}
       ${last ? `<h3>Dernière séance</h3><div class="list">${historyRow(last)}</div>` : ''}`;
   },
@@ -861,6 +885,14 @@ const screens = {
   },
 };
 
+// Calendrier : revient où il était, sinon s'ouvre sur la semaine en cours.
+function placeWeek() {
+  const strip = document.getElementById('week');
+  if (!strip) return;
+  const monday = strip.querySelector(`[data-pickday="${mondayOf(today())}"]`);
+  strip.scrollLeft = weekScroll ?? monday.offsetLeft - strip.offsetLeft;
+}
+
 // Onglet allumé pour chaque écran.
 const TAB_OF = { edit: 'programme', live: 'demarrer', bilan: 'progression', saisie: 'progression', compte: 'profil' };
 
@@ -869,6 +901,7 @@ function render() {
   for (const b of document.querySelectorAll('#tabs button')) b.classList.toggle('on', b.dataset.tab === (TAB_OF[current] || current));
   document.body.classList.toggle('is-live', current === 'live');
   mountMaps();
+  placeWeek();
   if (current === 'live') requestAnimationFrame(tick);
 }
 
@@ -994,7 +1027,12 @@ document.addEventListener('click', (e) => {
   const t = e.target.closest('button');
   if (!t) return;
   const ds = t.dataset;
-  if (ds.tab) {
+  if (ds.pickday) {
+    selDay = ds.pickday;
+    weekScroll = document.getElementById('week')?.scrollLeft ?? null;
+    render();
+  } else if (ds.tab) {
+    if (ds.tab === 'accueil') { selDay = today(); weekScroll = null; }
     if (current === 'live' && !audio.paused && !confirm('La séance continue en arrière-plan. Quitter l\'écran ?')) return;
     go(ds.tab === 'demarrer' && live && !live.done ? 'live' : ds.tab);
   } else if (ds.start) {
@@ -1065,6 +1103,7 @@ document.addEventListener('click', (e) => {
     render();
   } else if (ds.manual) {
     bilan = newManual(ds.manual);
+    if (ds.mdate) bilan.date = ds.mdate;
     go('saisie');
   } else if (ds.logplan) {
     // Saisie préremplie avec la séance prévue aujourd'hui ; tout reste modifiable.
