@@ -2,7 +2,8 @@ import { KINDS } from './phrases.js';
 import { assemble, stepAt } from './track.js';
 import { load, update, uid, PRESETS, onSave, replace } from './store.js';
 import * as account from './account.js';
-import { createTrack, addPoint, markGap, summary } from './gps.js';
+import { createTrack, addPoint, markGap, summary, encodeTrace, decodeTrace } from './gps.js';
+import { drawTrace } from './map.js';
 import { upcoming } from './plan.js';
 
 const app = document.getElementById('app');
@@ -83,6 +84,19 @@ function planRow(p, showNow = false) {
     ${showNow ? `<button class="btn-ghost small-btn" data-startplan="${esc(p.date)}">La faire maintenant ›</button>` : ''}`;
 }
 
+// Tracé GPS d'une séance (les toutes premières séances gardaient les points bruts).
+const traceOf = (h) => (h?.trace ? decodeTrace(h.trace) : h?.gpsPoints?.length ? decodeTrace(encodeTrace(h.gpsPoints)) : []);
+
+// Cartes de l'écran : dessinées une fois visibles (une ligne d'historique fermée attend d'être dépliée).
+function mountMaps() {
+  for (const el of document.querySelectorAll('.map[data-map]')) {
+    if (el.closest('details:not([open])')) continue;
+    const id = el.dataset.map;
+    drawTrace(el, traceOf(id === 'bilan' ? bilan : load().history.find((h) => h.id === id)));
+  }
+}
+document.addEventListener('toggle', (e) => { if (e.target.open) mountMaps(); }, true);
+
 // Séance passée : ligne dépliable, le détail reste à un toucher.
 function historyRow(h) {
   const sport = sportOf(h);
@@ -106,6 +120,7 @@ function historyRow(h) {
     <details class="hist">
       <summary class="li">${icon(sport)}<div class="li-main"><b>${dateLabel(h.date)}</b><span>${parts.length ? parts.join(' · ') : esc(h.structure || h.sessionName || (sport === 'natation' ? 'Natation' : 'Course'))}</span></div><span class="li-side ${sport}">${side}</span></summary>
       <div class="li-more">
+        ${traceOf(h).length ? `<div class="map" data-map="${esc(h.id)}"></div>` : ''}
         ${sport === 'natation' && h.swim?.nages?.length ? `<p class="small">${esc(h.swim.nages.join(', '))}${h.swim.detail ? ` · ${esc(h.swim.detail)}` : ''}</p>` : ''}
         ${h.structure ? `<p class="small">${esc(h.structure)}</p>` : ''}
         ${feel.length ? `<p class="muted small">${feel.join(' · ')}</p>` : ''}
@@ -640,6 +655,7 @@ const screens = {
       <div class="card">
         <p><strong>${esc(b.sessionName)}</strong></p>
         <p class="muted">${mmss(b.elapsedSec)} de séance · ${b.completedSteps} étape(s) sur ${b.steps.length}${b.skipped.length ? ` · ${b.skipped.length} passée(s)` : ''}</p>
+        ${b.trace ? `<div class="map" data-map="bilan"></div>${b.gpsIncomplet ? '<p class="muted small">En pointillés : écran verrouillé, le GPS ne suivait plus.</p>' : ''}` : ''}
         ${b.distanceSource === 'gps' ? `<p class="small">GPS : ${b.distanceKm.toLocaleString('fr-FR')} km${b.allureSecKm ? ` · ${allure(b.allureSecKm)}` : ''}${b.gpsIncomplet ? ' · <strong>incomplet</strong> (écran verrouillé un moment)' : ''}</p>` : ''}
         <label for="dist">Distance (km${b.distanceSource === 'gps' ? ', corrige si besoin' : ', facultatif'})</label>
         <input id="dist" type="number" inputmode="decimal" step="0.01" min="0" value="${b.distanceKm ?? ''}">
@@ -852,6 +868,7 @@ function render() {
   app.innerHTML = screens[current]();
   for (const b of document.querySelectorAll('#tabs button')) b.classList.toggle('on', b.dataset.tab === (TAB_OF[current] || current));
   document.body.classList.toggle('is-live', current === 'live');
+  mountMaps();
   if (current === 'live') requestAnimationFrame(tick);
 }
 
@@ -885,7 +902,7 @@ function go(screen) {
       distanceSource: gps.distanceKm ? 'gps' : null,
       allureSecKm: gps.allureSecKm,
       gpsIncomplet: gps.gpsIncomplet,
-      gpsPoints: gps.points,
+      trace: encodeTrace(gps.points),
       difficulte: null,
       fatigue: null,
       douleur: '',
