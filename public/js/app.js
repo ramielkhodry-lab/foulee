@@ -40,7 +40,7 @@ function planCard(p, isToday, showNow = false) {
   if (p.sport === 'natation') {
     return `
       <div class="card${isToday ? ' dark' : ''}">
-        <p><span class="pill">Natation</span> <strong>${label}</strong></p>
+        <p><span class="pill natation">Natation</span> <strong>${label}</strong></p>
         <h2 style="margin-top:8px">${p.longueurs} longueurs · ${p.distance} m</h2>
         ${isToday ? `<ul class="steps">${p.plan.map((l) => `<li><span>${esc(l)}</span></li>`).join('')}</ul>` : ''}
         <p class="muted small" style="margin-top:8px">${esc(p.reason)}</p>
@@ -50,7 +50,7 @@ function planCard(p, isToday, showNow = false) {
   const mins = Math.round(total(p.steps) / 60);
   return `
     <div class="card${isToday ? ' dark' : ''}">
-      <p><span class="pill">Course</span> <strong>${label}</strong> <span class="muted small">· palier ${p.level}/12</span></p>
+      <p><span class="pill course">Course</span> <strong>${label}</strong> <span class="muted small">· palier ${p.level}/12</span></p>
       <h2 style="margin-top:8px">${mins} min · ${esc(p.title)}</h2>
       <p class="small">${esc(stepsSummary(p.steps))}</p>
       <p class="muted small">${esc(p.reason)}</p>
@@ -75,7 +75,7 @@ function journalCard(h) {
   ].filter(Boolean);
   return `
     <div class="card">
-      <p><span class="pill">${sport === 'natation' ? 'Natation' : 'Course'}</span> <strong>${dateLabel(h.date)}</strong></p>
+      <p><span class="pill ${sport === 'natation' ? 'natation' : 'course'}">${sport === 'natation' ? 'Natation' : 'Course'}</span> <strong>${dateLabel(h.date)}</strong></p>
       <p class="muted">${parts.join(' · ')}</p>
       ${sport === 'natation' && h.swim?.nages?.length ? `<p class="small">${esc(h.swim.nages.join(', '))}${h.swim.detail ? ` · ${esc(h.swim.detail)}` : ''}</p>` : ''}
       ${h.structure ? `<p class="small">${esc(h.structure)}</p>` : ''}
