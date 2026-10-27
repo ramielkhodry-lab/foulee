@@ -37,13 +37,13 @@ const t1 = await page.evaluate(() => document.getElementById('player').currentTi
 const now1 = await page.textContent('#now');
 await page.click('[data-skip]'); // intro → étape 1
 await page.waitForTimeout(300);
-const now2 = await page.textContent('#now');
+const now2 = await page.textContent('#stepno');
 // Course simulée : 3 m toutes les 600 ms vers le nord.
 for (let i = 1; i <= 10; i++) {
   await context.setGeolocation({ latitude: 48.897 + (i * 3) / 111195, longitude: 2.253, accuracy: 5 });
   await page.waitForTimeout(600);
 }
-const gpsLine = await page.textContent('#gps');
+const gpsLine = await page.textContent('#dist');
 // Verrou tactile : un clic ne passe plus, un appui long déverrouille.
 await page.click('[data-touchlock]');
 const before = await page.evaluate(() => document.getElementById('player').paused);
@@ -66,7 +66,7 @@ const journal = await page.textContent('#app');
 await page.screenshot({ path: '/tmp/foulee-journal.png', fullPage: true });
 
 // Import d'un historique, puis saisie manuelle d'une séance de natation.
-await page.click('[data-tab="reglages"]');
+await page.click('[data-tab="profil"]');
 await page.setInputFiles('#importfile', new URL('../fixtures/historique.json', import.meta.url).pathname);
 await page.waitForSelector('[data-manual="natation"]');
 await page.click('[data-manual="natation"]');
@@ -81,16 +81,22 @@ await page.click('[data-savemanual]');
 const journal2 = await page.textContent('#app');
 await page.screenshot({ path: '/tmp/foulee-journal2.png', fullPage: true });
 // Réimporter ne doit rien dupliquer.
-await page.click('[data-tab="reglages"]');
+await page.click('[data-tab="profil"]');
 await page.setInputFiles('#importfile', new URL('../fixtures/historique.json', import.meta.url).pathname);
 await page.waitForSelector('[data-manual="natation"]');
-const count = await page.locator('#app .card').count();
+const count = await page.locator('#app .card:has(.pill)').count();
 await page.click('[data-tab="accueil"]');
 const accueil = await page.textContent('#app');
 await page.screenshot({ path: '/tmp/foulee-accueil2.png', fullPage: true });
 await page.click('[data-tab="programme"]');
 const programme = await page.textContent('#app');
 await page.screenshot({ path: '/tmp/foulee-programme.png', fullPage: true });
+await page.click('[data-tab="progression"]');
+await page.screenshot({ path: '/tmp/foulee-progression.png', fullPage: true });
+await page.click('[data-tab="demarrer"]');
+await page.screenshot({ path: '/tmp/foulee-demarrer.png', fullPage: true });
+await page.click('[data-tab="profil"]');
+await page.screenshot({ path: '/tmp/foulee-profil.png', fullPage: true });
 // Reprise après fermeture de l'app en pleine séance.
 await page.click('[data-tab="programme"]');
 await page.click('[data-start="test-4"]');
@@ -112,12 +118,12 @@ server.close();
 
 const checks = {
   'la piste avance': t1 > 1,
-  'GPS mesuré pendant la séance': /0,0[23] km/.test(gpsLine),
+  'GPS mesuré pendant la séance': /^0,0[23]$/.test(gpsLine),
   'verrou tactile bloque les clics': lockedStill === 1 && before === after,
   'appui long déverrouille': unlocked,
   'distance GPS reprise au bilan': bilanText.includes('GPS : 0,0'),
   'intro affichée': now1 === 'Prépare-toi',
-  'étape suivante': now2 === "Marche d'échauffement",
+  'étape suivante': now2.endsWith("Marche d'échauffement"),
   'durée de piste ≈ 4 min + intro + fin': dur > 250 && dur < 262,
   'bilan au journal': journal.includes('Test automatique') && journal.includes('difficulté 2/5'),
   'distance natation calculée': swimdist.includes('750 m'),
