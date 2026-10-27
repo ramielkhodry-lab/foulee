@@ -155,7 +155,7 @@ const checks = {
   'reprise au bon endroit': resumedAt > 5,
   'bandeau si pause non voulue': interruptedText.includes('Séance interrompue (appel'),
   'calendrier : jour passé = séance faite': dayPast.includes('3,35 km') && dayPast.includes('vendredi 23 octobre'),
-  'calendrier : jour à venir = séance prévue': /course · palier \d+\/12/.test(dayFuture) && dayFuture.includes('La faire maintenant'),
+  'calendrier : jour à venir = séance prévue': /Palier \d+\/12/.test(dayFuture) && dayFuture.includes('La faire maintenant'),
   'programme calculé (course + natation)': /palier [23]\/12/.test(programme) && programme.includes('32 longueurs'),
   'accueil : dernière séance = la plus récente': accueil.includes('mercredi 28 octobre') && !accueil.includes('30 septembre'),
   'aucune erreur hors alertes d\u2019import': errors.filter((e) => !e.includes('séance(s) ajoutée(s)')).length === 0,

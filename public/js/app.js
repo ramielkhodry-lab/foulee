@@ -155,27 +155,6 @@ function weekTotals(history, monday) {
   };
 }
 
-// Séances de la semaine : faites / prévues (faites + encore au programme d'ici dimanche).
-function weekGoal(history, plan) {
-  const monday = mondayOf(today());
-  const sunday = addDays(monday, 6);
-  const done = history.filter((h) => { const d = String(h.date).slice(0, 10); return d >= monday && d <= sunday; }).length;
-  const left = plan.filter((p) => p.sport !== 'repos' && p.date <= sunday).length;
-  return { done, goal: done + left };
-}
-
-function ring(done, goal) {
-  const r = 50;
-  const c = 2 * Math.PI * r;
-  const frac = goal ? Math.min(1, done / goal) : 0;
-  return `
-    <svg class="ring" viewBox="0 0 120 120" aria-hidden="true">
-      <defs><linearGradient id="ringg" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#E6FF8A"/><stop offset="1" stop-color="#9BE000"/></linearGradient></defs>
-      <circle cx="60" cy="60" r="${r}" class="ring-bg"/>
-      ${frac ? `<circle cx="60" cy="60" r="${r}" class="ring-fg" stroke="url(#ringg)" stroke-dasharray="${(frac * c).toFixed(1)} ${c.toFixed(1)}"/>` : ''}
-    </svg>`;
-}
-
 // Calendrier : 2 semaines passées → 2 à venir, une semaine par écran, chaque jour se touche.
 function weekStrip(history, plan, sel) {
   const t = today();
@@ -200,12 +179,107 @@ function dayPanel(history, plan, sel) {
       <div class="row"><button data-manual="natation" data-mdate="${sel}" class="btn-ghost" style="color:var(--swim)">+ Natation</button><button data-manual="course" data-mdate="${sel}" class="btn-ghost" style="color:var(--run)">+ Course</button></div></section>`;
   }
   const p = plan.find((x) => x.date === sel);
-  const label = sel === t ? "Aujourd'hui" : dateLabel(sel);
-  if (p && p.sport !== 'repos') return todayHero(p);
+  if (p && p.sport !== 'repos') return sessionCard(p);
   const doneToday = sel === t ? history.filter((h) => String(h.date).slice(0, 10) === sel) : [];
   if (doneToday.length) return `<h3 style="margin-top:0">Aujourd'hui</h3><div class="list">${doneToday.map((h) => historyRow(h, true)).join('')}</div>`;
   const inPlan = sel <= addDays(t, 13);
-  return `<section class="hero rest"><p class="eyebrow">${label}</p><p class="hero-num">Repos</p><p class="muted">${p ? esc(p.reason) : inPlan ? "Le repos fait partie de l'entraînement : c'est là que le corps progresse." : 'Programme pas encore calculé : il se construit 2 semaines à l\'avance, selon tes bilans.'}</p></section>`;
+  return `
+    <section class="day-card repos">
+      <div class="stripes" aria-hidden="true"></div>
+      <p class="day-kicker">${sel === t ? 'Ta journée' : dateLabel(sel)}</p>
+      <h2 class="day-title">Repos</h2>
+      <p class="day-sub">${p ? esc(p.reason) : inPlan ? "C'est là que le corps progresse" : 'Programme pas encore calculé'}</p>
+      ${inPlan ? '' : '<p class="muted small" style="position:relative">Il se construit 2 semaines à l\'avance, selon tes bilans.</p>'}
+    </section>`;
+}
+
+const FACT_ICONS = {
+  temps: '<circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/>',
+  effort: '<path d="M2 12h4l2-5 4 10 2-5h8"/>',
+  niveau: '<path d="M5 20v-5M10 20v-9M15 20v-13M20 20V4"/>',
+};
+const fact = (k, text) => `<li><svg viewBox="0 0 24 24">${FACT_ICONS[k]}</svg>${text}</li>`;
+
+// Séance du jour choisi, façon affiche : titre géant, trois repères, un seul bouton.
+function sessionCard(p) {
+  const isToday = p.date === today();
+  const kicker = isToday ? 'Ta séance du jour' : `Prévue ${dateLabel(p.date)}`;
+  if (p.sport === 'natation') {
+    return `
+      <section class="day-card natation">
+        <div class="stripes" aria-hidden="true"></div>
+        <p class="day-kicker">${kicker}</p>
+        <h2 class="day-title">Natation</h2>
+        <p class="day-sub">${p.longueurs} longueurs · ${p.distance} m</p>
+        <ul class="day-facts">
+          ${fact('temps', `Bassin de ${p.bassin} m`)}
+          ${fact('effort', 'Crawl, brasse et dos en alternance')}
+          ${fact('niveau', 'Pauses de 30 s entre les blocs')}
+        </ul>
+        ${isToday ? '<button class="cta swim" data-logplan="natation"><span>Noter ma séance</span><i>›</i></button>' : ''}
+        <button class="day-link" data-tab="programme">Le détail longueur par longueur ›</button>
+      </section>`;
+  }
+  const mins = Math.round(total(p.steps) / 60);
+  const runs = p.steps.filter((s) => KINDS[s.kind].effort === 'course');
+  const runText = runs.length === 1 ? `${minutesLabel(runs[0].duration)} de course sans t'arrêter` : `${runs.length} × ${minutesLabel(runs[0].duration)} de course, marche entre`;
+  return `
+    <section class="day-card course">
+      <div class="stripes" aria-hidden="true"></div>
+      <p class="day-kicker">${kicker}</p>
+      <h2 class="day-title">Course</h2>
+      <p class="day-sub">Palier ${p.level}/12 · ${runs.length === 1 ? 'continu' : 'marche-course'}</p>
+      <ul class="day-facts">
+        ${fact('temps', `${mins} min, échauffement compris`)}
+        ${fact('effort', runText)}
+        ${fact('niveau', 'Allure où tu peux encore parler')}
+      </ul>
+      ${isToday
+        ? `<button class="cta" data-startplan="${esc(p.date)}"><span>Démarrer ma séance</span><i>›</i></button>
+           <button class="day-link" data-logplan="course">Faite sans l'app : la noter ›</button>`
+        : `<button class="cta ghost" data-startplan="${esc(p.date)}"><span>La faire maintenant</span><i>›</i></button>`}
+    </section>`;
+}
+
+// « Mes indicateurs » : la semaine en cours comparée à la précédente.
+function miniBars(vals, cls) {
+  const max = Math.max(...vals) || 1;
+  return `<span class="mini-bars ${cls}">${vals.map((v, i) => `<i class="${i === vals.length - 1 ? 'cur' : ''}" style="height:${Math.max(12, (v / max) * 100)}%"></i>`).join('')}</span>`;
+}
+function spark(vals) {
+  if (vals.length < 2) return '';
+  const max = Math.max(...vals);
+  const min = Math.min(...vals);
+  const pts = vals.map((v, i) => `${(i / (vals.length - 1)) * 60},${4 + (max === min ? 10 : ((v - min) / (max - min)) * 20)}`).join(' ');
+  return `<svg class="spark" viewBox="0 0 60 28" aria-hidden="true"><polyline points="${pts}"/></svg>`;
+}
+function pct(cur, prev) {
+  if (!prev) return cur ? '<em class="up">nouveau</em>' : '<em>–</em>';
+  const v = Math.round(((cur - prev) / prev) * 100);
+  return `<em class="${v > 0 ? 'up' : ''}">${v > 0 ? '+' : ''}${v} %</em>`;
+}
+function indicators(history) {
+  const monday = mondayOf(today());
+  const weeks = Array.from({ length: 5 }, (_, i) => addDays(monday, (i - 4) * 7));
+  const km = weeks.map((w) => weekTotals(history, w).km);
+  const time = weeks.map((w) => {
+    const end = addDays(w, 7);
+    return history.filter((h) => { const d = String(h.date).slice(0, 10); return d >= w && d < end; }).reduce((a, h) => a + (h.elapsedSec || 0), 0);
+  });
+  const t = time.at(-1);
+  // Allure : les dernières courses mesurées (marche comprise), de la plus ancienne à la plus récente.
+  const paces = history.filter((h) => sportOf(h) === 'course')
+    .map((h) => ({ d: String(h.date), v: h.allureSecKm || (h.distanceKm && h.elapsedSec && !h.distanceEstimee ? h.elapsedSec / h.distanceKm : 0) }))
+    .filter((x) => x.v).sort((a, b) => a.d.localeCompare(b.d)).slice(-6).map((x) => x.v);
+  const lastPace = paces.at(-1);
+  const gain = paces.length > 1 ? Math.round(paces.at(-2) - lastPace) : null;
+  return `
+    <div class="ind-head"><h3>Mes indicateurs</h3><button class="day-link" data-tab="progression">Voir tout ›</button></div>
+    <div class="ind">
+      <div><span class="ind-label">Semaine</span><b>${fmtKm(km.at(-1))}<small>km</small></b><span class="ind-foot">${miniBars(km, 'course')}${pct(km.at(-1), km.at(-2))}</span></div>
+      <div><span class="ind-label">Temps d'activité</span><b>${t >= 3600 ? `${Math.floor(t / 3600)}<small>h</small>` : ''}${Math.round((t % 3600) / 60)}<small>min</small></b><span class="ind-foot">${miniBars(time, 'neutral')}${pct(t, time.at(-2))}</span></div>
+      <div><span class="ind-label">Dernière allure</span><b>${lastPace ? allure(lastPace).replace('/km', '') : '–'}<small>/km</small></b><span class="ind-foot">${spark(paces)}${gain === null ? '<em>–</em>' : `<em class="${gain > 0 ? 'up' : ''}">${gain > 0 ? '−' : '+'}${Math.abs(gain)} s</em>`}</span></div>
+    </div>`;
 }
 
 // Courbe des 8 dernières semaines (km de course ou mètres nagés).
@@ -539,27 +613,18 @@ const screens = {
     const resumable = live ? null : savedLive();
     const next = plan.filter((p) => p.sport !== 'repos' && p.date !== today()).slice(0, 3);
     const prenom = d.profile.prenom || account.session()?.user?.prenom || '';
-    const wk = weekTotals(d.history, mondayOf(today()));
-    const goal = weekGoal(d.history, plan);
     return `
-      <header class="top">
-        <div><p class="eyebrow">${new Date().toLocaleDateString('fr-FR', { weekday: 'long', day: 'numeric', month: 'long' })}</p>
-        <h1>${prenom ? `Salut ${esc(prenom)}` : 'Salut'}</h1></div>
-        <button class="avatar sm" data-tab="profil" aria-label="Profil">${esc((prenom[0] || '?').toUpperCase())}</button>
+      <header class="hello">
+        <button class="avatar" data-tab="profil" aria-label="Profil">${esc((prenom[0] || '?').toUpperCase())}</button>
+        <div><span>Bonjour</span><b>${esc(prenom) || 'à toi'}</b></div>
       </header>
+      <p class="motto">Discipline aujourd'hui<br>Progrès demain</p>
       ${installed ? '' : '<div class="notice"><strong>Installe Foulée :</strong> dans Safari, touche Partager puis « Sur l\'écran d\'accueil », et ouvre l\'app depuis son icône. Le guidage est plus fiable ainsi.</div>'}
       ${resumable ? `<div class="alert">Séance interrompue : « ${esc(resumable.session.name)} », arrêtée à ${mmss(resumable.pos)}.
         <div class="row" style="margin-top:10px"><button class="btn-dark" data-resume>Reprendre</button><button data-dropresume>Abandonner</button></div></div>` : ''}
-      <section class="goal">
-        <div class="goal-ring">${ring(goal.done, goal.goal)}<div><b>${goal.done}<small>/${goal.goal}</small></b><span>séances</span></div></div>
-        <div class="goal-side">
-          <p class="eyebrow" style="margin:0 0 6px">Cette semaine</p>
-          <p class="kpi course">${fmtKm(wk.km)}<small>km courus</small></p>
-          <p class="kpi natation">${wk.m}<small>m nagés</small></p>
-        </div>
-      </section>
       ${weekStrip(d.history, plan, selDay)}
       ${dayPanel(d.history, plan, selDay)}
+      ${indicators(d.history)}
       ${next.length ? `<h3>Ensuite</h3><div class="list">${next.map((p) => planRow(p, !todayItem?.steps && p === next.find((x) => x.sport === 'course'))).join('')}</div>` : ''}
       ${last ? `<h3>Dernière séance</h3><div class="list">${historyRow(last)}</div>` : ''}`;
   },

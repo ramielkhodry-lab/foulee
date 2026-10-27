@@ -1,3 +1,7 @@
+@font-face { font-family: "Barlow Condensed"; font-weight: 600; font-style: normal; font-display: swap; src: url("fonts/barlow-condensed-latin-600-normal.woff2") format("woff2"); }
+@font-face { font-family: "Barlow Condensed"; font-weight: 700; font-style: italic; font-display: swap; src: url("fonts/barlow-condensed-latin-700-italic.woff2") format("woff2"); }
+@font-face { font-family: "Barlow Condensed"; font-weight: 800; font-style: italic; font-display: swap; src: url("fonts/barlow-condensed-latin-800-italic.woff2") format("woff2"); }
+
 /* Thème unique, sombre : noir profond (économe sur écran OLED, lisible en plein soleil).
    Vert électrique = la course et les actions. Bleu = la natation, et rien d'autre. */
 :root {
@@ -14,6 +18,7 @@
   --on-accent: #0A0A0A;
   --danger: #FF5A4E;
   --radius: 20px;
+  --display: "Barlow Condensed", "Arial Narrow", sans-serif;
   color-scheme: dark;
 }
 * { box-sizing: border-box; }
@@ -269,3 +274,53 @@ details.hist[open] .li { border-bottom: 0; }
 .map.leaflet-container { display: block; background: #0E0E10; font: inherit; }
 .map .leaflet-control-attribution { background: rgba(0, 0, 0, 0.6); color: #8A8A90; font-size: 10px; }
 .map .leaflet-control-attribution a { color: #B0B0B6; }
+
+/* --- Accueil façon affiche sportive : typo condensée italique, bandes obliques. --- */
+.hello { display: flex; align-items: center; gap: 14px; margin: 10px 0 14px; }
+.hello .avatar { width: 58px; height: 58px; font-size: 26px; min-height: 0; padding: 0; border: 2px solid var(--run); background: var(--surface-2); color: var(--run); font-family: var(--display); font-style: italic; font-weight: 800; }
+.hello span { display: block; font-family: var(--display); font-weight: 600; font-size: 20px; color: var(--muted); line-height: 1; }
+.hello b { display: block; font-family: var(--display); font-style: italic; font-weight: 800; font-size: 40px; line-height: 1; letter-spacing: 0.01em; }
+.motto { border-left: 3px solid var(--run); padding: 2px 0 2px 12px; margin: 0 0 18px; font-family: var(--display); font-weight: 600; font-size: 13px; letter-spacing: 0.28em; text-transform: uppercase; color: #CFCFD4; line-height: 1.5; }
+
+.day-card { position: relative; overflow: hidden; border-radius: 24px; padding: 22px 20px 20px; margin: 0 0 22px; background: linear-gradient(160deg, #18181B, #0B0B0C 70%); box-shadow: inset 0 0 0 1px var(--line); }
+.day-card > *:not(.stripes) { position: relative; }
+.stripes { position: absolute; top: -20%; right: -18%; width: 78%; height: 140%; transform: skewX(-24deg);
+  background: repeating-linear-gradient(90deg, transparent 0 26px, var(--run) 26px 40px, transparent 40px 58px, rgba(200, 255, 46, 0.35) 58px 64px, transparent 64px 96px);
+  -webkit-mask-image: linear-gradient(100deg, transparent 8%, rgba(0, 0, 0, 0.55) 45%, #000 85%); mask-image: linear-gradient(100deg, transparent 8%, rgba(0, 0, 0, 0.55) 45%, #000 85%); opacity: 0.55; }
+.day-card.natation .stripes { background: repeating-linear-gradient(90deg, transparent 0 26px, var(--swim) 26px 40px, transparent 40px 58px, rgba(47, 140, 255, 0.4) 58px 64px, transparent 64px 96px); opacity: 0.7; }
+.day-card.repos .stripes { background: repeating-linear-gradient(90deg, transparent 0 26px, #3A3A40 26px 40px, transparent 40px 96px); }
+.day-kicker { font-size: 16px; color: #D8D8DC; margin: 0; }
+.day-title { font-family: var(--display); font-style: italic; font-weight: 800; font-size: 76px; line-height: 0.9; text-transform: uppercase; letter-spacing: 0.005em; margin: 6px 0 2px; text-shadow: 0 2px 18px rgba(0, 0, 0, 0.6); }
+.day-sub { font-family: var(--display); font-style: italic; font-weight: 700; font-size: 21px; text-transform: uppercase; letter-spacing: 0.08em; margin: 0 0 16px; }
+.day-card.course .day-sub { color: var(--run); }
+.day-card.natation .day-sub { color: #8EC0FF; }
+.day-facts { list-style: none; padding: 0; margin: 0 0 18px; }
+.day-facts li { display: flex; align-items: center; gap: 10px; font-size: 16px; font-weight: 600; margin: 0 0 10px; text-shadow: 0 1px 8px rgba(0, 0, 0, 0.8); }
+.day-facts svg { width: 22px; height: 22px; flex: none; fill: none; stroke: var(--run); stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }
+.day-card.natation .day-facts svg { stroke: var(--swim); }
+.cta { display: flex; align-items: center; justify-content: center; gap: 14px; width: 100%; min-height: 58px; border: 0; border-radius: 10px; transform: skewX(-8deg); background: var(--run); color: var(--on-accent); box-shadow: 0 8px 30px rgba(200, 255, 46, 0.25); }
+.cta span, .cta i { transform: skewX(8deg); font-family: var(--display); font-style: italic; font-weight: 800; font-size: 21px; letter-spacing: 0.14em; text-transform: uppercase; }
+.cta i { font-size: 28px; line-height: 1; }
+.cta.swim { background: var(--swim); color: #fff; box-shadow: 0 8px 30px rgba(47, 140, 255, 0.3); }
+.cta.ghost { background: transparent; color: var(--run); box-shadow: inset 0 0 0 2px var(--run); }
+.day-link { background: transparent; border: 0; min-height: 40px; padding: 8px 0 0; font-size: 14px; color: var(--muted); font-weight: 600; }
+.day-card .day-link { display: block; margin: 6px auto 0; }
+
+.ind-head { display: flex; justify-content: space-between; align-items: baseline; }
+.ind-head h3 { margin: 0 0 10px; color: var(--ink); font-family: var(--display); font-weight: 600; font-size: 16px; letter-spacing: 0.22em; }
+.ind-head .day-link { padding: 0; font-family: var(--display); font-weight: 600; letter-spacing: 0.16em; text-transform: uppercase; font-size: 13px; }
+.ind { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; margin: 0 0 6px; }
+.ind > div { background: var(--surface); border-radius: 16px; padding: 14px 10px 12px; min-width: 0; box-shadow: inset 0 0 0 1px var(--line); }
+.ind-label { display: block; font-family: var(--display); font-weight: 600; font-size: 12px; letter-spacing: 0.14em; text-transform: uppercase; color: #CFCFD4; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.ind b { display: block; font-family: var(--display); font-style: italic; font-weight: 800; font-size: 40px; line-height: 1.05; margin: 8px 0 10px; white-space: nowrap; }
+.ind b small { font-size: 17px; font-weight: 700; color: #D8D8DC; margin: 0 4px 0 3px; }
+.ind-foot { display: flex; align-items: center; gap: 8px; height: 24px; }
+.ind-foot em { font-style: normal; font-size: 13px; font-weight: 700; color: var(--muted); white-space: nowrap; }
+.ind-foot em.up { color: var(--run); }
+.mini-bars { display: flex; align-items: flex-end; gap: 3px; height: 24px; }
+.mini-bars i { display: block; width: 5px; border-radius: 2px; background: rgba(200, 255, 46, 0.35); }
+.mini-bars i.cur { background: var(--run); }
+.mini-bars.neutral i { background: rgba(255, 255, 255, 0.3); }
+.mini-bars.neutral i.cur { background: var(--run); }
+.spark { width: 46px; height: 24px; overflow: visible; }
+.spark polyline { fill: none; stroke: var(--run); stroke-width: 2.5; stroke-linecap: round; stroke-linejoin: round; }
