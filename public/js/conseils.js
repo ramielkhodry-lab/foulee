@@ -50,3 +50,7 @@ export function conseils(h) {
   if (!out.length) out.push('Rien à corriger : refais la même chose, au même rythme. C’est la régularité qui fait progresser.');
   return out.slice(0, 4);
 }
+
+// Conseils affichés pour un bilan : ceux de l'IA s'ils existent, sinon ceux des règles.
+export const tipsOf = (h) => (h?.conseilsIA?.conseils?.length ? h.conseilsIA.conseils : conseils(h));
+export const tipsSource = (h) => (h?.conseilsIA?.conseils?.length ? 'ia' : 'regles');

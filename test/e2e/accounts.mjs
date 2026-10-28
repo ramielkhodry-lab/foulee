@@ -4,7 +4,7 @@
 import { createRequire } from 'node:module';
 import { spawn, execFileSync } from 'node:child_process';
 import { createServer } from 'node:http';
-import { readFile, rm } from 'node:fs/promises';
+import { readFile, rm, writeFile } from 'node:fs/promises';
 import { join, extname } from 'node:path';
 
 const { chromium } = createRequire(import.meta.url)('playwright');
@@ -17,8 +17,12 @@ const API = `http://localhost:${API_PORT}`;
 
 // Base locale neuve à chaque exécution.
 await rm(join(workerDir, '.wrangler/state'), { recursive: true, force: true });
-execFileSync('npx', ['wrangler', 'd1', 'migrations', 'apply', 'foulee', '--local'], { cwd: workerDir, stdio: 'ignore' });
-const wrangler = spawn('npx', ['wrangler', 'dev', '--port', String(API_PORT), '--var', `APP_ORIGIN:${APP}`, '--var', 'RP_ID:localhost', '--var', 'APP_PATH:/'], { cwd: workerDir, stdio: ['ignore', 'pipe', 'pipe'], detached: true });
+// Workers AI n'existe qu'à distance : la copie de test de la configuration s'en passe
+// (la route des conseils répond alors « IA indisponible »).
+const toml = (await readFile(join(workerDir, 'wrangler.toml'), 'utf8')).replace(/\n# Workers AI[^\n]*\n\[ai\]\nbinding = "AI"\n?/, '\n');
+await writeFile(join(workerDir, 'wrangler.test.toml'), toml);
+execFileSync('npx', ['wrangler', 'd1', 'migrations', 'apply', 'foulee', '--local', '--config', 'wrangler.test.toml'], { cwd: workerDir, stdio: 'ignore' });
+const wrangler = spawn('npx', ['wrangler', 'dev', '--config', 'wrangler.test.toml', '--port', String(API_PORT), '--var', `APP_ORIGIN:${APP}`, '--var', 'RP_ID:localhost', '--var', 'APP_PATH:/'], { cwd: workerDir, stdio: ['ignore', 'pipe', 'pipe'], detached: true });
 // npx lance wrangler qui lance workerd : on arrête tout le groupe de processus.
 const stopWrangler = () => { try { process.kill(-wrangler.pid, 'SIGTERM'); } catch {} };
 process.on('exit', stopWrangler);

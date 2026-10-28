@@ -34,14 +34,14 @@ async function api(path, { method = 'GET', body, auth = false } = {}) {
   try {
     res = await fetch(`${API_URL}${path}`, { method, headers, body: body === undefined ? undefined : JSON.stringify(body) });
   } catch {
-    throw new Error('Serveur injoignable : vérifie ta connexion.');
+    throw Object.assign(new Error('Serveur injoignable : vérifie ta connexion.'), { code: 'horsligne' });
   }
   const data = await res.json().catch(() => ({}));
   if (res.status === 401 && auth) {
     write(TOKEN_KEY, null);
     write(USER_KEY, null);
   }
-  if (!res.ok) throw new Error(data.error || `Erreur ${res.status}`);
+  if (!res.ok) throw Object.assign(new Error(data.error || `Erreur ${res.status}`), { status: res.status, code: data.code, resetAt: data.resetAt });
   return data;
 }
 
@@ -93,6 +93,7 @@ export const rename = (prenom) => api('/me', { method: 'PUT', body: { prenom }, 
 export const createInvite = (kind = 'join') => api('/me/invites', { method: 'POST', body: { kind }, auth: true });
 export const listInvites = () => api('/me/invites', { auth: true });
 export const pullData = () => api('/me/data', { auth: true });
+export const askConseils = (input) => api('/me/conseils', { method: 'POST', body: input, auth: true });
 export const pushData = (data) => api('/me/data', { method: 'PUT', body: { data }, auth: true });
 
 // Fusion sans perte : séances réalisées et séances perso réunies par identifiant.

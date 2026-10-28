@@ -401,3 +401,6 @@ details.hist[open] .li { border-bottom: 0; }
 .conseils li::before { content: counter(c); position: absolute; left: 0; top: -2px; font-family: var(--display); font-style: italic; font-weight: 800; font-size: 26px; color: var(--run); }
 .conseils.natation li::before { color: var(--swim); }
 .conseils.muscu li::before { color: var(--muscu); }
+.ia-wait, .ia-ok { font-size: 14px; color: var(--muted); margin: 0 0 12px; }
+.ia-ok { color: var(--run); font-weight: 700; }
+.alert.ia-fail { margin-bottom: 14px; }

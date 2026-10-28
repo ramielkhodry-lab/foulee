@@ -3,7 +3,7 @@
 // simplement la suite. Les règles sont volontairement simples et explicables.
 
 import { muscuPlan, nextSeance, followingSeance } from './muscu.js';
-import { conseils, breathingIssue } from './conseils.js';
+import { tipsOf, tipsSource, breathingIssue } from './conseils.js';
 
 // Le programme se calcule à la volée sur cet horizon (12 semaines) : il n'a pas de fin,
 // la fenêtre avance avec les jours.
@@ -213,8 +213,8 @@ export function upcoming(history, settings, from, days = 14, q = null) {
   let swimReason = swim.reason;
   // Conseils du dernier bilan de chaque sport, affichés sur la prochaine séance de ce sport.
   const lastOf = (sport) => history.filter((h) => (h.sport || 'course') === sport).sort((a, b) => String(a.date).localeCompare(String(b.date))).at(-1);
-  const tips = { course: conseils(lastOf('course')), natation: conseils(lastOf('natation')), muscu: conseils(lastOf('muscu')) };
-  const takeTips = (sport) => { const t = tips[sport]; tips[sport] = []; return t; };
+  const tips = Object.fromEntries(['course', 'natation', 'muscu'].map((sp) => [sp, { tips: tipsOf(lastOf(sp)), tipsSource: tipsSource(lastOf(sp)) }]));
+  const takeTips = (sport) => { const t = tips[sport]; tips[sport] = { tips: [] }; return t; };
   const swimFocus = breathingIssue(lastOf('natation')) ? 'respiration' : null;
   for (let i = 0; i < days; i++) {
     const date = addDays(from, i);
@@ -225,7 +225,7 @@ export function upcoming(history, settings, from, days = 14, q = null) {
         out.push({ date, sport: 'repos', reason: 'Course prévue décalée : il faut un jour de repos entre deux courses.' });
       } else {
         const lvl = LEVELS[level - 1];
-        out.push({ date, sport: 'course', level, max: opts.maxLevel, title: lvl.label, steps: levelSteps(level), reason, tips: takeTips('course') });
+        out.push({ date, sport: 'course', level, max: opts.maxLevel, title: lvl.label, steps: levelSteps(level), reason, ...takeTips('course') });
         runPlaced = date;
         // Hypothèse pour les séances suivantes : la séance se passe bien (difficulté 3).
         reason = 'Prévu si la séance précédente se passe bien. Recalculé après ton bilan.';
@@ -234,12 +234,12 @@ export function upcoming(history, settings, from, days = 14, q = null) {
         history = sim;
       }
     } else if (joursNatation.includes(wd) && !done.has(`${date}|natation`)) {
-      out.push({ date, sport: 'natation', longueurs: swimLongueurs, bassin: swim.bassin, distance: swimLongueurs * swim.bassin, plan: swimPlan(swimLongueurs, swimFocus), focus: swimFocus, reason: swimReason, tips: takeTips('natation') });
+      out.push({ date, sport: 'natation', longueurs: swimLongueurs, bassin: swim.bassin, distance: swimLongueurs * swim.bassin, plan: swimPlan(swimLongueurs, swimFocus), focus: swimFocus, reason: swimReason, ...takeTips('natation') });
       swimLongueurs = Math.min(opts.maxLongueurs, swimLongueurs + 2);
       swimReason = 'Prévu si la séance précédente se passe bien. Recalculé après ton bilan.';
     } else if (joursMuscu.includes(wd) && !done.has(`${date}|muscu`)) {
       const m = muscuPlan(seance, history, q || {}, settings.muscuChoix || {});
-      out.push({ date, sport: 'muscu', ...m, reason: firstMuscu.reason ?? m.reason, tips: takeTips('muscu') });
+      out.push({ date, sport: 'muscu', ...m, reason: firstMuscu.reason ?? m.reason, ...takeTips('muscu') });
       firstMuscu.reason = 'Charges recalculées après chaque séance notée.';
       seance = followingSeance(seance, joursMuscu.length);
     }
@@ -252,7 +252,7 @@ export function upcoming(history, settings, from, days = 14, q = null) {
 export function afterBilan(history, entry, settings, from, q = null) {
   const sport = entry.sport || 'course';
   const next = upcoming(history, settings, from, HORIZON, q).find((p) => p.sport === sport) || null;
-  const out = { sport, next, conseils: conseils(entry), titre: 'Bilan enregistré', detail: next?.reason || '' };
+  const out = { sport, entryId: entry.id, next, conseils: tipsOf(entry), source: tipsSource(entry), titre: 'Bilan enregistré', detail: next?.reason || '' };
   if (!next) return out;
   if (sport === 'course') {
     const was = runLevel(entry);

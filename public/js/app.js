@@ -4,6 +4,7 @@ import { load, update, uid, PRESETS, onSave, replace, empty } from './store.js';
 import * as account from './account.js';
 import { createTrack, addPoint, markGap, summary, encodeTrace, decodeTrace } from './gps.js';
 import { drawTrace } from './map.js';
+import { iaInput, pendingIA, failedIA, failureMessage } from './ia.js';
 import { GOALS_MUSCU, LIEUX, NIVEAUX_MUSCU, MUSCLES, alternatives, byId, muscuPlan, nextSeance, nextLoad, tonnage } from './muscu.js';
 import { upcoming, planOptions, nextRunLevel, runLevel, afterBilan, HORIZON, GOALS_RUN, START_RUN, GOALS_SWIM, START_SWIM, LEVELS } from './plan.js';
 
@@ -58,7 +59,7 @@ const shortDate = (d) => new Date(`${String(d).slice(0, 10)}T12:00`).toLocaleDat
 const whyTips = (p) => `
   <div class="why-tips ${p.sport}">
     <p>${esc(p.reason)}</p>
-    ${p.tips?.length ? `<p class="tips-head">Conseils de ton dernier bilan</p><ul>${p.tips.slice(0, 3).map((t) => `<li>${esc(t)}</li>`).join('')}</ul>` : ''}
+    ${p.tips?.length ? `<p class="tips-head">${p.tipsSource === 'ia' ? 'Conseils de l’IA sur ton dernier bilan' : 'Conseils de ton dernier bilan · règles'}</p><ul>${p.tips.slice(0, 3).map((t) => `<li>${esc(t)}</li>`).join('')}</ul>` : ''}
   </div>`;
 
 // Séance du jour : le seul bloc mis en vedette de l'accueil et du programme.
@@ -805,6 +806,7 @@ const screens = {
       </header>
       <p class="motto">Discipline aujourd'hui<br>Progrès demain</p>
       ${d.profile.questionnaire ? '' : questionnaireBanner()}
+      ${iaAlert(d.history)}
       ${installed ? '' : '<div class="notice"><strong>Installe Foulée :</strong> dans Safari, touche Partager puis « Sur l\'écran d\'accueil », et ouvre l\'app depuis son icône. Le guidage est plus fiable ainsi.</div>'}
       ${resumable ? `<div class="alert">Séance interrompue : « ${esc(resumable.session.name)} », arrêtée à ${mmss(resumable.pos)}.
         <div class="row" style="margin-top:10px"><button class="btn-dark" data-resume>Reprendre</button><button data-dropresume>Abandonner</button></div></div>` : ''}
@@ -966,9 +968,14 @@ const screens = {
         <p class="muted small" style="margin:0">${esc(r.detail)}</p>
       </section>
       <h3>Pour la prochaine séance</h3>
+      ${r.ia === 'loading' ? '<p class="ia-wait">L’IA lit ton ressenti… En attendant, les conseils des règles :</p>' : ''}
+      ${r.ia?.code ? `<div class="alert ia-fail"><strong>Conseils de secours (règles).</strong> ${esc(failureMessage(r.ia))}</div>` : ''}
+      ${r.source === 'ia' ? '<p class="ia-ok">Conseils de l’IA, à partir de ton ressenti</p>' : ''}
       <ul class="conseils ${r.sport}">${r.conseils.map((t) => `<li>${esc(t)}</li>`).join('')}</ul>
       ${r.next ? `<h3>Prochaine ${r.sport === 'natation' ? 'natation' : r.sport === 'muscu' ? 'muscu' : 'course'}</h3><div class="list">${planRow(r.next)}</div>` : ''}
-      <p class="muted small">Règles fixes de Foulée, pas un coach : difficulté, essoufflement, fatigue, douleur et les mots de ton ressenti décident. Tes conseils restent affichés sur la carte de la prochaine séance.</p>
+      <p class="muted small">${r.source === 'ia'
+        ? 'La suite du programme est décidée par les règles de Foulée. Les conseils sont écrits par une IA gratuite (Mistral, via Cloudflare) : elle peut se tromper, ce n’est pas un coach ni un médecin.'
+        : 'Règles fixes de Foulée, pas un coach : difficulté, essoufflement, fatigue, douleur et les mots de ton ressenti décident.'} Tes conseils restent affichés sur la carte de la prochaine séance.</p>
       <div class="row" style="margin-top:14px"><button data-tab="progression">Mon historique</button><button class="btn-dark" data-tab="programme">Mon programme</button></div>`;
   },
 
@@ -1307,6 +1314,55 @@ function showSuite(entry) {
   const d = load();
   suite = afterBilan(d.history, entry, d.settings, today(), d.profile.questionnaire);
   go('suite');
+  askIA(entry.id);
+}
+
+// --- Conseils de l'IA ---------------------------------------------------------
+
+// Alerte de l'accueil : l'IA n'a pas lu un bilan récent, pourquoi, et quand elle reprend.
+function iaAlert(history) {
+  const failed = failedIA(history);
+  if (!failed.length) return '';
+  const h = failed[0];
+  return `<div class="alert ia-fail"><strong>IA indisponible : conseils de secours.</strong> ${esc(failureMessage(h.iaEchec))}
+    <div class="row" style="margin-top:10px"><button class="btn-dark" data-retryia="${esc(h.id)}">Réessayer maintenant</button></div></div>`;
+}
+
+const asking = new Set();
+const OBJECTIFS = { '30min': 'courir 30 min sans s’arrêter', '5km': 'courir 5 km', '10km': 'réussir un 10 km' };
+
+// Fait lire un bilan par l'IA. Réussite : conseils gardés sur la séance (et synchronisés).
+// Échec : la raison et l'heure de reprise sont gardées pour l'alerte ; les règles restent.
+async function askIA(id, { force = false } = {}) {
+  if (asking.has(id)) return;
+  const d = load();
+  const entry = d.history.find((h) => h.id === id);
+  if (!entry || (entry.conseilsIA && !force)) return;
+  const setState = (ia) => { if (suite?.entryId === id) { suite.ia = ia; if (current === 'suite') render(); } };
+  if (!account.serverEnabled()) return; // pas de serveur : les règles seules, sans alerte
+  if (!account.session()) { setState({ code: 'nonconnecte' }); return; }
+  asking.add(id);
+  setState('loading');
+  const q = d.profile.questionnaire;
+  const ctx = suite?.entryId === id ? suite : afterBilan(d.history, entry, d.settings, today(), q);
+  try {
+    const res = await account.askConseils(iaInput(entry, d.history, ctx, OBJECTIFS[q?.objectifCourse] || ''));
+    update((dd) => { const h = dd.history.find((x) => x.id === id); if (h) { h.conseilsIA = res; delete h.iaEchec; } });
+    if (suite?.entryId === id) Object.assign(suite, { conseils: res.conseils, source: 'ia', ia: null });
+  } catch (e) {
+    const fail = { code: e.code || (e.status === 401 ? 'nonconnecte' : 'indisponible'), resetAt: e.resetAt || null, at: Date.now() };
+    update((dd) => { const h = dd.history.find((x) => x.id === id); if (h) h.iaEchec = fail; });
+    if (suite?.entryId === id) suite.ia = fail;
+  } finally {
+    asking.delete(id);
+  }
+  if (['suite', 'accueil', 'programme'].includes(current)) render();
+}
+
+// À l'ouverture : les bilans récents restés sans conseils de l'IA, une fois l'heure de reprise passée.
+function retryIA() {
+  if (!account.serverEnabled() || !account.session()) return;
+  for (const h of pendingIA(load().history)) askIA(h.id);
 }
 
 const findSession = (id) => load().sessions.find((s) => s.id === id);
@@ -1520,6 +1576,8 @@ document.addEventListener('click', (e) => {
     renderTouchLock();
   } else if ('finish' in ds) {
     go('bilan');
+  } else if (ds.retryia) {
+    askIA(ds.retryia, { force: true });
   } else if ('moreplan' in ds) {
     progDays = Math.min(HORIZON, progDays + 14);
     render();
@@ -1779,7 +1837,8 @@ if (inviteParam && account.serverEnabled()) {
     .finally(() => render());
 }
 refreshAccount();
-syncNow();
+syncNow().then(retryIA);
+document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'visible' && current !== 'live') retryIA(); });
 
 if ('serviceWorker' in navigator) navigator.serviceWorker.register('sw.js').catch(() => {});
 navigator.storage?.persist?.().catch(() => {});
