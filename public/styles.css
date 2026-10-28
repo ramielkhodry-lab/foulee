@@ -3,7 +3,7 @@
 @font-face { font-family: "Barlow Condensed"; font-weight: 800; font-style: italic; font-display: swap; src: url("fonts/barlow-condensed-latin-800-italic.woff2") format("woff2"); }
 
 /* Thème unique, sombre : noir profond (économe sur écran OLED, lisible en plein soleil).
-   Vert électrique = la course et les actions. Bleu = la natation, et rien d'autre. */
+   Vert électrique = la course et les actions. Bleu = la natation, orange = la musculation, et rien d'autre. */
 :root {
   --bg: #000000;
   --surface: #121214;
@@ -15,6 +15,7 @@
   --run-soft: rgba(200, 255, 46, 0.12);
   --swim: #2F8CFF;
   --swim-soft: rgba(47, 140, 255, 0.14);
+  --muscu: #FF7A1A;
   --on-accent: #0A0A0A;
   --danger: #FF5A4E;
   --radius: 20px;
@@ -252,7 +253,7 @@ details.hist[open] .li { border-bottom: 0; }
 .level-track i.on { background: var(--run); box-shadow: 0 0 8px rgba(200, 255, 46, 0.35); }
 
 /* Progression. */
-.seg { display: grid; grid-template-columns: 1fr 1fr; gap: 4px; background: var(--surface); border-radius: 14px; padding: 4px; margin: 0 0 18px; }
+.seg { display: grid; grid-auto-flow: column; grid-auto-columns: 1fr; gap: 4px; background: var(--surface); border-radius: 14px; padding: 4px; margin: 0 0 18px; }
 .seg button { min-height: 40px; padding: 0; border: 0; background: transparent; color: var(--muted); border-radius: 10px; font-size: 15px; }
 .seg button.on.course { background: var(--run); color: var(--on-accent); }
 .seg button.on.natation { background: var(--swim); color: #fff; }
@@ -333,8 +334,8 @@ details.hist[open] .li { border-bottom: 0; }
 /* Questionnaire de chaque profil : un titre affiche, des questions numérotées, un aperçu du programme. */
 .q-title { font-family: var(--display); font-style: italic; font-weight: 800; font-size: 46px; line-height: 0.95; text-transform: uppercase; letter-spacing: 0; margin: 6px 0 10px; }
 .q-num { display: inline-grid; place-items: center; width: 20px; height: 20px; border-radius: 50%; background: var(--surface-2); color: var(--ink); font-size: 11px; margin-right: 8px; vertical-align: 1px; }
-.q-sports { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
-.q-sports button { min-height: 64px; font-size: 19px; font-weight: 800; }
+.q-sports { display: grid; grid-auto-flow: column; grid-auto-columns: 1fr; gap: 8px; }
+.q-sports button { min-height: 64px; padding: 0 4px; font-size: 16px; font-weight: 800; }
 .q-sports button.on.course { background: var(--run); border-color: var(--run); color: var(--on-accent); }
 .q-sports button.on.natation { background: var(--swim); border-color: var(--swim); color: #fff; }
 .q-known { background: var(--surface); border-radius: 14px; padding: 12px 14px; margin: 0; font-size: 15px; }
@@ -351,3 +352,38 @@ details.hist[open] .li { border-bottom: 0; }
 .q-summary { list-style: none; padding: 0; margin: 0 0 12px; }
 .q-summary li { padding: 6px 0 6px 12px; border-left: 3px solid var(--run); margin: 0 0 6px; font-size: 15px; }
 .q-summary li.natation { border-color: var(--swim); }
+
+/* Musculation : orange. */
+.option.muscu .go, .days.muscu button.on, .seg button.on.muscu, .q-sports button.on.muscu, .cta.muscu { background: var(--muscu); border-color: var(--muscu); color: var(--on-accent); }
+.cta.muscu { box-shadow: 0 8px 30px rgba(255, 122, 26, 0.3); }
+.dot.muscu { border-color: var(--muscu); }
+.dot.done.muscu { background: var(--muscu); }
+.ico.muscu { background: #2A1606; color: var(--muscu); }
+.li-side.muscu, .prog.muscu .hero-num, .prog.muscu .delta.up, .records .muscu b, .q-preview b.muscu { color: var(--muscu); }
+.q-summary li.muscu { border-color: var(--muscu); }
+.days button:disabled { opacity: 0.25; }
+.day-card.muscu .stripes { background: repeating-linear-gradient(90deg, transparent 0 26px, var(--muscu) 26px 40px, transparent 40px 58px, rgba(255, 122, 26, 0.4) 58px 64px, transparent 64px 96px); opacity: 0.6; }
+.day-card.muscu .day-sub { color: #FFB07A; }
+.day-card.muscu .day-facts svg { stroke: var(--muscu); }
+.hero.muscu { background: radial-gradient(140% 100% at 100% 0%, rgba(255, 122, 26, 0.32), rgba(255, 122, 26, 0.05) 55%, transparent 75%), linear-gradient(180deg, #1D130B, #0E0B08); box-shadow: inset 0 0 0 1px rgba(255, 122, 26, 0.3); }
+.hero.muscu .hero-num { color: var(--muscu); }
+.exos { list-style: none; padding: 0; margin: 0 0 12px; counter-reset: exo; }
+.exos li { display: grid; grid-template-columns: 1fr auto; gap: 2px 12px; padding: 10px 0; border-top: 1px solid var(--line); }
+.exos li:first-child { border-top: 0; }
+.exos b { font-size: 16px; }
+.exos .dose { font-weight: 800; color: var(--muscu); white-space: nowrap; text-align: right; }
+.exos .why { grid-column: 1 / -1; font-size: 13px; color: var(--muted); }
+.exo-log { background: var(--surface); border-radius: 16px; padding: 14px; margin: 0 0 10px; }
+.exo-log h2 { font-size: 17px; margin: 0; }
+.exo-log select { margin: 8px 0; }
+.exo-log .sets { display: grid; grid-template-columns: repeat(auto-fill, minmax(62px, 1fr)); gap: 6px; margin-top: 6px; }
+.exo-log .sets label { margin: 0; font-size: 12px; color: var(--muted); font-weight: 600; text-align: center; }
+.exo-log .sets input { text-align: center; padding-left: 4px; padding-right: 4px; }
+.exo-log .kg { display: flex; align-items: center; gap: 8px; }
+.exo-log .kg input { max-width: 110px; }
+.lib summary { padding: 12px 0; font-weight: 700; border-top: 1px solid var(--line); list-style: none; display: flex; justify-content: space-between; }
+.lib summary::after { content: '›'; color: var(--muted); }
+.lib details[open] summary::after { transform: rotate(90deg); }
+.lib ul { list-style: none; padding: 0 0 8px; margin: 0; }
+.lib li { display: flex; justify-content: space-between; gap: 10px; padding: 6px 0; font-size: 15px; }
+.lib li span { color: var(--muted); font-size: 13px; white-space: nowrap; }

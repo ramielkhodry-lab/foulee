@@ -2,6 +2,8 @@
 // L'historique n'est donc jamais réécrit, et une séance manquée décale
 // simplement la suite. Les règles sont volontairement simples et explicables.
 
+import { muscuPlan, nextSeance, followingSeance } from './muscu.js';
+
 const W = (min) => ({ kind: 'marche', duration: min * 60 });
 const R = (min) => ({ kind: 'course_lente', duration: min * 60 });
 const rep = (n, run, walk) => Array.from({ length: n }, (_, i) => (i < n - 1 || walk === 0 ? [R(run), W(walk)] : [R(run)])).flat().filter((s) => s.duration > 0);
@@ -51,12 +53,14 @@ export const START_SWIM = [
   { longueurs: 24, label: '20 à 30 longueurs' },
   { longueurs: 32, label: 'Plus de 30 longueurs' },
 ];
-export const SPORTS = ['course', 'natation'];
+export const SPORTS = ['course', 'natation', 'muscu'];
+// Sans questionnaire : le programme d'origine, course + natation.
+const DEFAULT_SPORTS = ['course', 'natation'];
 
 // Options du programme tirées du questionnaire. Sans questionnaire : réglages d'origine
 // (course + natation, palier 12 maximum, 16 longueurs pour commencer, 60 au plus).
 export function planOptions(q, settings = {}) {
-  const sports = q?.sports?.length ? q.sports : SPORTS;
+  const sports = q?.sports?.length ? q.sports : DEFAULT_SPORTS;
   const bassin = q?.bassin || 25;
   return {
     sports,
@@ -68,6 +72,7 @@ export function planOptions(q, settings = {}) {
     maxLongueurs: q?.objectifNatation ? Math.max(4, Math.round(q.objectifNatation / bassin)) : 60,
     joursCourse: sports.includes('course') ? (q?.joursCourse ?? settings.joursCourse ?? [1, 5]) : [],
     joursNatation: sports.includes('natation') ? (q?.joursNatation ?? settings.joursNatation ?? [3]) : [],
+    joursMuscu: sports.includes('muscu') ? (q?.joursMuscu ?? []) : [],
   };
 }
 
@@ -174,7 +179,9 @@ function swimPlan(longueurs) {
 // Jours de la semaine : 0 = dimanche.
 export function upcoming(history, settings, from, days = 14, q = null) {
   const opts = planOptions(q, settings);
-  const { joursCourse, joursNatation } = opts;
+  const { joursCourse, joursNatation, joursMuscu } = opts;
+  let seance = joursMuscu.length ? nextSeance(history, joursMuscu.length) : null;
+  const firstMuscu = { reason: null };
   const done = new Set(history.map((h) => `${dateOnly(h.date)}|${h.sport || 'course'}`));
   const lastRun = history.filter((h) => (h.sport || 'course') === 'course').map((h) => dateOnly(h.date)).sort().at(-1);
   const run = nextRunLevel(history, opts);
@@ -206,6 +213,11 @@ export function upcoming(history, settings, from, days = 14, q = null) {
       out.push({ date, sport: 'natation', longueurs: swimLongueurs, bassin: swim.bassin, distance: swimLongueurs * swim.bassin, plan: swimPlan(swimLongueurs), reason: swimReason });
       swimLongueurs = Math.min(opts.maxLongueurs, swimLongueurs + 2);
       swimReason = 'Prévu si la séance précédente se passe bien. Recalculé après ton bilan.';
+    } else if (joursMuscu.includes(wd) && !done.has(`${date}|muscu`)) {
+      const m = muscuPlan(seance, history, q || {}, settings.muscuChoix || {});
+      out.push({ date, sport: 'muscu', ...m, reason: firstMuscu.reason ?? m.reason });
+      firstMuscu.reason = 'Charges recalculées après chaque séance notée.';
+      seance = followingSeance(seance, joursMuscu.length);
     }
   }
   return out;
