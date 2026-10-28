@@ -23,6 +23,11 @@
 }
 * { box-sizing: border-box; }
 html, body { margin: 0; background: var(--bg); color: var(--ink); }
+/* iPhone, webapp installée (barre d'état translucide) : sur une page plus courte que l'écran,
+   la barre d'onglets fixée en bas remonte. Une page toujours au moins aussi haute que l'écran
+   entier (barre d'état comprise) la garde collée en bas, comme sur les pages longues. */
+html { min-height: calc(100% + env(safe-area-inset-top)); }
+body { min-height: calc(100vh + env(safe-area-inset-top)); }
 body {
   font: 17px/1.45 -apple-system, BlinkMacSystemFont, "SF Pro Text", "Segoe UI", Roboto, sans-serif;
   padding: calc(env(safe-area-inset-top) + 8px) 16px calc(96px + env(safe-area-inset-bottom));
