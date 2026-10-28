@@ -52,5 +52,9 @@ export function conseils(h) {
 }
 
 // Conseils affichés pour un bilan : ceux de l'IA s'ils existent, sinon ceux des règles.
-export const tipsOf = (h) => (h?.conseilsIA?.conseils?.length ? h.conseilsIA.conseils : conseils(h));
-export const tipsSource = (h) => (h?.conseilsIA?.conseils?.length ? 'ia' : 'regles');
+// Version attendue des conseils de l'IA (worker/src/ia.js, VERSION) : ceux d'une version plus
+// ancienne ne s'affichent plus et sont redemandés.
+export const IA_VERSION = 2;
+export const hasIA = (h) => Boolean(h?.conseilsIA?.conseils?.length && h.conseilsIA.v === IA_VERSION);
+export const tipsOf = (h) => (hasIA(h) ? h.conseilsIA.conseils : conseils(h));
+export const tipsSource = (h) => (hasIA(h) ? 'ia' : 'regles');

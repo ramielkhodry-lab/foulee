@@ -404,3 +404,33 @@ details.hist[open] .li { border-bottom: 0; }
 .ia-wait, .ia-ok { font-size: 14px; color: var(--muted); margin: 0 0 12px; }
 .ia-ok { color: var(--run); font-weight: 700; }
 .alert.ia-fail { margin-bottom: 14px; }
+
+/* Détail d'une séance prévue, déplié dans la carte du jour. */
+.day-detail { margin: 10px 0 0; }
+.day-detail summary { list-style: none; cursor: pointer; text-align: center; font-size: 14px; font-weight: 600; color: var(--muted); padding: 8px 0; }
+.day-detail summary::-webkit-details-marker { display: none; }
+.day-detail summary i, .coach summary i { font-style: normal; display: inline-block; transition: transform .15s; }
+.day-detail[open] summary i, .coach[open] summary i { transform: rotate(90deg); }
+.day-detail .hero-steps, .day-detail .exos { margin-top: 6px; }
+
+/* Conseils du coach sur une séance faite. */
+.coach { margin: 10px 0 4px; border-radius: 14px; background: var(--run-soft); padding: 0 14px; }
+.coach.natation { background: var(--swim-soft); }
+.coach.muscu { background: rgba(255, 122, 26, 0.12); }
+.coach summary { list-style: none; cursor: pointer; padding: 12px 0; font-weight: 800; font-size: 15px; color: var(--run); display: flex; justify-content: space-between; }
+.coach.natation summary { color: #8EC0FF; }
+.coach.muscu summary { color: var(--muscu); }
+.coach summary::-webkit-details-marker { display: none; }
+.coach .coach-src { font-size: 12px; color: var(--muted); margin: 0 0 6px; text-transform: uppercase; letter-spacing: 0.06em; }
+.coach ul { margin: 0; padding: 0 0 12px 18px; font-size: 15px; }
+.coach li { margin: 0 0 6px; }
+
+/* Questionnaire : une partie par sport, à sa couleur. */
+.q-part { margin: 26px 0 0; padding: 4px 0 4px 14px; border-left: 3px solid var(--run); }
+.q-part.natation { border-color: var(--swim); }
+.q-part.muscu { border-color: var(--muscu); }
+.q-part-head { display: flex; align-items: center; gap: 10px; margin: 0 0 -4px; }
+.q-part-head h2 { margin: 0; font-family: var(--display); font-style: italic; font-weight: 800; font-size: 30px; text-transform: uppercase; letter-spacing: 0.02em; }
+.q-part.course .q-part-head h2 { color: var(--run); }
+.q-part.natation .q-part-head h2 { color: var(--swim); }
+.q-part.muscu .q-part-head h2 { color: var(--muscu); }

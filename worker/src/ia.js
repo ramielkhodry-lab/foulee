@@ -2,7 +2,11 @@
 // par jour pour tout le compte, remis à zéro à 00:00 UTC). L'IA écrit les conseils, elle ne
 // touche jamais au programme : palier, longueurs et charges restent décidés par les règles.
 
-export const MODEL = '@cf/mistralai/mistral-small-3.1-24b-instruct';
+// Llama 3.3 70B : Mistral Small donnait des conseils techniques faux (menton hors de l'eau
+// en crawl). Environ 120 neurones par bilan, soit ~80 bilans par jour sur le quota gratuit.
+export const MODEL = '@cf/meta/llama-3.3-70b-instruct-fp8-fast';
+// Version des conseils : l'app redemande ceux d'une version plus ancienne (public/js/conseils.js).
+export const VERSION = 2;
 // Par personne et par jour : protège le quota commun si un téléphone boucle.
 export const USER_DAILY = 15;
 const MAX_TEXT = 1200;
@@ -40,20 +44,45 @@ export function cleanInput(body = {}) {
     ressenti: clip(b.ressenti),
     suite: clip(body.suite, 400),
     objectif: clip(body.objectif, 120),
+    base: (Array.isArray(body.base) ? body.base : []).slice(0, 4).map((s) => clip(s, 400)),
     precedentes: (Array.isArray(body.precedentes) ? body.precedentes : []).slice(0, 5).map((s) => clip(s, 200)),
   };
 }
+
+// Fiche technique validée : le modèle s'appuie dessus au lieu d'inventer des gestes.
+const FICHE = `FICHE TECHNIQUE (seule source autorisée pour les gestes et exercices) :
+Natation
+- Crawl : visage dans l'eau, regard vers le fond, tête dans l'axe du corps. Pour inspirer, la tête tourne sur le côté avec la rotation des épaules, une oreille reste dans l'eau. Ne jamais lever la tête ni le menton vers l'avant : les jambes coulent et on avale de l'eau.
+- Expirer en continu sous l'eau, par le nez et la bouche, pendant que le visage est immergé. Si les poumons ne sont pas vides quand la bouche sort, l'inspiration arrive trop tard et on boit la tasse.
+- Rythme : inspirer tous les 2 ou tous les 3 mouvements de bras ; au début, toujours du même côté.
+- Éducatifs respiration : (1) debout au bord, visage dans l'eau, souffler 4 à 5 s en bulles puis sortir la tête pour inspirer, 10 fois ; (2) battements de jambes avec une planche tenue bras tendus, visage dans l'eau, tourner la tête sur le côté pour inspirer ; (3) crawl très lent en s'arrêtant au bord dès qu'on boit la tasse.
+- Brasse : inspirer quand les mains s'écartent et que la tête sort devant, souffler sous l'eau pendant que les bras reviennent et pendant la glisse. Nager tête hors de l'eau en permanence fatigue la nuque et le dos.
+- Dos : oreilles dans l'eau, regard au plafond, hanches hautes, battements souples.
+- Fatigue ou essoufflement : pause de 20 à 30 s au bord ; le nombre de longueurs compte, pas de les enchaîner.
+Course
+- Allure où l'on peut dire une phrase entière ; si on ne peut pas, ralentir, même si ça paraît très lent.
+- Foulée courte, pied qui se pose sous le corps ; respecter les temps de marche prévus.
+- Point de côté : ralentir, souffler fort, ne pas manger lourd dans les 2 h avant.
+- Échauffement : 5 min de marche rapide avant de courir.
+Musculation
+- La technique avant la charge : garder 1 à 2 répétitions en réserve ; dos neutre.
+- Douleur articulaire pendant un exercice : arrêter cet exercice, en garder un autre pour le même muscle.
+Général
+- Sommeil, hydratation, un en-cas léger 1 à 2 h avant ; au moins un jour de repos entre deux séances dures.`;
 
 const SYSTEM = `Tu es le coach de Foulée, une app de course à pied, natation et musculation pour débutants.
 On te donne le bilan d'une séance qui vient d'être faite. Tu écris 2 à 4 conseils pour la prochaine séance du même sport.
 Règles :
 - Tutoie, français simple, phrases courtes. Chaque conseil fait au plus 280 caractères.
-- Pars d'abord de ce que la personne a écrit dans son ressenti : réponds à son problème précis, avec un geste ou un exercice concret qu'elle peut faire.
+- Pars d'abord de ce que la personne a écrit dans son ressenti : réponds à son problème précis.
+- Chaque geste, exercice ou consigne technique vient de la FICHE TECHNIQUE ci-dessous ou des « conseils de base » fournis. N'invente aucun exercice, aucune position, aucune consigne qui n'y figure pas. Ne contredis jamais la fiche.
 - Tu ne changes jamais le programme (palier, durée, longueurs, charges) : il est déjà décidé et t'est donné dans « suite ». Tu peux l'expliquer.
 - Douleur : aucun diagnostic. Dis de ne pas forcer et de voir un médecin si elle dure plus de 3 jours ou augmente.
 - N'invente aucun chiffre que la personne n'a pas donné (pas de fréquence cardiaque, pas d'allure).
 - Pas de formule creuse ni de félicitations génériques.
-Réponds uniquement avec ce JSON, sans texte autour : {"conseils": ["...", "..."]}`;
+Réponds uniquement avec ce JSON, sans texte autour : {"conseils": ["...", "..."]}
+
+${FICHE}`;
 
 export function buildMessages(input) {
   const lignes = [
@@ -67,6 +96,7 @@ export function buildMessages(input) {
     input.ressenti && `Ressenti : « ${input.ressenti} »`,
     input.suite && `Suite décidée par le programme : ${input.suite}`,
     input.precedentes.length && `Séances précédentes : ${input.precedentes.join(' | ')}`,
+    input.base.length && `Conseils de base (validés, à personnaliser) : ${input.base.join(' | ')}`,
   ].filter(Boolean);
   return [
     { role: 'system', content: SYSTEM },
@@ -115,5 +145,5 @@ export async function conseilsIA(env, userId, body, t = Date.now()) {
   }
   const conseils = parseConseils(out);
   if (!conseils) throw new IaError('indisponible', 'Réponse de l’IA illisible');
-  return { conseils, model: MODEL.split('/').pop(), at: t };
+  return { conseils, model: MODEL.split('/').pop(), at: t, v: VERSION };
 }
