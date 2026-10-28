@@ -4,8 +4,9 @@ import { load, update, uid, PRESETS, onSave, replace, empty } from './store.js';
 import * as account from './account.js';
 import { createTrack, addPoint, markGap, summary, encodeTrace, decodeTrace } from './gps.js';
 import { drawTrace } from './map.js';
+import { iaInput, pendingIA, failedIA, failureMessage } from './ia.js';
 import { GOALS_MUSCU, LIEUX, NIVEAUX_MUSCU, MUSCLES, alternatives, byId, muscuPlan, nextSeance, nextLoad, tonnage } from './muscu.js';
-import { upcoming, planOptions, nextRunLevel, runLevel, GOALS_RUN, START_RUN, GOALS_SWIM, START_SWIM, LEVELS } from './plan.js';
+import { upcoming, planOptions, nextRunLevel, runLevel, afterBilan, HORIZON, GOALS_RUN, START_RUN, GOALS_SWIM, START_SWIM, LEVELS } from './plan.js';
 
 const app = document.getElementById('app');
 const audio = document.getElementById('player');
@@ -20,8 +21,9 @@ const total = (steps) => steps.reduce((a, s) => a + s.duration, 0);
 const JOURS = [[1, 'L'], [2, 'M'], [3, 'M'], [4, 'J'], [5, 'V'], [6, 'S'], [0, 'D']];
 const today = () => new Date().toLocaleDateString('sv-SE'); // AAAA-MM-JJ, heure locale
 const dateLabel = (d) => new Date(String(d).length === 10 ? `${d}T12:00` : d).toLocaleDateString('fr-FR', { weekday: 'long', day: 'numeric', month: 'long' });
-// Programme de ce profil, d'après son historique et son questionnaire.
-const planFor = (d, days = 14) => upcoming(d.history, d.settings, today(), days, d.profile.questionnaire);
+// Programme de ce profil, d'après son historique et son questionnaire. Sans date de fin :
+// recalculé à chaque affichage sur les 12 semaines qui viennent.
+const planFor = (d, days = HORIZON) => upcoming(d.history, d.settings, today(), days, d.profile.questionnaire);
 const practiced = (d, sport) => planOptions(d.profile.questionnaire).sports.includes(sport);
 const allure = (secKm) => `${Math.floor(secKm / 60)}'${String(Math.round(secKm % 60)).padStart(2, '0')}/km`;
 
@@ -53,6 +55,13 @@ const dose = (x) => `${x.series} × ${x.min}–${x.max}${x.unite === 's' ? ' s' 
 const exoList = (p) => `<ol class="exos">${p.exercices.map((x) => `<li><b>${esc(x.nom)}</b><span class="dose">${dose(x)}</span><span class="why">${esc(x.muscle)} · ${esc(x.reason)}</span></li>`).join('')}</ol>`;
 const shortDate = (d) => new Date(`${String(d).slice(0, 10)}T12:00`).toLocaleDateString('fr-FR', { weekday: 'short', day: 'numeric', month: 'short' });
 
+// Pourquoi cette séance, et les conseils tirés du dernier bilan du même sport.
+const whyTips = (p) => `
+  <div class="why-tips ${p.sport}">
+    <p>${esc(p.reason)}</p>
+    ${p.tips?.length ? `<p class="tips-head">${p.tipsSource === 'ia' ? 'Conseils de l’IA sur ton dernier bilan' : 'Conseils de ton dernier bilan · règles'}</p><ul>${p.tips.slice(0, 3).map((t) => `<li>${esc(t)}</li>`).join('')}</ul>` : ''}
+  </div>`;
+
 // Séance du jour : le seul bloc mis en vedette de l'accueil et du programme.
 function todayHero(p) {
   const isToday = p.date === today();
@@ -64,7 +73,7 @@ function todayHero(p) {
         <p class="hero-num">${p.longueurs}<small>longueurs</small></p>
         <p class="hero-sub">${p.distance} m en bassin de ${p.bassin} m</p>
         <ol class="hero-steps">${p.plan.map((l) => `<li>${esc(l)}</li>`).join('')}</ol>
-        <p class="muted small">${esc(p.reason)}</p>
+        ${whyTips(p)}
         ${isToday ? '<button class="btn-swim" data-logplan="natation">Noter ma séance</button>' : ''}
       </section>`;
   }
@@ -75,7 +84,7 @@ function todayHero(p) {
         <p class="hero-num">${p.exercices.length}<small>exercices</small></p>
         <p class="hero-sub">${esc(p.title)} · ${p.repos} s de repos entre les séries</p>
         ${exoList(p)}
-        <p class="muted small">${esc(p.reason)}</p>
+        ${whyTips(p)}
         ${isToday ? '<button class="cta muscu" data-logplan="muscu"><span>Noter ma séance</span><i>›</i></button>' : ''}
       </section>`;
   }
@@ -87,7 +96,8 @@ function todayHero(p) {
       <p class="hero-num">${mins}<small>min</small></p>
       <p class="hero-sub">${esc(p.title)}</p>
       <div class="effort-bar">${p.steps.map((s) => `<i class="${KINDS[s.kind].effort}" style="flex:${s.duration}"></i>`).join('')}</div>
-      <p class="muted small">${runs.length} fois en course, ${Math.round(runs.reduce((a, s) => a + s.duration, 0) / 60)} min au total. ${esc(p.reason)}</p>
+      <p class="muted small">${runs.length} fois en course, ${Math.round(runs.reduce((a, s) => a + s.duration, 0) / 60)} min au total.</p>
+      ${whyTips(p)}
       ${isToday ? `<button class="btn-primary" data-startplan="${esc(p.date)}">Démarrer la séance</button>
       <button class="btn-ghost" data-logplan="course" style="width:100%;margin-top:6px">Faite sans l'app : la noter</button>` : `<button data-startplan="${esc(p.date)}" style="width:100%">La faire maintenant</button>`}
     </section>`;
@@ -183,11 +193,11 @@ function weekTotals(history, monday) {
   };
 }
 
-// Calendrier : 2 semaines passées → 2 à venir, une semaine par écran, chaque jour se touche.
+// Calendrier : 2 semaines passées → 12 à venir, une semaine par écran, chaque jour se touche.
 function weekStrip(history, plan, sel) {
   const t = today();
   const first = addDays(mondayOf(t), -14);
-  const days = Array.from({ length: 35 }, (_, i) => addDays(first, i));
+  const days = Array.from({ length: 14 * 7 }, (_, i) => addDays(first, i));
   return `<div class="week" id="week">${days.map((d, i) => {
     const done = history.filter((h) => String(h.date).slice(0, 10) === d).map(sportOf);
     const planned = plan.filter((p) => p.date === d && p.sport !== 'repos').map((p) => p.sport);
@@ -244,14 +254,12 @@ function dayPanel(history, plan, sel) {
   if (p && p.sport !== 'repos') return sessionCard(p);
   const doneToday = sel === t ? history.filter((h) => String(h.date).slice(0, 10) === sel) : [];
   if (doneToday.length) return `<h3 style="margin-top:0">Aujourd'hui</h3><div class="list">${doneToday.map((h) => historyRow(h, true)).join('')}</div>`;
-  const inPlan = sel <= addDays(t, 13);
   return `
     <section class="day-card repos">
       <div class="stripes" aria-hidden="true"></div>
       <p class="day-kicker">${sel === t ? 'Ta journée' : dateLabel(sel)}</p>
       <h2 class="day-title">Repos</h2>
-      <p class="day-sub">${p ? esc(p.reason) : inPlan ? "C'est là que le corps progresse" : 'Programme pas encore calculé'}</p>
-      ${inPlan ? '' : '<p class="muted small" style="position:relative">Il se construit 2 semaines à l\'avance, selon tes bilans.</p>'}
+      <p class="day-sub">${p ? esc(p.reason) : "C'est là que le corps progresse"}</p>
     </section>`;
 }
 
@@ -276,8 +284,9 @@ function sessionCard(p) {
         <ul class="day-facts">
           ${fact('temps', `Bassin de ${p.bassin} m`)}
           ${fact('effort', 'Crawl, brasse et dos en alternance')}
-          ${fact('niveau', 'Pauses de 30 s entre les blocs')}
+          ${fact('niveau', p.focus === 'respiration' ? '4 longueurs pour travailler ta respiration' : 'Pauses de 30 s entre les blocs')}
         </ul>
+        ${whyTips(p)}
         ${isToday ? '<button class="cta swim" data-logplan="natation"><span>Noter ma séance</span><i>›</i></button>' : ''}
         <button class="day-link" data-tab="programme">Le détail longueur par longueur ›</button>
       </section>`;
@@ -295,6 +304,7 @@ function sessionCard(p) {
           ${fact('niveau', esc(muscles.slice(0, 4).join(', ') + (muscles.length > 4 ? '…' : '')))}
           ${fact('temps', `${p.repos} s de repos entre les séries`)}
         </ul>
+        ${whyTips(p)}
         ${isToday ? '<button class="cta muscu" data-logplan="muscu"><span>Noter ma séance</span><i>›</i></button>' : ''}
         <button class="day-link" data-tab="programme">Exercices, charges et répétitions ›</button>
       </section>`;
@@ -313,6 +323,7 @@ function sessionCard(p) {
         ${fact('effort', runText)}
         ${fact('niveau', 'Allure où tu peux encore parler')}
       </ul>
+      ${whyTips(p)}
       ${isToday
         ? `<button class="cta" data-startplan="${esc(p.date)}"><span>Démarrer ma séance</span><i>›</i></button>
            <button class="day-link" data-logplan="course">Faite sans l'app : la noter ›</button>`
@@ -775,6 +786,8 @@ let selDay = today(); // jour choisi dans le calendrier de l'accueil
 let weekScroll = null; // position du calendrier, gardée entre deux affichages
 let editing = null; // séance en cours d'édition (copie)
 let bilan = null; // formulaire de bilan en cours
+let suite = null; // ce que change le bilan qu'on vient d'enregistrer
+let progDays = 14; // jours affichés dans la liste du programme
 
 const screens = {
   accueil() {
@@ -793,6 +806,7 @@ const screens = {
       </header>
       <p class="motto">Discipline aujourd'hui<br>Progrès demain</p>
       ${d.profile.questionnaire ? '' : questionnaireBanner()}
+      ${iaAlert(d.history)}
       ${installed ? '' : '<div class="notice"><strong>Installe Foulée :</strong> dans Safari, touche Partager puis « Sur l\'écran d\'accueil », et ouvre l\'app depuis son icône. Le guidage est plus fiable ainsi.</div>'}
       ${resumable ? `<div class="alert">Séance interrompue : « ${esc(resumable.session.name)} », arrêtée à ${mmss(resumable.pos)}.
         <div class="row" style="margin-top:10px"><button class="btn-dark" data-resume>Reprendre</button><button data-dropresume>Abandonner</button></div></div>` : ''}
@@ -808,7 +822,7 @@ const screens = {
     const plan = planFor(d);
     const todayItem = plan.find((p) => p.date === today() && p.sport !== 'repos');
     const firstRun = todayItem?.sport === 'course' ? null : plan.find((p) => p.sport === 'course');
-    const rest = plan.filter((p) => p !== todayItem);
+    const rest = plan.filter((p) => p !== todayItem && p.date < addDays(today(), progDays));
     const run = plan.find((p) => p.sport === 'course');
     return `
       <h1>Programme</h1>
@@ -820,8 +834,10 @@ const screens = {
         <p class="muted small" style="margin:8px 0 0">Palier ${run.max} = ${esc(LEVELS[run.max - 1].label.replace(' de course continue', ''))} de course sans marcher. Recalculé après chaque bilan selon ta difficulté, ta fatigue et tes douleurs : des règles fixes, pas un coach humain.</p>
       </section>` : ''}
       ${todayItem ? todayHero(todayItem) : ''}
-      <h3>Les 2 prochaines semaines</h3>
-      ${rest.length ? `<div class="timeline">${rest.map((p) => planRow(p, p === firstRun)).join('')}</div>` : '<p class="muted">Aucune séance prévue : choisis tes jours dans Profil > Mon programme.</p>'}
+      <h3>Les ${progDays / 7} prochaines semaines</h3>
+      ${rest.length ? `<div class="timeline">${rest.map((p) => planRow(p, p === firstRun)).join('')}</div>
+        ${progDays < HORIZON ? '<button class="btn-ghost" data-moreplan style="width:100%;margin-top:8px">Voir 2 semaines de plus</button>' : ''}
+        <p class="muted small">Le programme n'a pas de fin : il se recalcule après chaque bilan, et les semaines suivantes partent de là où tu en es.</p>` : '<p class="muted">Aucune séance prévue : choisis tes jours dans Profil > Mon programme.</p>'}
       ${practiced(d, 'muscu') ? muscuLibrary(d) : ''}
       ${practiced(d, 'course') ? `<h3>Mes séances</h3>
       <p class="muted small">Des séances guidées à faire quand tu veux, en dehors du plan.</p>
@@ -938,6 +954,29 @@ const screens = {
       </div>
       <button class="btn-primary" data-savebilan>Enregistrer</button>
       <p class="muted small" style="margin-top:10px">La douleur et ton ressenti restent privés.</p>`;
+  },
+
+  // Juste après un bilan : ce qui change pour la suite, et pourquoi.
+  suite() {
+    const r = suite;
+    const tag = { monte: '▲ ça monte', garde: '= on consolide', recul: '▼ on lève le pied', suite: 'la suite' }[r.verdict] || '';
+    return `
+      <h1>Et maintenant ?</h1>
+      <section class="hero ${r.sport === 'repos' ? 'rest' : r.sport}">
+        <p class="eyebrow">${esc(SPORT_LABEL[r.sport])} · ${esc(tag)}</p>
+        <p class="hero-sub" style="font-size:26px;margin:8px 0 6px">${esc(r.titre)}</p>
+        <p class="muted small" style="margin:0">${esc(r.detail)}</p>
+      </section>
+      <h3>Pour la prochaine séance</h3>
+      ${r.ia === 'loading' ? '<p class="ia-wait">L’IA lit ton ressenti… En attendant, les conseils des règles :</p>' : ''}
+      ${r.ia?.code ? `<div class="alert ia-fail"><strong>Conseils de secours (règles).</strong> ${esc(failureMessage(r.ia))}</div>` : ''}
+      ${r.source === 'ia' ? '<p class="ia-ok">Conseils de l’IA, à partir de ton ressenti</p>' : ''}
+      <ul class="conseils ${r.sport}">${r.conseils.map((t) => `<li>${esc(t)}</li>`).join('')}</ul>
+      ${r.next ? `<h3>Prochaine ${r.sport === 'natation' ? 'natation' : r.sport === 'muscu' ? 'muscu' : 'course'}</h3><div class="list">${planRow(r.next)}</div>` : ''}
+      <p class="muted small">${r.source === 'ia'
+        ? 'La suite du programme est décidée par les règles de Foulée. Les conseils sont écrits par une IA gratuite (Mistral, via Cloudflare) : elle peut se tromper, ce n’est pas un coach ni un médecin.'
+        : 'Règles fixes de Foulée, pas un coach : difficulté, essoufflement, fatigue, douleur et les mots de ton ressenti décident.'} Tes conseils restent affichés sur la carte de la prochaine séance.</p>
+      <div class="row" style="margin-top:14px"><button data-tab="progression">Mon historique</button><button class="btn-dark" data-tab="programme">Mon programme</button></div>`;
   },
 
   progression() {
@@ -1216,7 +1255,7 @@ function placeWeek() {
 }
 
 // Onglet allumé pour chaque écran.
-const TAB_OF = { questionnaire: 'profil', edit: 'programme', live: 'demarrer', bilan: 'progression', saisie: 'progression', compte: 'profil' };
+const TAB_OF = { questionnaire: 'profil', edit: 'programme', live: 'demarrer', bilan: 'progression', saisie: 'progression', suite: 'programme', compte: 'profil' };
 
 function render() {
   app.innerHTML = screens[current]();
@@ -1270,6 +1309,61 @@ function go(screen) {
 }
 
 // --- Actions ------------------------------------------------------------------
+
+function showSuite(entry) {
+  const d = load();
+  suite = afterBilan(d.history, entry, d.settings, today(), d.profile.questionnaire);
+  go('suite');
+  askIA(entry.id);
+}
+
+// --- Conseils de l'IA ---------------------------------------------------------
+
+// Alerte de l'accueil : l'IA n'a pas lu un bilan récent, pourquoi, et quand elle reprend.
+function iaAlert(history) {
+  const failed = failedIA(history);
+  if (!failed.length) return '';
+  const h = failed[0];
+  return `<div class="alert ia-fail"><strong>IA indisponible : conseils de secours.</strong> ${esc(failureMessage(h.iaEchec))}
+    <div class="row" style="margin-top:10px"><button class="btn-dark" data-retryia="${esc(h.id)}">Réessayer maintenant</button></div></div>`;
+}
+
+const asking = new Set();
+const OBJECTIFS = { '30min': 'courir 30 min sans s’arrêter', '5km': 'courir 5 km', '10km': 'réussir un 10 km' };
+
+// Fait lire un bilan par l'IA. Réussite : conseils gardés sur la séance (et synchronisés).
+// Échec : la raison et l'heure de reprise sont gardées pour l'alerte ; les règles restent.
+async function askIA(id, { force = false } = {}) {
+  if (asking.has(id)) return;
+  const d = load();
+  const entry = d.history.find((h) => h.id === id);
+  if (!entry || (entry.conseilsIA && !force)) return;
+  const setState = (ia) => { if (suite?.entryId === id) { suite.ia = ia; if (current === 'suite') render(); } };
+  if (!account.serverEnabled()) return; // pas de serveur : les règles seules, sans alerte
+  if (!account.session()) { setState({ code: 'nonconnecte' }); return; }
+  asking.add(id);
+  setState('loading');
+  const q = d.profile.questionnaire;
+  const ctx = suite?.entryId === id ? suite : afterBilan(d.history, entry, d.settings, today(), q);
+  try {
+    const res = await account.askConseils(iaInput(entry, d.history, ctx, OBJECTIFS[q?.objectifCourse] || ''));
+    update((dd) => { const h = dd.history.find((x) => x.id === id); if (h) { h.conseilsIA = res; delete h.iaEchec; } });
+    if (suite?.entryId === id) Object.assign(suite, { conseils: res.conseils, source: 'ia', ia: null });
+  } catch (e) {
+    const fail = { code: e.code || (e.status === 401 ? 'nonconnecte' : 'indisponible'), resetAt: e.resetAt || null, at: Date.now() };
+    update((dd) => { const h = dd.history.find((x) => x.id === id); if (h) h.iaEchec = fail; });
+    if (suite?.entryId === id) suite.ia = fail;
+  } finally {
+    asking.delete(id);
+  }
+  if (['suite', 'accueil', 'programme'].includes(current)) render();
+}
+
+// À l'ouverture : les bilans récents restés sans conseils de l'IA, une fois l'heure de reprise passée.
+function retryIA() {
+  if (!account.serverEnabled() || !account.session()) return;
+  for (const h of pendingIA(load().history)) askIA(h.id);
+}
 
 const findSession = (id) => load().sessions.find((s) => s.id === id);
 
@@ -1482,6 +1576,11 @@ document.addEventListener('click', (e) => {
     renderTouchLock();
   } else if ('finish' in ds) {
     go('bilan');
+  } else if (ds.retryia) {
+    askIA(ds.retryia, { force: true });
+  } else if ('moreplan' in ds) {
+    progDays = Math.min(HORIZON, progDays + 14);
+    render();
   } else if (ds.progsport) {
     progSport = ds.progsport;
     render();
@@ -1525,7 +1624,7 @@ document.addEventListener('click', (e) => {
     update((d) => { d.history.push(entry); });
     progSport = entry.sport; // Progression s'ouvre sur le sport qu'on vient de noter
     bilan = null;
-    go('progression');
+    showSuite(entry);
   } else if ('import' in ds) {
     document.getElementById('importfile').click();
   } else if (ds.scale) {
@@ -1542,7 +1641,7 @@ document.addEventListener('click', (e) => {
     audio.removeAttribute('src');
     audio.load();
     bilan = null;
-    go('progression');
+    showSuite(entry);
   } else if ('export' in ds) {
     const blob = new Blob([JSON.stringify(load(), null, 2)], { type: 'application/json' });
     const a = document.createElement('a');
@@ -1738,7 +1837,8 @@ if (inviteParam && account.serverEnabled()) {
     .finally(() => render());
 }
 refreshAccount();
-syncNow();
+syncNow().then(retryIA);
+document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'visible' && current !== 'live') retryIA(); });
 
 if ('serviceWorker' in navigator) navigator.serviceWorker.register('sw.js').catch(() => {});
 navigator.storage?.persist?.().catch(() => {});

@@ -3,6 +3,11 @@
 // simplement la suite. Les règles sont volontairement simples et explicables.
 
 import { muscuPlan, nextSeance, followingSeance } from './muscu.js';
+import { tipsOf, tipsSource, breathingIssue } from './conseils.js';
+
+// Le programme se calcule à la volée sur cet horizon (12 semaines) : il n'a pas de fin,
+// la fenêtre avance avec les jours.
+export const HORIZON = 84;
 
 const W = (min) => ({ kind: 'marche', duration: min * 60 });
 const R = (min) => ({ kind: 'course_lente', duration: min * 60 });
@@ -125,6 +130,9 @@ export function nextRunLevel(history, opts = {}) {
   if (last.difficulte === 4 || incomplete) {
     return { level: Math.min(max, last.level), reason: incomplete ? "Tu n'as pas fini la dernière séance : on refait le même palier." : 'Dernière course dure : on consolide le même palier.' };
   }
+  if (last.essoufflement === 5 || last.fatigue === 5) {
+    return { level: Math.min(max, last.level), reason: `Tu étais ${last.fatigue === 5 ? 'épuisé' : 'à bout de souffle'} : on consolide le même palier.` };
+  }
   if (last.difficulte && last.difficulte <= 2) {
     if (last.level >= max) return { level: max, reason: 'Objectif atteint : on garde ce palier.' };
     return { level: Math.min(max, last.level + 1), reason: 'Dernière course facile : on passe au palier suivant.' };
@@ -143,6 +151,9 @@ export function nextRunLevel(history, opts = {}) {
 
 // Natation : +2 longueurs par rapport à la dernière séance (environ +10 %), plafonné
 // par l'objectif (60 longueurs sans questionnaire).
+// - douleur ou difficulté 5 : 2 longueurs de moins ;
+// - difficulté 4, ou essoufflement et fatigue à 4 ou plus : même volume ;
+// - sinon : +2 longueurs.
 export function nextSwim(history, opts = {}) {
   const cap = opts.maxLongueurs ?? 60;
   const swims = history.filter((h) => h.sport === 'natation' && h.swim?.longueurs).sort((a, b) => String(a.date).localeCompare(String(b.date)));
@@ -152,22 +163,30 @@ export function nextSwim(history, opts = {}) {
     const n = Math.min(cap, opts.startLongueurs ?? 16);
     return { longueurs: n, bassin, reason: `Première séance : ${n} longueurs, à ton rythme, avec des pauses.` };
   }
-  if (hasPain(last) || last.difficulte >= 4) {
-    return { longueurs: Math.min(cap, last.swim.longueurs), bassin, reason: 'Dernière séance difficile : même volume, plus de pauses.' };
+  const n = last.swim.longueurs;
+  if (hasPain(last) || last.difficulte === 5) {
+    const longueurs = Math.min(cap, Math.max(4, n - 2));
+    return { longueurs, bassin, reason: `Dernière séance ${hasPain(last) ? 'douloureuse' : 'très dure'} (${n} longueurs) : on redescend à ${longueurs}.` };
   }
-  if (last.swim.longueurs >= cap) return { longueurs: cap, bassin, reason: `Objectif atteint : ${cap} longueurs, on garde ce volume.` };
-  const longueurs = Math.min(cap, last.swim.longueurs + 2);
-  return { longueurs, bassin, reason: `Dernière fois ${last.swim.longueurs} longueurs : on ajoute 2 longueurs.` };
+  if (last.difficulte === 4 || ((last.essoufflement || 0) >= 4 && (last.fatigue || 0) >= 4)) {
+    return { longueurs: Math.min(cap, n), bassin, reason: `Dernière séance dure (${n} longueurs) : on garde ${Math.min(cap, n)} longueurs, avec plus de pauses.` };
+  }
+  if (n >= cap) return { longueurs: cap, bassin, reason: `Objectif atteint : ${cap} longueurs, on garde ce volume.` };
+  const longueurs = Math.min(cap, n + 2);
+  return { longueurs, bassin, reason: `Dernière fois ${n} longueurs : on ajoute 2 longueurs.` };
 }
 
-function swimPlan(longueurs) {
+// focus 'respiration' : la gêne notée au dernier bilan remplace le premier bloc par un éducatif.
+function swimPlan(longueurs, focus = null) {
   const echauf = 4;
   const retour = 2;
-  const corps = Math.max(0, longueurs - echauf - retour);
+  const educ = focus === 'respiration' && longueurs >= 14 ? 4 : 0;
+  const corps = Math.max(0, longueurs - echauf - retour - educ);
   const blocs = Math.floor(corps / 4);
   const reste = corps - blocs * 4;
   return [
     `Échauffement : ${echauf} longueurs tranquilles (brasse ou dos).`,
+    educ ? `Respiration : ${educ} longueurs de crawl lent. Souffle toutes tes bulles sous l’eau, tourne la tête pour inspirer tous les 2 mouvements de bras ; arrête-toi au bord dès que tu bois la tasse.` : '',
     blocs ? `${blocs} bloc${blocs > 1 ? 's' : ''} de 4 longueurs : 1 crawl + 1 brasse + 1 crawl + 1 dos, 30 s de pause entre les blocs.` : '',
     reste ? `${reste} longueur${reste > 1 ? 's' : ''} de brasse.` : '',
     `Retour au calme : ${retour} longueurs de dos.`,
@@ -192,6 +211,11 @@ export function upcoming(history, settings, from, days = 14, q = null) {
   let reason = run.reason;
   let swimLongueurs = swim.longueurs;
   let swimReason = swim.reason;
+  // Conseils du dernier bilan de chaque sport, affichés sur la prochaine séance de ce sport.
+  const lastOf = (sport) => history.filter((h) => (h.sport || 'course') === sport).sort((a, b) => String(a.date).localeCompare(String(b.date))).at(-1);
+  const tips = Object.fromEntries(['course', 'natation', 'muscu'].map((sp) => [sp, { tips: tipsOf(lastOf(sp)), tipsSource: tipsSource(lastOf(sp)) }]));
+  const takeTips = (sport) => { const t = tips[sport]; tips[sport] = { tips: [] }; return t; };
+  const swimFocus = breathingIssue(lastOf('natation')) ? 'respiration' : null;
   for (let i = 0; i < days; i++) {
     const date = addDays(from, i);
     const wd = weekday(date);
@@ -201,7 +225,7 @@ export function upcoming(history, settings, from, days = 14, q = null) {
         out.push({ date, sport: 'repos', reason: 'Course prévue décalée : il faut un jour de repos entre deux courses.' });
       } else {
         const lvl = LEVELS[level - 1];
-        out.push({ date, sport: 'course', level, max: opts.maxLevel, title: lvl.label, steps: levelSteps(level), reason });
+        out.push({ date, sport: 'course', level, max: opts.maxLevel, title: lvl.label, steps: levelSteps(level), reason, ...takeTips('course') });
         runPlaced = date;
         // Hypothèse pour les séances suivantes : la séance se passe bien (difficulté 3).
         reason = 'Prévu si la séance précédente se passe bien. Recalculé après ton bilan.';
@@ -210,15 +234,39 @@ export function upcoming(history, settings, from, days = 14, q = null) {
         history = sim;
       }
     } else if (joursNatation.includes(wd) && !done.has(`${date}|natation`)) {
-      out.push({ date, sport: 'natation', longueurs: swimLongueurs, bassin: swim.bassin, distance: swimLongueurs * swim.bassin, plan: swimPlan(swimLongueurs), reason: swimReason });
+      out.push({ date, sport: 'natation', longueurs: swimLongueurs, bassin: swim.bassin, distance: swimLongueurs * swim.bassin, plan: swimPlan(swimLongueurs, swimFocus), focus: swimFocus, reason: swimReason, ...takeTips('natation') });
       swimLongueurs = Math.min(opts.maxLongueurs, swimLongueurs + 2);
       swimReason = 'Prévu si la séance précédente se passe bien. Recalculé après ton bilan.';
     } else if (joursMuscu.includes(wd) && !done.has(`${date}|muscu`)) {
       const m = muscuPlan(seance, history, q || {}, settings.muscuChoix || {});
-      out.push({ date, sport: 'muscu', ...m, reason: firstMuscu.reason ?? m.reason });
+      out.push({ date, sport: 'muscu', ...m, reason: firstMuscu.reason ?? m.reason, ...takeTips('muscu') });
       firstMuscu.reason = 'Charges recalculées après chaque séance notée.';
       seance = followingSeance(seance, joursMuscu.length);
     }
+  }
+  return out;
+}
+
+// Ce que change un bilan qu'on vient d'enregistrer : la prochaine séance du même sport,
+// comparée à celle qui vient d'être faite, et les conseils pour la faire.
+export function afterBilan(history, entry, settings, from, q = null) {
+  const sport = entry.sport || 'course';
+  const next = upcoming(history, settings, from, HORIZON, q).find((p) => p.sport === sport) || null;
+  const out = { sport, entryId: entry.id, next, conseils: tipsOf(entry), source: tipsSource(entry), titre: 'Bilan enregistré', detail: next?.reason || '' };
+  if (!next) return out;
+  if (sport === 'course') {
+    const was = runLevel(entry);
+    out.verdict = !was ? 'suite' : next.level > was ? 'monte' : next.level < was ? 'recul' : 'garde';
+    out.titre = { monte: `Palier ${was} → ${next.level}`, recul: `Retour au palier ${next.level}`, garde: `On garde le palier ${next.level}`, suite: `Prochaine course : palier ${next.level}` }[out.verdict];
+  } else if (sport === 'natation') {
+    const was = entry.swim?.longueurs;
+    out.verdict = !was ? 'suite' : next.longueurs > was ? 'monte' : next.longueurs < was ? 'recul' : 'garde';
+    out.titre = { monte: `${was} → ${next.longueurs} longueurs`, recul: `On redescend à ${next.longueurs} longueurs`, garde: `On garde ${next.longueurs} longueurs`, suite: `Prochaine séance : ${next.longueurs} longueurs` }[out.verdict];
+  } else {
+    const ups = next.exercices.filter((x) => x.poids && entry.exercices?.some((e) => e.id === x.id && Number(e.poids) && x.poids > Number(e.poids)));
+    out.verdict = ups.length ? 'monte' : 'garde';
+    out.titre = ups.length ? `Charge en hausse sur ${ups.length} exercice${ups.length > 1 ? 's' : ''}` : 'Mêmes charges, une répétition de plus';
+    out.detail = next.exercices.map((x) => `${x.nom.split(' (')[0]} : ${x.reason}`).join(' ');
   }
   return out;
 }

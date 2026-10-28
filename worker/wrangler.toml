@@ -13,3 +13,7 @@ binding = "DB"
 database_name = "foulee"
 database_id = "REMPLACE_PAR_LE_DEPLOIEMENT"
 migrations_dir = "migrations"
+
+# Workers AI : conseils après un bilan (palier gratuit, 10 000 neurones par jour).
+[ai]
+binding = "AI"

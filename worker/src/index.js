@@ -12,6 +12,7 @@ import {
   verifyAuthenticationResponse,
 } from '@simplewebauthn/server';
 import { isoBase64URL } from '@simplewebauthn/server/helpers';
+import { conseilsIA, IaError } from './ia.js';
 
 const SESSION_DAYS = 180;
 const INVITE_DAYS = 14;
@@ -284,6 +285,13 @@ const routes = {
     return { code, kind, url: `${env.APP_ORIGIN}${env.APP_PATH ?? '/foulee/'}?invite=${code}` };
   },
 
+  // Conseils de l'IA sur un bilan. En cas d'échec, l'app garde les conseils des règles et
+  // affiche pourquoi (code) et quand réessayer (resetAt, en ms).
+  'POST /me/conseils': async (req, env) => {
+    const u = await currentUser(req, env);
+    return conseilsIA(env, u.id, await readJson(req));
+  },
+
   'GET /me/invites': async (req, env) => {
     const u = await currentUser(req, env);
     const rows = await env.DB.prepare(
@@ -303,6 +311,7 @@ export default {
       return json(env, await handler(request, env));
     } catch (e) {
       if (e instanceof HttpError) return json(env, { error: e.message }, e.status);
+      if (e instanceof IaError) return json(env, { error: e.message, code: e.code, resetAt: e.resetAt }, e.code === 'indisponible' ? 503 : 429);
       console.error(e);
       return json(env, { error: 'Erreur serveur' }, 500);
     }
