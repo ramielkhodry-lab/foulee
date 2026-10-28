@@ -56,7 +56,7 @@ test('IA : réponse en JSON mode, texte autour, entrée nettoyée', () => {
 
 test('app : conseils de l’IA prioritaires, sinon règles', () => {
   assert.match(tipsOf(swim)[0], /avales de l’eau/);
-  const withIA = { ...swim, conseilsIA: { conseils: ['Conseil de l’IA sur la respiration.'] } };
+  const withIA = { ...swim, conseilsIA: { v: 2, conseils: ['Conseil de l’IA sur la respiration.'] } };
   assert.deepEqual(tipsOf(withIA), ['Conseil de l’IA sur la respiration.']);
   const next = upcoming([withIA], {}, '2026-10-29', 14).find((p) => p.sport === 'natation');
   assert.equal(next.tipsSource, 'ia');
@@ -76,4 +76,19 @@ test('app : quand réessayer, et le message d’alerte', () => {
   assert.deepEqual(pendingIA([{ ...swim, date: '2026-10-01' }], now), [], 'vieux bilan : jamais envoyé');
   assert.equal(pendingIA([swim], now).length, 1, 'bilan récent sans conseils IA : à envoyer');
   assert.match(whenLabel(new Date('2026-10-29T01:00:00').getTime(), now), /cette nuit à 01:00/);
+});
+
+test('IA : fiche technique et conseils de base envoyés, anciens conseils redemandés', async () => {
+  let sent;
+  const env = fakeEnv(async (model, opts) => { sent = { model, ...opts }; return { response: '{"conseils":["Souffle tout sous l’eau avant de tourner la tête."]}' }; });
+  const input = iaInput(swim, [swim], null);
+  assert.ok(input.base.some((t) => /avales de l’eau/.test(t)), 'conseils des règles envoyés comme base');
+  const r = await conseilsIA(env, 'u1', input, T);
+  assert.equal(r.v, 2);
+  assert.match(sent.model, /llama-3.3-70b/);
+  assert.match(sent.messages[0].content, /Ne jamais lever la tête ni le menton/);
+  assert.match(sent.messages[1].content, /Conseils de base/);
+  const ancien = { ...swim, conseilsIA: { conseils: ['Garde le menton au-dessus de l’eau.'] } };
+  assert.doesNotMatch(tipsOf(ancien)[0], /menton/, 'ancienne version : plus affichée');
+  assert.equal(pendingIA([ancien], new Date('2026-10-28T21:00:00').getTime()).length, 1, 'ancienne version : redemandée');
 });

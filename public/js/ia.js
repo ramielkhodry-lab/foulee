@@ -1,3 +1,5 @@
+import { conseils, hasIA } from './conseils.js';
+
 // Conseils de l'IA côté app : ce qu'on envoie au serveur, quand réessayer après un échec,
 // et le message qui dit pourquoi l'IA n'a pas répondu et quand elle reprend.
 
@@ -47,6 +49,7 @@ export function iaInput(entry, history, suite, objectif = '') {
     },
     suite: suite ? `${suite.titre}. ${suite.detail}`.trim() : '',
     objectif,
+    base: conseils(entry),
     precedentes: before,
   };
 }
@@ -63,7 +66,7 @@ export function pendingIA(history, now = Date.now()) {
     const sp = sportOf(h);
     if (!last[sp] || String(h.date) > String(last[sp].date)) last[sp] = h;
   }
-  return Object.values(last).filter((h) => dateOnly(h.date) >= limit && !h.conseilsIA && (!h.iaEchec || now >= retryAt(h.iaEchec)));
+  return Object.values(last).filter((h) => dateOnly(h.date) >= limit && !hasIA(h) && (!h.iaEchec || now >= retryAt(h.iaEchec)));
 }
 
 // Derniers bilans dont l'IA a échoué (pour l'alerte de l'accueil).
@@ -74,7 +77,7 @@ export function failedIA(history, now = Date.now()) {
     const sp = sportOf(h);
     if (!last[sp] || String(h.date) > String(last[sp].date)) last[sp] = h;
   }
-  return Object.values(last).filter((h) => dateOnly(h.date) >= limit && !h.conseilsIA && h.iaEchec);
+  return Object.values(last).filter((h) => dateOnly(h.date) >= limit && !hasIA(h) && h.iaEchec);
 }
 
 // « cette nuit à 01:00 », « aujourd'hui à 14:30 », « demain à 09:00 ».

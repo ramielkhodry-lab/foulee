@@ -31,7 +31,7 @@ await page.route('https://api.test/**', async (r) => {
   if (url.pathname === '/me/conseils') {
     asked.push(JSON.parse(r.request().postData()));
     if (mode === 'quota') return reply({ error: 'Quota gratuit de l’IA épuisé pour aujourd’hui', code: 'quota', resetAt: Date.UTC(2026, 9, 29) }, 429);
-    return reply({ model: 'mistral-small-3.1-24b-instruct', at: Date.now(), conseils: [
+    return reply({ model: 'llama-3.3-70b-instruct-fp8-fast', v: 2, at: Date.now(), conseils: [
       'Tu bois la tasse parce que tu inspires trop tôt : souffle longuement par le nez sous l’eau, et ne tourne la tête qu’une fois les poumons vides.',
       'Fais tes 4 longueurs de respiration en crawl très lent, en respirant tous les 2 bras, toujours du même côté pour commencer.',
       '« Bonne fatigue » à 4/5 : garde le même volume mercredi et prends 20 s au bord dès que le rythme se casse.',
@@ -93,7 +93,32 @@ await page.waitForTimeout(400);
 const suiteOk = await page.textContent('#app');
 await page.screenshot({ path: '/tmp/foulee-ia-suite.png', fullPage: true });
 
+// Jour du bilan : conseils du coach derrière un bouton.
+await page.click('[data-tab="accueil"]');
+await page.click(`[data-pickday="${new Date().toLocaleDateString('sv-SE')}"]`);
+await page.click('details.hist[open] .coach summary');
+const jourBilan = await page.textContent('#app');
+await page.locator('details.hist[open]').first().screenshot({ path: '/tmp/foulee-coach-jour.png' });
+// Carte d'une séance future : le détail se déplie sur place.
+await page.click('[data-pickday="2026-11-04"]');
+await page.click('.day-detail summary');
+const detail = await page.textContent('.day-card');
+await page.locator('.day-card').screenshot({ path: '/tmp/foulee-detail-longueurs.png' });
+// Programme : chaque séance se déplie.
+await page.click('[data-tab="programme"]');
+await page.click('.timeline details.plan-row:has(.ico.natation) summary');
+const progDetail = await page.textContent('.timeline');
+// Questionnaire : une partie par sport.
+await page.click('[data-questionnaire]');
+await page.click('[data-qsport="muscu"]');
+const parts = await page.locator('.q-part').count();
+await page.screenshot({ path: '/tmp/foulee-questionnaire-parties.png', fullPage: true });
+
 const checks = {
+  'jour du bilan : conseils du coach': jourBilan.includes('Conseils du coach suite à ta séance') && jourBilan.includes('Écrits par l’IA'),
+  'carte du 4/11 : détail longueur par longueur sur place': detail.includes('Échauffement : 4 longueurs') && detail.includes('Respiration'),
+  'programme : détail d’une natation': progDetail.includes('Échauffement : 4 longueurs'),
+  'questionnaire : 3 parties': parts === 3,
   'quota : conseils de secours affichés': suiteQuota.includes('Conseils de secours') && suiteQuota.includes('avales de l’eau'),
   'quota : heure de reprise': /reprend (cette nuit|aujourd'hui|demain) à \d\d:\d\d/.test(suiteQuota),
   'alerte à l’accueil': accueilQuota.includes('IA indisponible') && accueilQuota.includes('Réessayer maintenant'),

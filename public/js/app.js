@@ -5,6 +5,7 @@ import * as account from './account.js';
 import { createTrack, addPoint, markGap, summary, encodeTrace, decodeTrace } from './gps.js';
 import { drawTrace } from './map.js';
 import { iaInput, pendingIA, failedIA, failureMessage } from './ia.js';
+import { tipsOf, tipsSource, hasIA } from './conseils.js';
 import { GOALS_MUSCU, LIEUX, NIVEAUX_MUSCU, MUSCLES, alternatives, byId, muscuPlan, nextSeance, nextLoad, tonnage } from './muscu.js';
 import { upcoming, planOptions, nextRunLevel, runLevel, afterBilan, HORIZON, GOALS_RUN, START_RUN, GOALS_SWIM, START_SWIM, LEVELS } from './plan.js';
 
@@ -114,8 +115,13 @@ function planRow(p, showNow = false) {
       ? `<b>${shortDate(p.date)} <em>${esc(p.title)}</em></b><span>${esc(p.exercices.map((x) => x.nom.split(' (')[0]).join(', '))}</span>`
       : `<b>${shortDate(p.date)} <em>palier ${p.level}/${p.max}</em></b><span>${esc(p.title)}</span>`;
   const side = p.sport === 'natation' ? `${p.distance}<small>m</small>` : p.sport === 'muscu' ? `${p.exercices.length}<small>exos</small>` : `${Math.round(total(p.steps) / 60)}<small>min</small>`;
+  // Détail à un toucher : longueur par longueur, exercices, ou déroulé de la course.
+  const more = p.sport === 'natation' ? `<ol class="hero-steps">${p.plan.map((l) => `<li>${esc(l)}</li>`).join('')}</ol>`
+    : p.sport === 'muscu' ? exoList(p)
+      : `<p class="small">${esc(stepsSummary(p.steps))}</p>`;
   return `
-    <div class="li">${icon(p.sport)}<div class="li-main">${main}</div><span class="li-side ${p.sport}">${side}</span></div>
+    <details class="hist plan-row"><summary class="li">${icon(p.sport)}<div class="li-main">${main}</div><span class="li-side ${p.sport}">${side}</span></summary>
+      <div class="li-more">${more}<p class="muted small">${esc(p.reason)}</p></div></details>
     ${showNow ? `<button class="btn-ghost small-btn" data-startplan="${esc(p.date)}">La faire maintenant ›</button>` : ''}`;
 }
 
@@ -131,6 +137,19 @@ function mountMaps() {
   }
 }
 document.addEventListener('toggle', (e) => { if (e.target.open) mountMaps(); }, true);
+
+// Conseils du coach sur une séance faite : ceux de l'IA s'ils existent, sinon ceux des règles.
+function coachTips(h) {
+  const tips = tipsOf(h);
+  if (!tips.length) return '';
+  const ia = tipsSource(h) === 'ia';
+  return `
+    <details class="coach ${sportOf(h)}">
+      <summary>Conseils du coach suite à ta séance <i>›</i></summary>
+      <p class="coach-src">${ia ? 'Écrits par l’IA à partir de ton ressenti' : 'Conseils des règles de Foulée'}</p>
+      <ul>${tips.map((t) => `<li>${esc(t)}</li>`).join('')}</ul>
+    </details>`;
+}
 
 // Séance passée : ligne dépliable, le détail reste à un toucher.
 function historyRow(h, open = false) {
@@ -165,6 +184,7 @@ function historyRow(h, open = false) {
         ${feel.length ? `<p class="muted small">${feel.join(' · ')}</p>` : ''}
         ${h.commentaire ? `<p class="small">« ${esc(h.commentaire)} »</p>` : ''}
         ${!feel.length && !h.commentaire && !h.structure ? '<p class="muted small">Pas de ressenti noté.</p>' : ''}
+        ${coachTips(h)}
       </div>
     </details>`;
 }
@@ -229,6 +249,9 @@ function muscuLibrary(d) {
     }).join('')}</div>`;
 }
 
+// En-tête d'une partie du questionnaire : un sport, sa couleur.
+const qPartHead = (sport) => `<div class="q-part-head">${icon(sport)}<h2>${SPORT_LABEL[sport]}</h2></div>`;
+
 // Invitation à répondre au questionnaire, tant que ce profil ne l'a pas fait.
 const questionnaireBanner = () => `
   <button class="q-banner" data-questionnaire>
@@ -288,7 +311,8 @@ function sessionCard(p) {
         </ul>
         ${whyTips(p)}
         ${isToday ? '<button class="cta swim" data-logplan="natation"><span>Noter ma séance</span><i>›</i></button>' : ''}
-        <button class="day-link" data-tab="programme">Le détail longueur par longueur ›</button>
+        <details class="day-detail natation"><summary>Le détail longueur par longueur <i>›</i></summary>
+          <ol class="hero-steps">${p.plan.map((l) => `<li>${esc(l)}</li>`).join('')}</ol></details>
       </section>`;
   }
   if (p.sport === 'muscu') {
@@ -306,7 +330,7 @@ function sessionCard(p) {
         </ul>
         ${whyTips(p)}
         ${isToday ? '<button class="cta muscu" data-logplan="muscu"><span>Noter ma séance</span><i>›</i></button>' : ''}
-        <button class="day-link" data-tab="programme">Exercices, charges et répétitions ›</button>
+        <details class="day-detail muscu"><summary>Exercices, charges et répétitions <i>›</i></summary>${exoList(p)}</details>
       </section>`;
   }
   const mins = Math.round(total(p.steps) / 60);
@@ -974,7 +998,7 @@ const screens = {
       <ul class="conseils ${r.sport}">${r.conseils.map((t) => `<li>${esc(t)}</li>`).join('')}</ul>
       ${r.next ? `<h3>Prochaine ${r.sport === 'natation' ? 'natation' : r.sport === 'muscu' ? 'muscu' : 'course'}</h3><div class="list">${planRow(r.next)}</div>` : ''}
       <p class="muted small">${r.source === 'ia'
-        ? 'La suite du programme est décidée par les règles de Foulée. Les conseils sont écrits par une IA gratuite (Mistral, via Cloudflare) : elle peut se tromper, ce n’est pas un coach ni un médecin.'
+        ? 'La suite du programme est décidée par les règles de Foulée. Les conseils sont écrits par une IA gratuite (Llama, via Cloudflare) : elle peut se tromper, ce n’est pas un coach ni un médecin.'
         : 'Règles fixes de Foulée, pas un coach : difficulté, essoufflement, fatigue, douleur et les mots de ton ressenti décident.'} Tes conseils restent affichés sur la carte de la prochaine séance.</p>
       <div class="row" style="margin-top:14px"><button data-tab="progression">Mon historique</button><button class="btn-dark" data-tab="programme">Mon programme</button></div>`;
   },
@@ -1155,7 +1179,7 @@ const screens = {
         <button data-qsport="muscu" class="${q.sports.includes('muscu') ? 'on muscu' : ''}">Musculation</button>
       </div>
 
-      ${q.sports.includes('course') ? `
+      ${q.sports.includes('course') ? `<section class="q-part course">${qPartHead('course')}
         <h3>${num()}Ton objectif en course</h3>
         ${Object.entries(GOALS_RUN).map(([k, g]) => radio('q-objc', k, q.objectifCourse, g.label, g.detail)).join('')}
         <h3>${num()}Aujourd'hui, tu cours sans t'arrêter…</h3>
@@ -1163,9 +1187,9 @@ const screens = {
           : START_RUN.map((x) => radio('q-nivc', x.level, q.niveauCourse, x.label)).join('')}
         <h3>${num()}Tes jours de course</h3>
         ${qDays('joursCourse', q.joursCourse)}
-        <p class="muted small" style="margin-top:8px">Garde un jour entre deux courses : sinon la seconde devient un jour de repos.</p>` : ''}
+        <p class="muted small" style="margin-top:8px">Garde un jour entre deux courses : sinon la seconde devient un jour de repos.</p></section>` : ''}
 
-      ${q.sports.includes('natation') ? `
+      ${q.sports.includes('natation') ? `<section class="q-part natation">${qPartHead('natation')}
         <h3>${num()}Ton bassin</h3>
         <div class="seg"><button data-qbassin="25" class="${q.bassin === 25 ? 'on natation' : ''}">25 m</button><button data-qbassin="50" class="${q.bassin === 50 ? 'on natation' : ''}">50 m</button></div>
         <h3>${num()}Ton objectif en natation</h3>
@@ -1174,9 +1198,9 @@ const screens = {
         ${swims ? '<p class="q-known">Déjà connu grâce à tes séances : le programme repart de ta dernière nage.</p>'
           : START_SWIM.map((x) => radio('q-nivn', x.longueurs, q.niveauNatation, x.label)).join('')}
         <h3>${num()}Tes jours de natation</h3>
-        ${qDays('joursNatation', q.joursNatation, 'natation')}` : ''}
+        ${qDays('joursNatation', q.joursNatation, 'natation')}</section>` : ''}
 
-      ${q.sports.includes('muscu') ? `
+      ${q.sports.includes('muscu') ? `<section class="q-part muscu">${qPartHead('muscu')}
         <h3>${num()}Ton objectif en musculation</h3>
         ${Object.entries(GOALS_MUSCU).map(([k, g]) => radio('q-objm', k, q.objectifMuscu, g.label, `${g.series} séries de ${g.min} à ${g.max} répétitions`)).join('')}
         <h3>${num()}Où tu t'entraînes</h3>
@@ -1185,7 +1209,7 @@ const screens = {
         ${Object.entries(NIVEAUX_MUSCU).map(([k, n]) => radio('q-nivm', k, q.niveauMuscu, n.label, k === 'regulier' ? '' : 'une série de moins les 4 premières séances')).join('')}
         <h3>${num()}Tes jours de musculation</h3>
         ${qDays('joursMuscu', q.joursMuscu, 'muscu')}
-        <p class="muted small" style="margin-top:8px">Jusqu'à 3 jours : corps entier, séances A et B en alternance. 4 jours ou plus : haut du corps et bas du corps.</p>` : ''}
+        <p class="muted small" style="margin-top:8px">Jusqu'à 3 jours : corps entier, séances A et B en alternance. 4 jours ou plus : haut du corps et bas du corps.</p></section>` : ''}
 
       ${errs ? '' : `<section class="q-preview">
         <p class="eyebrow" style="margin:0">Ce que ça donne</p>
@@ -1337,7 +1361,7 @@ async function askIA(id, { force = false } = {}) {
   if (asking.has(id)) return;
   const d = load();
   const entry = d.history.find((h) => h.id === id);
-  if (!entry || (entry.conseilsIA && !force)) return;
+  if (!entry || (hasIA(entry) && !force)) return;
   const setState = (ia) => { if (suite?.entryId === id) { suite.ia = ia; if (current === 'suite') render(); } };
   if (!account.serverEnabled()) return; // pas de serveur : les règles seules, sans alerte
   if (!account.session()) { setState({ code: 'nonconnecte' }); return; }
