@@ -329,3 +329,25 @@ details.hist[open] .li { border-bottom: 0; }
 .mini-bars.neutral i.cur { background: var(--run); }
 .spark { width: 46px; height: 24px; overflow: visible; }
 .spark polyline { fill: none; stroke: var(--run); stroke-width: 2.5; stroke-linecap: round; stroke-linejoin: round; }
+
+/* Questionnaire de chaque profil : un titre affiche, des questions numérotées, un aperçu du programme. */
+.q-title { font-family: var(--display); font-style: italic; font-weight: 800; font-size: 46px; line-height: 0.95; text-transform: uppercase; letter-spacing: 0; margin: 6px 0 10px; }
+.q-num { display: inline-grid; place-items: center; width: 20px; height: 20px; border-radius: 50%; background: var(--surface-2); color: var(--ink); font-size: 11px; margin-right: 8px; vertical-align: 1px; }
+.q-sports { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+.q-sports button { min-height: 64px; font-size: 19px; font-weight: 800; }
+.q-sports button.on.course { background: var(--run); border-color: var(--run); color: var(--on-accent); }
+.q-sports button.on.natation { background: var(--swim); border-color: var(--swim); color: #fff; }
+.q-known { background: var(--surface); border-radius: 14px; padding: 12px 14px; margin: 0; font-size: 15px; }
+.q-preview { margin-top: 22px; padding: 16px 0 0; border-top: 1px solid var(--line); }
+.q-preview p { margin: 8px 0; }
+.q-preview b { display: block; font-size: 13px; text-transform: uppercase; letter-spacing: 0.06em; }
+.q-preview b.run { color: var(--run); }
+.q-preview b.swim { color: var(--swim); }
+.q-banner { display: flex; align-items: center; gap: 12px; width: 100%; text-align: left; margin: 0 0 18px; padding: 18px; border-radius: var(--radius); background: var(--run); border: 0; color: var(--on-accent); }
+.q-banner > span { flex: 1; }
+.q-banner b { display: block; font-family: var(--display); font-style: italic; font-weight: 800; font-size: 26px; text-transform: uppercase; line-height: 1; margin-bottom: 6px; }
+.q-banner span span { font-size: 14px; font-weight: 500; }
+.q-banner i { font-style: normal; font-size: 30px; font-weight: 800; }
+.q-summary { list-style: none; padding: 0; margin: 0 0 12px; }
+.q-summary li { padding: 6px 0 6px 12px; border-left: 3px solid var(--run); margin: 0 0 6px; font-size: 15px; }
+.q-summary li.natation { border-color: var(--swim); }

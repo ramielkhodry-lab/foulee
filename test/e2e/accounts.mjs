@@ -76,6 +76,12 @@ try {
   checks['premier compte proposé sans invitation'] = (await text(rami.page)).includes('Premier compte');
   await rami.page.fill('#acc-prenom', 'Rami');
   await rami.page.click('[data-register]');
+  // Nouveau compte sans questionnaire : il s'ouvre ; « Plus tard » laisse la bannière.
+  await rami.page.waitForSelector('[data-qsave]', { timeout: 15000 });
+  await rami.page.click('text=Plus tard');
+  checks['bannière tant que le questionnaire n’est pas rempli'] = Boolean(await rami.page.$('.q-banner'));
+  await rami.page.click('[data-tab="profil"]');
+  await rami.page.click('[data-tab="compte"]');
   await rami.page.waitForSelector('[data-logout]', { timeout: 15000 });
   const ramiToken = await token(rami.page);
   await rami.page.waitForTimeout(500);
@@ -97,8 +103,25 @@ try {
   checks['invitation reconnue'] = (await text(femme.page)).includes("Rami t'invite");
   await femme.page.fill('#acc-prenom', 'Sarah');
   await femme.page.click('[data-register]');
-  await femme.page.waitForSelector('[data-logout]', { timeout: 15000 });
+  await femme.page.waitForSelector('[data-qsave]', { timeout: 15000 });
+  checks['questionnaire proposé à la création du compte'] = (await text(femme.page)).includes('Ce que tu pratiques');
+  checks['le questionnaire de la femme est vierge'] = !(await femme.page.$('.q-sports button.on'));
+  // Course seulement, objectif 5 km, 5 min sans s'arrêter, mardi + jeudi + samedi.
+  await femme.page.click('[data-qsport="course"]');
+  await femme.page.check('input[name="q-objc"][value="5km"]');
+  await femme.page.check('input[name="q-nivc"][value="4"]');
+  for (const n of [1, 5]) await femme.page.click(`[data-qday="joursCourse"][data-v="${n}"]`);
+  for (const n of [2, 4, 6]) await femme.page.click(`[data-qday="joursCourse"][data-v="${n}"]`);
+  await femme.page.screenshot({ path: '/tmp/foulee-questionnaire.png', fullPage: true });
+  await femme.page.click('[data-qsave]');
+  await femme.page.waitForSelector('.level-num');
+  const prog = await text(femme.page);
+  checks['programme de la femme : palier 4/14, pas de natation'] = (await femme.page.textContent('.level-num')).replace(/\s/g, '') === '4/14' && !/natation/i.test(prog);
+  await femme.page.screenshot({ path: '/tmp/foulee-programme-femme.png', fullPage: true });
+  await femme.page.waitForTimeout(2600); // envoi différé au serveur
   const femmeToken = await token(femme.page);
+  const fq = (await (await call('/me/data', femmeToken)).json()).data?.profile?.questionnaire;
+  checks['questionnaire enregistré sur son compte'] = fq?.objectifCourse === '5km' && fq.sports.join() === 'course' && fq.joursCourse.join() === '2,4,6';
 
   // 4. Isolation : chacun ne lit que ses données.
   const femmeData = await (await call('/me/data', femmeToken)).json();
@@ -107,7 +130,9 @@ try {
   checks['identité séparée'] = meF.prenom === 'Sarah' && meF.id !== (await (await call('/me', ramiToken)).json()).id;
   checks['sans jeton : refusé'] = (await call('/me/data', null)).status === 401;
   checks['faux jeton : refusé'] = (await call('/me/data', 'abc')).status === 401;
-  await call('/me/data', femmeToken, { method: 'PUT', body: JSON.stringify({ data: { history: [{ id: 'f1' }] } }) });
+  const ramiQ = (await (await call('/me/data', ramiToken)).json()).data?.profile?.questionnaire;
+  checks['le questionnaire de la femme ne touche pas Rami'] = !ramiQ;
+  await call('/me/data', femmeToken, { method: 'PUT', body: JSON.stringify({ data: { ...(await (await call('/me/data', femmeToken)).json()).data, history: [{ id: 'f1', sport: 'course', date: '2026-10-27', douleur: 'genou' }] } }) });
   const ramiAfter = await (await call('/me/data', ramiToken)).json();
   checks['écrire chez soi ne touche pas l’autre compte'] = ramiAfter.data.history.some((h) => h.id === 'r1') && !ramiAfter.data.history.some((h) => h.id === 'f1');
 
@@ -115,6 +140,32 @@ try {
   const code = link.split('invite=')[1];
   const reuse = await (await call('/auth/register/options', null, { method: 'POST', body: JSON.stringify({ prenom: 'X', invite: code }) })).json();
   checks['invitation réutilisée refusée'] = Boolean(reuse.error);
+
+  // 5 bis. Téléphone partagé : la femme se déconnecte, le frère crée son compte sur ce même
+  // téléphone. Rien de la femme ne doit partir sur le compte du frère.
+  await rami.page.click('[data-invite="join"]');
+  await rami.page.waitForTimeout(800);
+  const link2 = (await rami.page.textContent('#invite-link')).trim();
+  await femme.page.reload();
+  await femme.page.waitForTimeout(800);
+  await femme.page.click('[data-tab="profil"]');
+  await femme.page.click('[data-tab="compte"]');
+  const femmeKept = (await (await call('/me/data', femmeToken)).json()).data;
+  checks['téléphone partagé : les données de la femme restent sur son compte'] = femmeKept.history.some((h) => h.id === 'f1') && femmeKept.profile.questionnaire.objectifCourse === '5km';
+  await femme.page.click('[data-logout]');
+  await femme.page.waitForSelector('[data-login]');
+  await femme.page.goto(link2);
+  await femme.page.waitForSelector('#acc-prenom');
+  await femme.page.waitForTimeout(500);
+  checks['téléphone partagé : prévenu que le compte démarre vide'] = (await text(femme.page)).includes('ton compte démarre vide');
+  await femme.page.fill('#acc-prenom', 'Karim');
+  await femme.page.click('[data-register]');
+  await femme.page.waitForSelector('[data-qsave]', { timeout: 15000 });
+  checks['téléphone partagé : questionnaire vierge pour le frère'] = !(await femme.page.$('.q-sports button.on'));
+  await femme.page.waitForTimeout(2600);
+  const frereToken = await token(femme.page);
+  const frereData = JSON.stringify((await (await call('/me/data', frereToken)).json()).data);
+  checks['téléphone partagé : rien de la femme chez le frère'] = !frereData.includes('f1') && !frereData.includes('genou') && !frereData.includes('5km');
 
   // 6. Rami se déconnecte puis se reconnecte avec sa passkey ; ses données reviennent.
   await rami.page.click('[data-logout]');
