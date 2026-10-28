@@ -91,3 +91,44 @@ test('questionnaire : l’historique prime sur le niveau déclaré, l’objectif
   assert.equal(nextRunLevel([run('2026-10-26', 14, { difficulte: 1 })], { maxLevel: 12 }).level, 12, 'objectif abaissé : on reste au plafond');
   for (const l of LEVELS) validateSteps(levelSteps(l.id));
 });
+
+test('natation de Rami du 28/10 (4/5 partout, avale de l’eau) : même volume, conseils de respiration', async () => {
+  const { afterBilan, HORIZON } = await import('../public/js/plan.js');
+  const data = JSON.parse(readFileSync(new URL('./fixtures/historique.json', import.meta.url)));
+  const swim = { id: 'n28', sport: 'natation', date: '2026-10-28', swim: { bassinM: 25, longueurs: 30, nages: ['crawl', 'brasse', 'dos'], detail: '' }, difficulte: 4, essoufflement: 4, fatigue: 4, douleur: '', commentaire: 'Très fatigué mais bonne fatigue. Quand j’inspire j’avale de l’eau et ça me coupe le rythme' };
+  const history = [...data.history, swim];
+  const r = afterBilan(history, swim, {}, '2026-10-28');
+  assert.equal(r.verdict, 'garde');
+  assert.equal(r.next.longueurs, 30);
+  assert.equal(r.next.date, '2026-11-04');
+  assert.ok(r.conseils.some((t) => /bulles|souffle tout/i.test(t)), 'conseil respiration');
+  assert.equal(r.next.focus, 'respiration');
+  assert.ok(r.next.plan.some((l) => l.startsWith('Respiration')));
+  assert.deepEqual(r.next.tips, r.conseils, 'conseils repris sur la carte de la prochaine natation');
+  // Programme continu : des séances bien après le 9 novembre.
+  const plan = upcoming(history, {}, '2026-10-28', HORIZON);
+  assert.ok(plan.some((p) => p.date > '2026-12-31' && p.sport === 'natation'));
+  assert.ok(plan.filter((p) => p.date >= '2026-11-09' && p.date < '2026-11-16' && p.sport !== 'repos').length >= 3, 'semaine du 9 : 2 courses + 1 natation');
+});
+
+test('natation : recul si douleur ou difficulté 5, montée sinon', () => {
+  const sw = (l, extra = {}) => ({ sport: 'natation', date: '2026-10-14', swim: { bassinM: 25, longueurs: l }, ...extra });
+  assert.equal(nextSwim([sw(30, { difficulte: 5 })]).longueurs, 28);
+  assert.equal(nextSwim([sw(30, { douleur: 'épaule' })]).longueurs, 28);
+  assert.equal(nextSwim([sw(30, { essoufflement: 4, fatigue: 4, difficulte: 3 })]).longueurs, 30);
+  assert.equal(nextSwim([sw(30, { difficulte: 2 })]).longueurs, 32);
+});
+
+test('course : palier qui monte, conseils selon le ressenti', async () => {
+  const { afterBilan } = await import('../public/js/plan.js');
+  const { conseils } = await import('../public/js/conseils.js');
+  const easy = run('2026-10-30', 2, { difficulte: 2 });
+  const r = afterBilan([easy], easy, {}, '2026-10-30');
+  assert.equal(r.verdict, 'monte');
+  assert.equal(r.titre, 'Palier 2 → 3');
+  assert.equal(nextRunLevel([run('2026-10-30', 3, { difficulte: 3, essoufflement: 5 })]).level, 3);
+  assert.ok(conseils(run('d', 2, { douleur: 'genou droit' })).some((t) => /Genou/.test(t)));
+  assert.ok(conseils(run('d', 2, { essoufflement: 4 })).some((t) => /phrase entière/.test(t)));
+  assert.ok(conseils(run('d', 2, { commentaire: 'gros point de côté' })).some((t) => /Point de côté/.test(t)));
+  assert.equal(conseils(run('d', 2, { difficulte: 3 })).length, 1);
+});

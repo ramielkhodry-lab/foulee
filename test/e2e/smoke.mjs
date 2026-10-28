@@ -68,6 +68,9 @@ await page.screenshot({ path: '/tmp/foulee-bilan.png', fullPage: true });
 await page.click('[data-scale="difficulte"][data-v="2"]');
 await page.fill('#comm', 'Test automatique');
 await page.click('[data-savebilan]');
+const suite1 = await page.textContent('#app');
+await page.screenshot({ path: '/tmp/foulee-suite-course.png', fullPage: true });
+await page.click('#app [data-tab="progression"]');
 const journal = await page.textContent('#app');
 await page.click('details.hist summary');
 await page.waitForTimeout(800);
@@ -86,8 +89,14 @@ await page.fill('#longueurs', '30');
 await page.dispatchEvent('#longueurs', 'change');
 const swimdist = await page.textContent('#swimdist');
 await page.check('[data-nage="crawl"]');
+await page.click('[data-scale="difficulte"][data-v="4"]');
 await page.click('[data-scale="essoufflement"][data-v="4"]');
+await page.click('[data-scale="fatigue"][data-v="4"]');
+await page.fill('#comm', "Très fatigué mais bonne fatigue. Quand j'inspire j'avale de l'eau et ça me coupe le rythme");
 await page.click('[data-savemanual]');
+const suite2 = await page.textContent('#app');
+await page.screenshot({ path: '/tmp/foulee-suite-natation.png', fullPage: true });
+await page.click('#app [data-tab="progression"]');
 const journal2 = await page.textContent('#app');
 await page.screenshot({ path: '/tmp/foulee-journal2.png', fullPage: true });
 // Réimporter ne doit rien dupliquer.
@@ -108,6 +117,16 @@ await page.click('[data-tab="accueil"]');
 await page.screenshot({ path: '/tmp/foulee-accueil2.png', fullPage: true });
 await page.click('[data-tab="programme"]');
 const programme = await page.textContent('#app');
+await page.click('[data-moreplan]');
+await page.screenshot({ path: '/tmp/foulee-programme-4sem.png', fullPage: true });
+await page.click('[data-tab="accueil"]');
+await page.click('[data-pickday="2026-11-04"]');
+const nextSwimCard = await page.textContent('#app');
+await page.locator('.day-card').screenshot({ path: '/tmp/foulee-carte-natation.png' });
+const farWeek = await page.locator('[data-pickday="2026-12-21"] .dot, [data-pickday="2026-12-23"] .dot').count() >= 2;
+await page.click('[data-pickday="2026-11-09"]');
+await page.screenshot({ path: '/tmp/foulee-semaine-9-nov.png', fullPage: true });
+await page.click('[data-tab="programme"]');
 await page.screenshot({ path: '/tmp/foulee-programme.png', fullPage: true });
 await page.click('[data-tab="progression"]');
 await page.screenshot({ path: '/tmp/foulee-progression.png', fullPage: true });
@@ -146,6 +165,8 @@ const checks = {
   'tracé affiché au bilan': bilanMap >= 2,
   'tracé enregistré compact': Boolean(stored.trace?.seg?.length) && !stored.gpsPoints,
   'tracé dans l\u2019historique': histMap === 1,
+  'après le bilan : ce qui change': suite1.includes('Et maintenant') && suite1.includes('Prochaine course'),
+  'natation 4/5 + eau avalée : même volume et conseil respiration': suite2.includes('On garde 30 longueurs') && suite2.includes('Souffle tout'),
   'bilan au journal': journal.includes('Test automatique') && journal.includes('difficulté 2/5'),
   'distance natation calculée': swimdist.includes('750 m'),
   'natation saisie au journal': journal2.includes('30 × 25 m = 750 m') && journal2.includes('essoufflement 4/5'),
@@ -156,7 +177,9 @@ const checks = {
   'bandeau si pause non voulue': interruptedText.includes('Séance interrompue (appel'),
   'calendrier : jour passé = séance faite': dayPast.includes('3,35 km') && dayPast.includes('vendredi 23 octobre'),
   'calendrier : jour à venir = séance prévue': /Palier \d+\/12/.test(dayFuture) && dayFuture.includes('La faire maintenant'),
-  'programme calculé (course + natation)': /palier [23]\/12/.test(programme) && programme.includes('32 longueurs'),
+  'programme calculé (course + natation)': /palier [23]\/12/.test(programme) && programme.includes('30 longueurs') && programme.includes('Voir 2 semaines de plus'),
+  'carte de la prochaine natation : conseils du bilan': nextSwimCard.includes('Conseils de ton dernier bilan') && nextSwimCard.includes('4 longueurs pour travailler ta respiration'),
+  'programme continu : séances 8 semaines plus loin': farWeek,
   'accueil : dernière séance = la plus récente': accueil.includes('mercredi 28 octobre') && !accueil.includes('30 septembre'),
   'aucune erreur hors alertes d\u2019import': errors.filter((e) => !e.includes('séance(s) ajoutée(s)')).length === 0,
 };
