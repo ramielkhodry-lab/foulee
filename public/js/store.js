@@ -30,7 +30,7 @@ export const PRESETS = [
   },
 ];
 
-const empty = () => ({
+export const empty = () => ({
   profile: { prenom: '' },
   sessions: structuredClone(PRESETS),
   history: [],

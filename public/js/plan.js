@@ -2,11 +2,14 @@
 // L'historique n'est donc jamais réécrit, et une séance manquée décale
 // simplement la suite. Les règles sont volontairement simples et explicables.
 
+import { muscuPlan, nextSeance, followingSeance } from './muscu.js';
+
 const W = (min) => ({ kind: 'marche', duration: min * 60 });
 const R = (min) => ({ kind: 'course_lente', duration: min * 60 });
 const rep = (n, run, walk) => Array.from({ length: n }, (_, i) => (i < n - 1 || walk === 0 ? [R(run), W(walk)] : [R(run)])).flat().filter((s) => s.duration > 0);
 
-// Paliers marche/course jusqu'à 30 min en continu.
+// Paliers marche/course jusqu'à 30 min en continu (palier 12), puis course continue
+// jusqu'à 1 h (palier 18) pour qui prépare un 10 km.
 export const LEVELS = [
   { id: 1, label: '7 × (2 min course + 2 min marche)', main: rep(7, 2, 2) },
   { id: 2, label: '6 × (3 min course + 2 min marche)', main: rep(6, 3, 2) },
@@ -20,7 +23,58 @@ export const LEVELS = [
   { id: 10, label: '20 min de course continue', main: [R(20)] },
   { id: 11, label: '25 min de course continue', main: [R(25)] },
   { id: 12, label: '30 min de course continue', main: [R(30)] },
+  { id: 13, label: '35 min de course continue', main: [R(35)] },
+  { id: 14, label: '40 min de course continue', main: [R(40)] },
+  { id: 15, label: '45 min de course continue', main: [R(45)] },
+  { id: 16, label: '50 min de course continue', main: [R(50)] },
+  { id: 17, label: '55 min de course continue', main: [R(55)] },
+  { id: 18, label: '1 h de course continue', main: [R(60)] },
 ];
+
+// Réponses du questionnaire de chaque profil (profile.questionnaire). Seules les
+// réponses qui changent le programme sont demandées.
+export const GOALS_RUN = {
+  '30min': { max: 12, label: 'Courir 30 min sans m’arrêter' },
+  '5km': { max: 14, label: 'Courir 5 km', detail: 'jusqu’à 40 min de course continue' },
+  '10km': { max: 18, label: 'Préparer un 10 km', detail: 'jusqu’à 1 h de course continue' },
+};
+export const START_RUN = [
+  { level: 1, label: 'Je ne cours pas encore, ou 1 à 2 min' },
+  { level: 2, label: 'Environ 3 min' },
+  { level: 4, label: 'Environ 5 min' },
+  { level: 7, label: 'Environ 10 min' },
+  { level: 10, label: 'Environ 20 min' },
+  { level: 12, label: '30 min ou plus' },
+];
+export const GOALS_SWIM = [500, 1000, 1500, 2000]; // mètres par séance
+export const START_SWIM = [
+  { longueurs: 8, label: 'Moins de 10 longueurs' },
+  { longueurs: 16, label: '10 à 20 longueurs' },
+  { longueurs: 24, label: '20 à 30 longueurs' },
+  { longueurs: 32, label: 'Plus de 30 longueurs' },
+];
+export const SPORTS = ['course', 'natation', 'muscu'];
+// Sans questionnaire : le programme d'origine, course + natation.
+const DEFAULT_SPORTS = ['course', 'natation'];
+
+// Options du programme tirées du questionnaire. Sans questionnaire : réglages d'origine
+// (course + natation, palier 12 maximum, 16 longueurs pour commencer, 60 au plus).
+export function planOptions(q, settings = {}) {
+  const sports = q?.sports?.length ? q.sports : DEFAULT_SPORTS;
+  const bassin = q?.bassin || 25;
+  return {
+    sports,
+    maxLevel: GOALS_RUN[q?.objectifCourse]?.max ?? 12,
+    startLevel: q?.niveauCourse || 1,
+    startNote: q?.niveauCourse ? 'D’après ton questionnaire' : null,
+    bassin,
+    startLongueurs: q?.niveauNatation || 16,
+    maxLongueurs: q?.objectifNatation ? Math.max(4, Math.round(q.objectifNatation / bassin)) : 60,
+    joursCourse: sports.includes('course') ? (q?.joursCourse ?? settings.joursCourse ?? [1, 5]) : [],
+    joursNatation: sports.includes('natation') ? (q?.joursNatation ?? settings.joursNatation ?? [3]) : [],
+    joursMuscu: sports.includes('muscu') ? (q?.joursMuscu ?? []) : [],
+  };
+}
 
 export function levelSteps(levelId) {
   const lvl = LEVELS[Math.min(Math.max(levelId, 1), LEVELS.length) - 1];
@@ -52,44 +106,57 @@ export function runLevel(h) {
   return found ? found.id : null;
 }
 
-export function nextRunLevel(history) {
+export function nextRunLevel(history, opts = {}) {
+  const max = opts.maxLevel ?? 12;
+  const start = Math.min(max, opts.startLevel ?? 1);
   const runs = history
     .map((h) => ((h.sport || 'course') === 'course' && !h.level && runLevel(h) ? { ...h, level: runLevel(h) } : h))
     .filter((h) => (h.sport || 'course') === 'course' && h.level)
     .sort((a, b) => String(a.date).localeCompare(String(b.date)));
-  if (runs.length === 0) return { level: 1, reason: 'Premier palier : alterner 2 min de course et 2 min de marche.' };
+  if (runs.length === 0) {
+    if (start > 1) return { level: start, reason: `${opts.startNote || 'Point de départ'} : ${LEVELS[start - 1].label}.` };
+    return { level: 1, reason: 'Premier palier : alterner 2 min de course et 2 min de marche.' };
+  }
   const last = runs.at(-1);
   const incomplete = last.steps && last.completedSteps !== undefined && last.completedSteps < last.steps.length;
   if (hasPain(last) || last.difficulte === 5) {
-    return { level: Math.max(1, last.level - 1), reason: `Ta dernière course était ${hasPain(last) ? 'douloureuse' : 'très dure'} : on redescend d'un palier.` };
+    return { level: Math.min(max, Math.max(1, last.level - 1)), reason: `Ta dernière course était ${hasPain(last) ? 'douloureuse' : 'très dure'} : on redescend d'un palier.` };
   }
   if (last.difficulte === 4 || incomplete) {
-    return { level: last.level, reason: incomplete ? "Tu n'as pas fini la dernière séance : on refait le même palier." : 'Dernière course dure : on consolide le même palier.' };
+    return { level: Math.min(max, last.level), reason: incomplete ? "Tu n'as pas fini la dernière séance : on refait le même palier." : 'Dernière course dure : on consolide le même palier.' };
   }
   if (last.difficulte && last.difficulte <= 2) {
-    return { level: Math.min(LEVELS.length, last.level + 1), reason: 'Dernière course facile : on passe au palier suivant.' };
+    if (last.level >= max) return { level: max, reason: 'Objectif atteint : on garde ce palier.' };
+    return { level: Math.min(max, last.level + 1), reason: 'Dernière course facile : on passe au palier suivant.' };
   }
   const sameLevel = [];
   for (let i = runs.length - 1; i >= 0 && runs[i].level === last.level; i--) sameLevel.push(runs[i]);
+  if (last.level >= max) return { level: max, reason: 'Objectif atteint : on garde ce palier.' };
   if (sameLevel.length >= 2) {
-    return { level: Math.min(LEVELS.length, last.level + 1), reason: 'Deux séances réussies à ce palier : on passe au suivant.' };
+    return { level: Math.min(max, last.level + 1), reason: 'Deux séances réussies à ce palier : on passe au suivant.' };
   }
   return {
-    level: last.level,
+    level: Math.min(max, last.level),
     reason: last.difficulte ? 'Séance correcte : on la refait une fois pour la consolider.' : "Tu n'as pas noté la difficulté : on consolide ce palier une fois avant de monter.",
   };
 }
 
-// Natation : +2 longueurs par rapport à la dernière séance (environ +10 %), plafonné à 60.
-export function nextSwim(history) {
+// Natation : +2 longueurs par rapport à la dernière séance (environ +10 %), plafonné
+// par l'objectif (60 longueurs sans questionnaire).
+export function nextSwim(history, opts = {}) {
+  const cap = opts.maxLongueurs ?? 60;
   const swims = history.filter((h) => h.sport === 'natation' && h.swim?.longueurs).sort((a, b) => String(a.date).localeCompare(String(b.date)));
   const last = swims.at(-1);
-  const bassin = last?.swim.bassinM || 25;
-  if (!last) return { longueurs: 16, bassin, reason: 'Première séance : 16 longueurs, à ton rythme, avec des pauses.' };
-  if (hasPain(last) || last.difficulte >= 4) {
-    return { longueurs: last.swim.longueurs, bassin, reason: 'Dernière séance difficile : même volume, plus de pauses.' };
+  const bassin = last?.swim.bassinM || opts.bassin || 25;
+  if (!last) {
+    const n = Math.min(cap, opts.startLongueurs ?? 16);
+    return { longueurs: n, bassin, reason: `Première séance : ${n} longueurs, à ton rythme, avec des pauses.` };
   }
-  const longueurs = Math.min(60, last.swim.longueurs + 2);
+  if (hasPain(last) || last.difficulte >= 4) {
+    return { longueurs: Math.min(cap, last.swim.longueurs), bassin, reason: 'Dernière séance difficile : même volume, plus de pauses.' };
+  }
+  if (last.swim.longueurs >= cap) return { longueurs: cap, bassin, reason: `Objectif atteint : ${cap} longueurs, on garde ce volume.` };
+  const longueurs = Math.min(cap, last.swim.longueurs + 2);
   return { longueurs, bassin, reason: `Dernière fois ${last.swim.longueurs} longueurs : on ajoute 2 longueurs.` };
 }
 
@@ -108,15 +175,17 @@ function swimPlan(longueurs) {
   ].filter(Boolean);
 }
 
-// Séances prévues de `from` (inclus) sur `days` jours.
-// settings.joursCourse / joursNatation : jours de la semaine (0 = dimanche).
-export function upcoming(history, settings, from, days = 14) {
-  const joursCourse = settings.joursCourse ?? [1, 5];
-  const joursNatation = settings.joursNatation ?? [3];
+// Séances prévues de `from` (inclus) sur `days` jours, selon le questionnaire `q`.
+// Jours de la semaine : 0 = dimanche.
+export function upcoming(history, settings, from, days = 14, q = null) {
+  const opts = planOptions(q, settings);
+  const { joursCourse, joursNatation, joursMuscu } = opts;
+  let seance = joursMuscu.length ? nextSeance(history, joursMuscu.length) : null;
+  const firstMuscu = { reason: null };
   const done = new Set(history.map((h) => `${dateOnly(h.date)}|${h.sport || 'course'}`));
   const lastRun = history.filter((h) => (h.sport || 'course') === 'course').map((h) => dateOnly(h.date)).sort().at(-1);
-  const run = nextRunLevel(history);
-  const swim = nextSwim(history);
+  const run = nextRunLevel(history, opts);
+  const swim = nextSwim(history, opts);
   const out = [];
   let runPlaced = lastRun || null;
   let level = run.level;
@@ -132,18 +201,23 @@ export function upcoming(history, settings, from, days = 14) {
         out.push({ date, sport: 'repos', reason: 'Course prévue décalée : il faut un jour de repos entre deux courses.' });
       } else {
         const lvl = LEVELS[level - 1];
-        out.push({ date, sport: 'course', level, title: lvl.label, steps: levelSteps(level), reason });
+        out.push({ date, sport: 'course', level, max: opts.maxLevel, title: lvl.label, steps: levelSteps(level), reason });
         runPlaced = date;
         // Hypothèse pour les séances suivantes : la séance se passe bien (difficulté 3).
         reason = 'Prévu si la séance précédente se passe bien. Recalculé après ton bilan.';
         const sim = [...history, { sport: 'course', date, level, difficulte: 3 }];
-        level = nextRunLevel(sim).level;
+        level = nextRunLevel(sim, opts).level;
         history = sim;
       }
     } else if (joursNatation.includes(wd) && !done.has(`${date}|natation`)) {
       out.push({ date, sport: 'natation', longueurs: swimLongueurs, bassin: swim.bassin, distance: swimLongueurs * swim.bassin, plan: swimPlan(swimLongueurs), reason: swimReason });
-      swimLongueurs = Math.min(60, swimLongueurs + 2);
+      swimLongueurs = Math.min(opts.maxLongueurs, swimLongueurs + 2);
       swimReason = 'Prévu si la séance précédente se passe bien. Recalculé après ton bilan.';
+    } else if (joursMuscu.includes(wd) && !done.has(`${date}|muscu`)) {
+      const m = muscuPlan(seance, history, q || {}, settings.muscuChoix || {});
+      out.push({ date, sport: 'muscu', ...m, reason: firstMuscu.reason ?? m.reason });
+      firstMuscu.reason = 'Charges recalculées après chaque séance notée.';
+      seance = followingSeance(seance, joursMuscu.length);
     }
   }
   return out;

@@ -97,6 +97,7 @@ export const pushData = (data) => api('/me/data', { method: 'PUT', body: { data 
 
 // Fusion sans perte : séances réalisées et séances perso réunies par identifiant.
 // Pour les réglages et le profil, le téléphone l'emporte, sauf s'il est neuf (aucune séance).
+// À n'appeler qu'avec des données locales du même compte (voir ownLocal dans app.js).
 export function mergeData(local, remote) {
   if (!remote) return local;
   const fresh = !(local.history && local.history.length);
@@ -106,10 +107,16 @@ export function mergeData(local, remote) {
     for (const x of a) out.set(x.id, x);
     return [...out.values()];
   };
+  // Questionnaire : la réponse la plus récente l'emporte, quel que soit l'appareil.
+  const lq = local.profile?.questionnaire;
+  const rq = remote.profile?.questionnaire;
+  const questionnaire = (lq?.answeredAt || 0) >= (rq?.answeredAt || 0) ? lq : rq;
+  const profile = pick(local.profile, remote.profile);
+  if (questionnaire) profile.questionnaire = questionnaire;
   return {
     ...remote,
     ...local,
-    profile: pick(local.profile, remote.profile),
+    profile,
     settings: pick(local.settings, remote.settings),
     history: byId(local.history, remote.history),
     sessions: byId(local.sessions, remote.sessions),

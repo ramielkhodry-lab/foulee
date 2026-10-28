@@ -66,3 +66,28 @@ test('palier déduit d’un déroulé saisi à la main', async () => {
   const sansPalier = [{ sport: 'course', date: '2026-10-23', structure: '7 × (2 min course + 2 min marche)' }, { sport: 'course', date: '2026-10-26', structure: '6 × (3 min course + 2 min marche)' }];
   assert.equal(nextRunLevel(sansPalier).level, 2);
 });
+
+test('questionnaire : sports, objectif, niveau de départ et jours de chaque profil', () => {
+  // Frère : course seulement, 10 min sans s'arrêter, objectif 10 km, mardi + samedi.
+  const frere = { sports: ['course'], objectifCourse: '10km', niveauCourse: 7, joursCourse: [2, 6] };
+  const plan = upcoming([], {}, '2026-11-02', 14, frere);
+  assert.ok(plan.length && plan.every((p) => p.sport === 'course'), 'jamais de natation');
+  assert.deepEqual([...new Set(plan.map((p) => new Date(`${p.date}T12:00`).getDay()))].sort(), [2, 6]);
+  assert.equal(plan[0].level, 7);
+  assert.equal(plan[0].max, 18);
+  assert.match(plan[0].reason, /questionnaire/);
+  // Natation seule, bassin de 50 m, objectif 1 km = 20 longueurs, départ à 24 : plafonné.
+  const swim = upcoming([], {}, '2026-11-02', 7, { sports: ['natation'], bassin: 50, objectifNatation: 1000, niveauNatation: 24, joursNatation: [4] });
+  assert.deepEqual(swim.map((p) => [p.sport, p.longueurs, p.distance]), [['natation', 20, 1000]]);
+});
+
+test('questionnaire : l’historique prime sur le niveau déclaré, l’objectif plafonne', () => {
+  const data = JSON.parse(readFileSync(new URL('./fixtures/historique.json', import.meta.url)));
+  const q = { sports: ['course', 'natation'], objectifCourse: '10km', niveauCourse: 12, joursCourse: [1, 5], bassin: 25, objectifNatation: 1500, joursNatation: [3] };
+  const avant = upcoming(data.history, {}, '2026-10-27', 14);
+  const apres = upcoming(data.history, {}, '2026-10-27', 14, q);
+  assert.deepEqual(apres.map((p) => [p.date, p.sport, p.level, p.longueurs]), avant.map((p) => [p.date, p.sport, p.level, p.longueurs]), 'le programme de Rami ne bouge pas');
+  assert.equal(nextRunLevel([run('2026-10-26', 12, { difficulte: 1 })], { maxLevel: 18 }).level, 13, '10 km : on continue après 30 min');
+  assert.equal(nextRunLevel([run('2026-10-26', 14, { difficulte: 1 })], { maxLevel: 12 }).level, 12, 'objectif abaissé : on reste au plafond');
+  for (const l of LEVELS) validateSteps(levelSteps(l.id));
+});

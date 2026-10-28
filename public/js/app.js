@@ -1,10 +1,11 @@
 import { KINDS } from './phrases.js';
 import { assemble, stepAt } from './track.js';
-import { load, update, uid, PRESETS, onSave, replace } from './store.js';
+import { load, update, uid, PRESETS, onSave, replace, empty } from './store.js';
 import * as account from './account.js';
 import { createTrack, addPoint, markGap, summary, encodeTrace, decodeTrace } from './gps.js';
 import { drawTrace } from './map.js';
-import { upcoming } from './plan.js';
+import { GOALS_MUSCU, LIEUX, NIVEAUX_MUSCU, MUSCLES, alternatives, byId, muscuPlan, nextSeance, nextLoad, tonnage } from './muscu.js';
+import { upcoming, planOptions, nextRunLevel, runLevel, GOALS_RUN, START_RUN, GOALS_SWIM, START_SWIM, LEVELS } from './plan.js';
 
 const app = document.getElementById('app');
 const audio = document.getElementById('player');
@@ -19,6 +20,9 @@ const total = (steps) => steps.reduce((a, s) => a + s.duration, 0);
 const JOURS = [[1, 'L'], [2, 'M'], [3, 'M'], [4, 'J'], [5, 'V'], [6, 'S'], [0, 'D']];
 const today = () => new Date().toLocaleDateString('sv-SE'); // AAAA-MM-JJ, heure locale
 const dateLabel = (d) => new Date(String(d).length === 10 ? `${d}T12:00` : d).toLocaleDateString('fr-FR', { weekday: 'long', day: 'numeric', month: 'long' });
+// Programme de ce profil, d'après son historique et son questionnaire.
+const planFor = (d, days = 14) => upcoming(d.history, d.settings, today(), days, d.profile.questionnaire);
+const practiced = (d, sport) => planOptions(d.profile.questionnaire).sports.includes(sport);
 const allure = (secKm) => `${Math.floor(secKm / 60)}'${String(Math.round(secKm % 60)).padStart(2, '0')}/km`;
 
 // Résumé court d'une séance : « 5 min marche · 6 × (3 min course + 2 min marche) · 5 min marche ».
@@ -38,9 +42,15 @@ function stepsSummary(steps) {
 const ICONS = {
   course: '<path d="M5 6l6 6-6 6M13 6l6 6-6 6"/>',
   natation: '<path d="M2 9c2.5-2 4.5-2 7 0s4.5 2 7 0 4.5-2 6 0M2 15c2.5-2 4.5-2 7 0s4.5 2 7 0 4.5-2 6 0"/>',
+  muscu: '<path d="M6.5 6.5v11M17.5 6.5v11M3.5 9v6M20.5 9v6M6.5 12h11"/>',
   repos: '<path d="M20 14.5A8 8 0 0 1 9.5 4a8 8 0 1 0 10.5 10.5z"/>',
 };
 const icon = (sport) => `<span class="ico ${sport}"><svg viewBox="0 0 24 24">${ICONS[sport] || ICONS.course}</svg></span>`;
+const SPORT_LABEL = { course: 'Course', natation: 'Natation', muscu: 'Musculation' };
+const kgLabel = (kg) => `${String(kg).replace('.', ',')} kg`;
+// « 3 × 8-12 · 40 kg » : la dose d'un exercice prévu.
+const dose = (x) => `${x.series} × ${x.min}–${x.max}${x.unite === 's' ? ' s' : ''}${x.poids ? ` · ${kgLabel(x.poids)}` : x.materiel === 'corps' ? '' : ' · charge à trouver'}`;
+const exoList = (p) => `<ol class="exos">${p.exercices.map((x) => `<li><b>${esc(x.nom)}</b><span class="dose">${dose(x)}</span><span class="why">${esc(x.muscle)} · ${esc(x.reason)}</span></li>`).join('')}</ol>`;
 const shortDate = (d) => new Date(`${String(d).slice(0, 10)}T12:00`).toLocaleDateString('fr-FR', { weekday: 'short', day: 'numeric', month: 'short' });
 
 // Séance du jour : le seul bloc mis en vedette de l'accueil et du programme.
@@ -58,11 +68,22 @@ function todayHero(p) {
         ${isToday ? '<button class="btn-swim" data-logplan="natation">Noter ma séance</button>' : ''}
       </section>`;
   }
+  if (p.sport === 'muscu') {
+    return `
+      <section class="hero muscu">
+        <p class="eyebrow">${when} · musculation</p>
+        <p class="hero-num">${p.exercices.length}<small>exercices</small></p>
+        <p class="hero-sub">${esc(p.title)} · ${p.repos} s de repos entre les séries</p>
+        ${exoList(p)}
+        <p class="muted small">${esc(p.reason)}</p>
+        ${isToday ? '<button class="cta muscu" data-logplan="muscu"><span>Noter ma séance</span><i>›</i></button>' : ''}
+      </section>`;
+  }
   const mins = Math.round(total(p.steps) / 60);
   const runs = p.steps.filter((s) => KINDS[s.kind].effort === 'course');
   return `
     <section class="hero course">
-      <p class="eyebrow">${when} · course · palier ${p.level}/12</p>
+      <p class="eyebrow">${when} · course · palier ${p.level}/${p.max}</p>
       <p class="hero-num">${mins}<small>min</small></p>
       <p class="hero-sub">${esc(p.title)}</p>
       <div class="effort-bar">${p.steps.map((s) => `<i class="${KINDS[s.kind].effort}" style="flex:${s.duration}"></i>`).join('')}</div>
@@ -79,8 +100,10 @@ function planRow(p, showNow = false) {
   }
   const main = p.sport === 'natation'
     ? `<b>${shortDate(p.date)}</b><span>${p.longueurs} longueurs · ${p.distance} m</span>`
-    : `<b>${shortDate(p.date)} <em>palier ${p.level}/12</em></b><span>${esc(p.title)}</span>`;
-  const side = p.sport === 'natation' ? `${p.distance}<small>m</small>` : `${Math.round(total(p.steps) / 60)}<small>min</small>`;
+    : p.sport === 'muscu'
+      ? `<b>${shortDate(p.date)} <em>${esc(p.title)}</em></b><span>${esc(p.exercices.map((x) => x.nom.split(' (')[0]).join(', '))}</span>`
+      : `<b>${shortDate(p.date)} <em>palier ${p.level}/${p.max}</em></b><span>${esc(p.title)}</span>`;
+  const side = p.sport === 'natation' ? `${p.distance}<small>m</small>` : p.sport === 'muscu' ? `${p.exercices.length}<small>exos</small>` : `${Math.round(total(p.steps) / 60)}<small>min</small>`;
   return `
     <div class="li">${icon(p.sport)}<div class="li-main">${main}</div><span class="li-side ${p.sport}">${side}</span></div>
     ${showNow ? `<button class="btn-ghost small-btn" data-startplan="${esc(p.date)}">La faire maintenant ›</button>` : ''}`;
@@ -109,20 +132,24 @@ function historyRow(h, open = false) {
   if (h.allureSecKm) parts.push(`allure ${allure(h.allureSecKm)}`);
   if (h.gpsIncomplet) parts.push('GPS incomplet');
   if (h.steps && h.source === 'guidee') parts.push(`${h.completedSteps}/${h.steps.length} étapes`);
+  if (sport === 'muscu' && h.exercices?.length) parts.unshift(`${h.sessionName} · ${h.exercices.length} exercices`);
   const feel = [
     h.difficulte && `difficulté ${h.difficulte}/5`,
     h.essoufflement && `essoufflement ${h.essoufflement}/5`,
     h.fatigue && `fatigue ${h.fatigue}/5`,
     h.douleur && `douleur : ${esc(h.douleur)}`,
   ].filter(Boolean);
-  const side = sport === 'natation'
+  const side = sport === 'muscu'
+    ? (tonnage(h) ? `${Math.round(tonnage(h)).toLocaleString('fr-FR')}<small>kg</small>` : '')
+    : sport === 'natation'
     ? (swimMeters(h) ? `${swimMeters(h)}<small>m</small>` : '')
     : h.distanceKm ? `${h.distanceKm.toLocaleString('fr-FR')}<small>km</small>` : h.elapsedSec ? `${Math.round(h.elapsedSec / 60)}<small>min</small>` : '';
   return `
     <details class="hist"${open ? ' open' : ''}>
-      <summary class="li">${icon(sport)}<div class="li-main"><b>${dateLabel(h.date)}</b><span>${parts.length ? parts.join(' · ') : esc(h.structure || h.sessionName || (sport === 'natation' ? 'Natation' : 'Course'))}</span></div><span class="li-side ${sport}">${side}</span></summary>
+      <summary class="li">${icon(sport)}<div class="li-main"><b>${dateLabel(h.date)}</b><span>${parts.length ? parts.join(' · ') : esc(h.structure || h.sessionName || SPORT_LABEL[sport])}</span></div><span class="li-side ${sport}">${side}</span></summary>
       <div class="li-more">
         ${traceOf(h).length ? `<div class="map" data-map="${esc(h.id)}"></div>` : ''}
+        ${sport === 'muscu' && h.exercices?.length ? `<ul class="steps">${h.exercices.map((x) => `<li><span>${esc(x.nom)}</span><span class="muted small">${x.poids ? `${kgLabel(x.poids)} · ` : ''}${(x.reps || []).filter((r) => r > 0).join(' / ')}${x.unite === 's' ? ' s' : ''}</span></li>`).join('')}</ul>${tonnage(h) ? '<p class="muted small">Total soulevé : charge × répétitions, hors poids du corps.</p>' : ''}` : ''}
         ${sport === 'natation' && h.swim?.nages?.length ? `<p class="small">${esc(h.swim.nages.join(', '))}${h.swim.detail ? ` · ${esc(h.swim.detail)}` : ''}</p>` : ''}
         ${h.structure ? `<p class="small">${esc(h.structure)}</p>` : ''}
         ${feel.length ? `<p class="muted small">${feel.join(' · ')}</p>` : ''}
@@ -151,6 +178,7 @@ function weekTotals(history, monday) {
   return {
     km: inWeek.filter((h) => sportOf(h) === 'course').reduce((a, h) => a + (h.distanceKm || 0), 0),
     m: inWeek.filter((h) => sportOf(h) === 'natation').reduce((a, h) => a + swimMeters(h), 0),
+    kg: inWeek.filter((h) => sportOf(h) === 'muscu').reduce((a, h) => a + tonnage(h), 0),
     n: inWeek.length,
   };
 }
@@ -169,6 +197,40 @@ function weekStrip(history, plan, sel) {
   }).join('')}</div>`;
 }
 
+// Exercices de musculation par muscle, avec la dernière charge notée pour chacun.
+function muscuLibrary(d) {
+  const lieu = d.profile.questionnaire?.lieu || 'salle';
+  const last = {};
+  for (const h of [...d.history].filter((x) => x.sport === 'muscu').sort((a, b) => String(a.date).localeCompare(String(b.date)))) {
+    for (const x of h.exercices || []) if (x.poids || x.reps?.some((r) => r > 0)) last[x.id] = x;
+  }
+  const info = (e) => {
+    const x = last[e.id];
+    if (!x) return e.materiel === 'corps' ? 'poids du corps' : { machine: 'machine', poulie: 'poulie', barre: 'barre', halteres: 'haltères' }[e.materiel];
+    return `dernière fois : ${x.poids ? `${kgLabel(x.poids)} × ` : ''}${Math.max(...x.reps)}${x.unite === 's' ? ' s' : ''}`;
+  };
+  return `
+    <h3>Exercices par muscle</h3>
+    <p class="muted small">${esc(LIEUX[lieu].label)}. Pour changer un exercice du programme, choisis-en un autre du même muscle quand tu notes ta séance.</p>
+    <div class="lib">${MUSCLES.map((m) => {
+      const list = alternatives(m, lieu);
+      if (!list.length) return '';
+      return `<details><summary>${esc(m[0].toUpperCase() + m.slice(1))} <span class="muted small" style="margin-left:auto;margin-right:8px">${list.length}</span></summary><ul>${list.map((e) => `<li>${esc(e.nom)}<span>${esc(info(e))}</span></li>`).join('')}</ul></details>`;
+    }).join('')}</div>`;
+}
+
+// Invitation à répondre au questionnaire, tant que ce profil ne l'a pas fait.
+const questionnaireBanner = () => `
+  <button class="q-banner" data-questionnaire>
+    <span><b>Personnalise ton programme</b><span>Pour l'instant, c'est le programme par défaut. Tes sports, ton objectif, ton niveau, tes jours : 1 minute.</span></span><i>›</i>
+  </button>`;
+
+// « + Natation » / « + Course » : seulement les sports de ce profil.
+function manualButtons(d, cls, date = null, style = '', courseSuffix = '') {
+  const b = (sport, label, color) => (practiced(d, sport) ? `<button data-manual="${sport}"${date ? ` data-mdate="${date}"` : ''} class="${cls}" style="color:var(${color})">+ ${label}</button>` : '');
+  return `<div class="row"${style ? ` style="${style}"` : ''}>${b('natation', 'Natation', '--swim')}${b('course', `Course${courseSuffix}`, '--run')}${b('muscu', 'Muscu', '--muscu')}</div>`;
+}
+
 // Ce que montre le jour choisi : la séance faite, la séance prévue, ou rien.
 function dayPanel(history, plan, sel) {
   const t = today();
@@ -176,7 +238,7 @@ function dayPanel(history, plan, sel) {
     const done = history.filter((h) => String(h.date).slice(0, 10) === sel);
     if (done.length) return `<div class="list">${done.map((h) => historyRow(h, true)).join('')}</div>`;
     return `<section class="hero rest"><p class="eyebrow">${dateLabel(sel)}</p><p class="hero-num">Rien</p><p class="muted">Aucune séance notée ce jour-là.</p>
-      <div class="row"><button data-manual="natation" data-mdate="${sel}" class="btn-ghost" style="color:var(--swim)">+ Natation</button><button data-manual="course" data-mdate="${sel}" class="btn-ghost" style="color:var(--run)">+ Course</button></div></section>`;
+      ${manualButtons(load(), 'btn-ghost', sel)}</section>`;
   }
   const p = plan.find((x) => x.date === sel);
   if (p && p.sport !== 'repos') return sessionCard(p);
@@ -220,6 +282,23 @@ function sessionCard(p) {
         <button class="day-link" data-tab="programme">Le détail longueur par longueur ›</button>
       </section>`;
   }
+  if (p.sport === 'muscu') {
+    const muscles = [...new Set(p.exercices.map((x) => x.muscle))];
+    return `
+      <section class="day-card muscu">
+        <div class="stripes" aria-hidden="true"></div>
+        <p class="day-kicker">${kicker}</p>
+        <h2 class="day-title">Muscu</h2>
+        <p class="day-sub">${esc(p.title)}</p>
+        <ul class="day-facts">
+          ${fact('effort', `${p.exercices.length} exercices · ${p.exercices[0].series} séries chacun`)}
+          ${fact('niveau', esc(muscles.slice(0, 4).join(', ') + (muscles.length > 4 ? '…' : '')))}
+          ${fact('temps', `${p.repos} s de repos entre les séries`)}
+        </ul>
+        ${isToday ? '<button class="cta muscu" data-logplan="muscu"><span>Noter ma séance</span><i>›</i></button>' : ''}
+        <button class="day-link" data-tab="programme">Exercices, charges et répétitions ›</button>
+      </section>`;
+  }
   const mins = Math.round(total(p.steps) / 60);
   const runs = p.steps.filter((s) => KINDS[s.kind].effort === 'course');
   const runText = runs.length === 1 ? `${minutesLabel(runs[0].duration)} de course sans t'arrêter` : `${runs.length} × ${minutesLabel(runs[0].duration)} de course, marche entre`;
@@ -228,7 +307,7 @@ function sessionCard(p) {
       <div class="stripes" aria-hidden="true"></div>
       <p class="day-kicker">${kicker}</p>
       <h2 class="day-title">Course</h2>
-      <p class="day-sub">Palier ${p.level}/12 · ${runs.length === 1 ? 'continu' : 'marche-course'}</p>
+      <p class="day-sub">Palier ${p.level}/${p.max} · ${runs.length === 1 ? 'continu' : 'marche-course'}</p>
       <ul class="day-facts">
         ${fact('temps', `${mins} min, échauffement compris`)}
         ${fact('effort', runText)}
@@ -286,7 +365,8 @@ function indicators(history) {
 function weekCurve(history, kind) {
   const monday = mondayOf(today());
   const weeks = Array.from({ length: 8 }, (_, i) => addDays(monday, (i - 7) * 7));
-  const vals = weeks.map((w) => weekTotals(history, w)[kind === 'course' ? 'km' : 'm']);
+  const unit = { course: 'km', natation: 'm', muscu: 'kg' }[kind];
+  const vals = weeks.map((w) => weekTotals(history, w)[unit]);
   const max = Math.max(...vals) || 1;
   const W = 320;
   const H = 130;
@@ -298,7 +378,7 @@ function weekCurve(history, kind) {
     const mx = (x0 + x1) / 2;
     d += ` C${mx},${y0} ${mx},${y1} ${x1},${y1}`;
   }
-  const color = kind === 'course' ? 'var(--run)' : 'var(--swim)';
+  const color = { course: 'var(--run)', natation: 'var(--swim)', muscu: 'var(--muscu)' }[kind];
   const [lx, ly] = pts.at(-1);
   return `
     <svg class="curve" viewBox="0 0 ${W} ${H}" preserveAspectRatio="none" aria-hidden="true">
@@ -308,7 +388,7 @@ function weekCurve(history, kind) {
       ${pts.map(([x, y], i) => (vals[i] ? `<circle cx="${x}" cy="${y}" r="3.5" fill="${color}"/>` : '')).join('')}
       <circle cx="${lx}" cy="${ly}" r="9" fill="${color}" opacity="0.25"/>
     </svg>
-    <div class="curve-x">${weeks.map((w, i) => `<span>${vals[i] ? `<b>${kind === 'course' ? fmtKm(vals[i]) : vals[i]}</b>` : '<b>·</b>'}${Number(w.slice(8))}/${Number(w.slice(5, 7))}</span>`).join('')}</div>`;
+    <div class="curve-x">${weeks.map((w, i) => `<span>${vals[i] ? `<b>${kind === 'course' ? fmtKm(vals[i]) : kind === 'muscu' && vals[i] >= 1000 ? `${fmtKm(vals[i] / 1000)}t` : Math.round(vals[i])}</b>` : '<b>·</b>'}${Number(w.slice(8))}/${Number(w.slice(5, 7))}</span>`).join('')}</div>`;
 }
 
 // --- Sons -------------------------------------------------------------------
@@ -594,6 +674,99 @@ function tick() {
   requestAnimationFrame(tick);
 }
 
+// --- Questionnaire de chaque profil -------------------------------------------
+
+let qDraft = null; // réponses en cours (copie), null hors du questionnaire
+
+const sameLevelOpts = { maxLevel: LEVELS.length };
+function openQuestionnaire() {
+  const d = load();
+  const q = d.profile.questionnaire;
+  const lastSwim = d.history.filter((h) => sportOf(h) === 'natation' && h.swim?.bassinM).sort((a, b) => String(a.date).localeCompare(String(b.date))).at(-1);
+  const bassin = q?.bassin || lastSwim?.swim.bassinM || 25;
+  // Sans réponse : les sports déjà pratiqués d'après l'historique, sinon rien de coché.
+  const fromHistory = [...new Set(d.history.map(sportOf))].filter((x) => SPORTS_ORDER.includes(x));
+  qDraft = {
+    sports: [...(q?.sports ?? fromHistory)],
+    objectifCourse: q?.objectifCourse ?? null,
+    niveauCourse: q?.niveauCourse ?? null,
+    joursCourse: [...(q?.joursCourse ?? d.settings.joursCourse ?? [1, 5])],
+    bassin,
+    objectifNatation: q?.objectifNatation ?? null,
+    niveauNatation: q?.niveauNatation ?? null,
+    joursNatation: [...(q?.joursNatation ?? d.settings.joursNatation ?? [3])],
+    objectifMuscu: q?.objectifMuscu ?? null,
+    lieu: q?.lieu ?? null,
+    niveauMuscu: q?.niveauMuscu ?? null,
+    joursMuscu: [...(q?.joursMuscu ?? [])],
+    error: null,
+  };
+  go('questionnaire');
+}
+
+// Niveau déjà connu par l'historique : on ne le redemande pas (et on ne l'écrase pas).
+const hasRuns = (d) => d.history.some((h) => sportOf(h) === 'course' && runLevel(h));
+const hasSwims = (d) => d.history.some((h) => sportOf(h) === 'natation' && h.swim?.longueurs);
+
+function questionnaireErrors(q, d) {
+  if (!q.sports.length) return 'Choisis au moins un sport.';
+  if (q.sports.includes('course')) {
+    if (!q.objectifCourse) return 'Choisis ton objectif de course.';
+    if (!hasRuns(d) && !q.niveauCourse) return 'Dis combien de temps tu cours sans t’arrêter aujourd’hui.';
+    if (!q.joursCourse.length) return 'Choisis au moins un jour de course.';
+  }
+  if (q.sports.includes('natation')) {
+    if (!q.objectifNatation) return 'Choisis ton objectif de natation.';
+    if (!hasSwims(d) && !q.niveauNatation) return 'Dis combien de longueurs tu nages aujourd’hui.';
+    if (!q.joursNatation.length) return 'Choisis au moins un jour de natation.';
+  }
+  if (q.sports.includes('muscu')) {
+    if (!q.objectifMuscu) return 'Choisis ton objectif en musculation.';
+    if (!q.lieu) return 'Dis où tu fais ta musculation.';
+    if (!q.niveauMuscu) return 'Dis où tu en es en musculation.';
+    if (!q.joursMuscu.length) return 'Choisis au moins un jour de musculation.';
+  }
+  const jours = q.sports.flatMap((x) => q[DAYS_KEY[x]]);
+  if (new Set(jours).size !== jours.length) return 'Un seul sport par jour : un jour est coché pour deux sports.';
+  return null;
+}
+
+// Les réponses gardées : celles des sports choisis seulement.
+function cleanAnswers(q, d) {
+  const out = { v: 1, answeredAt: Date.now(), sports: SPORTS_ORDER.filter((x) => q.sports.includes(x)) };
+  if (out.sports.includes('course')) {
+    Object.assign(out, { objectifCourse: q.objectifCourse, joursCourse: [...q.joursCourse].sort() });
+    if (!hasRuns(d)) out.niveauCourse = q.niveauCourse;
+  }
+  if (out.sports.includes('natation')) {
+    Object.assign(out, { bassin: q.bassin, objectifNatation: q.objectifNatation, joursNatation: [...q.joursNatation].sort() });
+    if (!hasSwims(d)) out.niveauNatation = q.niveauNatation;
+  }
+  if (out.sports.includes('muscu')) {
+    Object.assign(out, { objectifMuscu: q.objectifMuscu, lieu: q.lieu, niveauMuscu: q.niveauMuscu, joursMuscu: [...q.joursMuscu].sort() });
+  }
+  return out;
+}
+const SPORTS_ORDER = ['course', 'natation', 'muscu'];
+const DAYS_KEY = { course: 'joursCourse', natation: 'joursNatation', muscu: 'joursMuscu' };
+
+const radio = (name, value, cur, label, detail) => `<label class="choice"><input type="radio" name="${name}" value="${value}" ${String(cur) === String(value) ? 'checked' : ''}><span><strong>${esc(label)}</strong>${detail ? ` : ${esc(detail)}` : ''}</span></label>`;
+// Jours d'un sport ; ceux déjà pris par un autre sport choisi sont grisés (un sport par jour).
+const qDays = (key, sel, cls = '') => {
+  const taken = new Set(qDraft.sports.map((x) => DAYS_KEY[x]).filter((k) => k !== key).flatMap((k) => qDraft[k]));
+  return `<div class="days ${cls}">${JOURS.map(([n, l]) => `<button data-qday="${key}" data-v="${n}" class="${sel.includes(n) ? 'on' : ''}" ${taken.has(n) && !sel.includes(n) ? 'disabled' : ''}>${l}</button>`).join('')}</div>`;
+};
+
+// Résumé des réponses pour le Profil.
+function answersSummary(q) {
+  const jours = (list) => JOURS.filter(([n]) => list.includes(n)).map(([n]) => ['dim.', 'lun.', 'mar.', 'mer.', 'jeu.', 'ven.', 'sam.'][n]).join(', ');
+  const lines = [];
+  if (q.sports.includes('course')) lines.push(['course', `${GOALS_RUN[q.objectifCourse]?.label ?? 'Course'} · ${jours(q.joursCourse)}`]);
+  if (q.sports.includes('natation')) lines.push(['natation', `${(q.objectifNatation / 1000).toLocaleString('fr-FR')} km par séance, bassin de ${q.bassin} m · ${jours(q.joursNatation)}`]);
+  if (q.sports.includes('muscu')) lines.push(['muscu', `${GOALS_MUSCU[q.objectifMuscu]?.label ?? 'Musculation'}, ${LIEUX[q.lieu]?.label.toLowerCase() ?? ''} · ${jours(q.joursMuscu)}`]);
+  return lines;
+}
+
 // --- Écrans -------------------------------------------------------------------
 
 let current = 'accueil';
@@ -608,7 +781,7 @@ const screens = {
     const d = load();
     const last = [...d.history].sort((a, b) => String(b.date).localeCompare(String(a.date)))[0];
     const installed = navigator.standalone === true || matchMedia('(display-mode: standalone)').matches;
-    const plan = upcoming(d.history, d.settings, today(), 14);
+    const plan = planFor(d);
     const todayItem = plan.find((p) => p.date === today());
     const resumable = live ? null : savedLive();
     const next = plan.filter((p) => p.sport !== 'repos' && p.date !== today()).slice(0, 3);
@@ -619,6 +792,7 @@ const screens = {
         <div><span>Bonjour</span><b>${esc(prenom) || 'à toi'}</b></div>
       </header>
       <p class="motto">Discipline aujourd'hui<br>Progrès demain</p>
+      ${d.profile.questionnaire ? '' : questionnaireBanner()}
       ${installed ? '' : '<div class="notice"><strong>Installe Foulée :</strong> dans Safari, touche Partager puis « Sur l\'écran d\'accueil », et ouvre l\'app depuis son icône. Le guidage est plus fiable ainsi.</div>'}
       ${resumable ? `<div class="alert">Séance interrompue : « ${esc(resumable.session.name)} », arrêtée à ${mmss(resumable.pos)}.
         <div class="row" style="margin-top:10px"><button class="btn-dark" data-resume>Reprendre</button><button data-dropresume>Abandonner</button></div></div>` : ''}
@@ -631,30 +805,32 @@ const screens = {
 
   programme() {
     const d = load();
-    const plan = upcoming(d.history, d.settings, today(), 14);
+    const plan = planFor(d);
     const todayItem = plan.find((p) => p.date === today() && p.sport !== 'repos');
     const firstRun = todayItem?.sport === 'course' ? null : plan.find((p) => p.sport === 'course');
     const rest = plan.filter((p) => p !== todayItem);
     const run = plan.find((p) => p.sport === 'course');
     return `
       <h1>Programme</h1>
+      ${d.profile.questionnaire ? '' : questionnaireBanner()}
       ${run ? `<section class="level">
         <p class="eyebrow" style="margin:0">Ton palier de course</p>
-        <p class="level-num">${run.level}<small>/12</small></p>
-        <div class="level-track">${Array.from({ length: 12 }, (_, i) => `<i class="${i < run.level ? 'on' : ''}"></i>`).join('')}</div>
-        <p class="muted small" style="margin:8px 0 0">Palier 12 = 30 min de course sans marcher. Recalculé après chaque bilan selon ta difficulté, ta fatigue et tes douleurs : des règles fixes, pas un coach humain.</p>
+        <p class="level-num">${run.level}<small>/${run.max}</small></p>
+        <div class="level-track" style="grid-template-columns:repeat(${run.max},1fr)">${Array.from({ length: run.max }, (_, i) => `<i class="${i < run.level ? 'on' : ''}"></i>`).join('')}</div>
+        <p class="muted small" style="margin:8px 0 0">Palier ${run.max} = ${esc(LEVELS[run.max - 1].label.replace(' de course continue', ''))} de course sans marcher. Recalculé après chaque bilan selon ta difficulté, ta fatigue et tes douleurs : des règles fixes, pas un coach humain.</p>
       </section>` : ''}
       ${todayItem ? todayHero(todayItem) : ''}
       <h3>Les 2 prochaines semaines</h3>
-      ${rest.length ? `<div class="timeline">${rest.map((p) => planRow(p, p === firstRun)).join('')}</div>` : '<p class="muted">Aucune séance prévue : choisis tes jours dans Profil.</p>'}
-      <h3>Mes séances</h3>
+      ${rest.length ? `<div class="timeline">${rest.map((p) => planRow(p, p === firstRun)).join('')}</div>` : '<p class="muted">Aucune séance prévue : choisis tes jours dans Profil > Mon programme.</p>'}
+      ${practiced(d, 'muscu') ? muscuLibrary(d) : ''}
+      ${practiced(d, 'course') ? `<h3>Mes séances</h3>
       <p class="muted small">Des séances guidées à faire quand tu veux, en dehors du plan.</p>
-      ${screens.seance(true)}`;
+      ${screens.seance(true)}` : ''}`;
   },
 
   demarrer() {
     const d = load();
-    const todayItem = upcoming(d.history, d.settings, today(), 1).find((p) => p.date === today() && p.sport !== 'repos');
+    const todayItem = planFor(d, 1).find((p) => p.date === today() && p.sport !== 'repos');
     const resumable = savedLive();
     return `
       <h1>Démarrer</h1>
@@ -663,10 +839,12 @@ const screens = {
         <button class="option" data-startplan="${esc(todayItem.date)}"><span><span>Palier ${todayItem.level} · ${Math.round(total(todayItem.steps) / 60)} min</span><span class="muted">${esc(todayItem.title)}</span></span><span class="go">▶</span></button>` : ''}
       ${todayItem?.sport === 'natation' ? `<h3 style="margin-top:0">Prévu aujourd'hui</h3>
         <button class="option natation" data-logplan="natation"><span><span>Natation · ${todayItem.longueurs} longueurs</span><span class="muted">Pas de téléphone dans l'eau : note-la en sortant.</span></span><span class="go">+</span></button>` : ''}
+      ${todayItem?.sport === 'muscu' ? `<h3 style="margin-top:0">Prévu aujourd'hui</h3>
+        <button class="option muscu" data-logplan="muscu"><span><span>${esc(todayItem.title)} · ${todayItem.exercices.length} exercices</span><span class="muted">Note charges et répétitions au fil des séries.</span></span><span class="go">+</span></button>` : ''}
       <h3>Course guidée</h3>
       ${d.sessions.map((x) => `<button class="option" data-start="${esc(x.id)}"><span><span>${esc(x.name)}</span><span class="muted">${minutesLabel(total(x.steps))} · ${x.steps.length} étapes</span></span><span class="go">▶</span></button>`).join('')}
       <h3>Noter une séance faite</h3>
-      <div class="row"><button data-manual="natation" style="color:var(--swim)">+ Natation</button><button data-manual="course" style="color:var(--run)">+ Course</button></div>`;
+      ${manualButtons(d, '')}`;
   },
 
   seance(embedded) {
@@ -770,31 +948,37 @@ const screens = {
     const longest = Math.max(0, ...runs.map((h) => h.distanceKm || 0));
     const paces = runs.map((h) => h.allureSecKm || (h.distanceKm && h.elapsedSec && !h.distanceEstimee ? h.elapsedSec / h.distanceKm : 0)).filter(Boolean);
     const bestSwim = Math.max(0, ...swims.map(swimMeters));
-    const sp = progSport;
-    const key = sp === 'course' ? 'km' : 'm';
+    const progSports = ['course', 'natation', 'muscu'].filter((x) => practiced(d, x) || d.history.some((h) => sportOf(h) === x));
+    const sp = progSports.includes(progSport) ? progSport : progSports[0] || 'course';
+    const key = { course: 'km', natation: 'm', muscu: 'kg' }[sp];
     const wk = weekTotals(d.history, mondayOf(today()))[key];
     const prev = weekTotals(d.history, addDays(mondayOf(today()), -7))[key];
     const diff = wk - prev;
-    const fmt = (v) => (sp === 'course' ? fmtKm(v) : String(Math.round(v)));
+    const fmt = (v) => (sp === 'course' ? fmtKm(v) : Math.round(v).toLocaleString('fr-FR'));
+    // Musculation : meilleure charge par exercice (les 3 plus lourdes).
+    const best = {};
+    for (const h of d.history.filter((x) => sportOf(x) === 'muscu')) for (const x of h.exercices || []) if (x.poids > (best[x.id]?.poids || 0)) best[x.id] = x;
+    const topLifts = Object.values(best).sort((a, b) => b.poids - a.poids).slice(0, 3);
     return `
       <h1>Progression</h1>
       ${d.history.length ? `
-        <div class="seg"><button data-progsport="course" class="${sp === 'course' ? 'on course' : ''}">Course</button><button data-progsport="natation" class="${sp === 'natation' ? 'on natation' : ''}">Natation</button></div>
+        ${progSports.length > 1 ? `<div class="seg">${progSports.map((x) => `<button data-progsport="${x}" class="${sp === x ? `on ${x}` : ''}">${SPORT_LABEL[x]}</button>`).join('')}</div>` : ''}
         <section class="prog ${sp}">
           <p class="eyebrow" style="margin:0">Cette semaine</p>
           <p class="hero-num">${fmt(wk)}<small>${key}</small></p>
           <p class="delta ${diff > 0 ? 'up' : diff < 0 ? 'down' : ''}">${diff > 0 ? '▲' : diff < 0 ? '▼' : '='} ${fmt(Math.abs(diff))} ${key} par rapport à la semaine dernière</p>
           ${weekCurve(d.history, sp)}
         </section>
+        ${sp === 'muscu' ? '<p class="muted small" style="margin-top:4px">Total soulevé = charge × répétitions de la semaine, hors poids du corps.</p>' : ''}
         <h3>Records</h3>
-        <div class="records">
-          <div class="course"><b>${longest ? fmtKm(longest) : '–'}<small>km</small></b><span>plus longue course</span></div>
-          <div class="course"><b>${paces.length ? allure(Math.min(...paces)).replace('/km', '') : '–'}</b><span>meilleure allure</span></div>
-          <div class="natation"><b>${bestSwim || '–'}<small>m</small></b><span>plus longue nage</span></div>
-        </div>
-        <p class="muted small" style="margin-top:8px">Allure moyenne marche comprise : elle baisse quand tu cours plus longtemps.</p>` : ''}
+        ${sp === 'muscu' ? `<div class="records">${topLifts.length ? topLifts.map((x) => `<div class="muscu"><b>${String(x.poids).replace('.', ',')}<small>kg</small></b><span>${esc(x.nom.split(' (')[0])}</span></div>`).join('') : '<div class="muscu"><b>–</b><span>aucune charge notée</span></div>'}</div>` : `<div class="records">
+          ${practiced(d, 'course') || runs.length ? `<div class="course"><b>${longest ? fmtKm(longest) : '–'}<small>km</small></b><span>plus longue course</span></div>
+          <div class="course"><b>${paces.length ? allure(Math.min(...paces)).replace('/km', '') : '–'}</b><span>meilleure allure</span></div>` : ''}
+          ${practiced(d, 'natation') || swims.length ? `<div class="natation"><b>${bestSwim || '–'}<small>m</small></b><span>plus longue nage</span></div>` : ''}
+        </div>`}
+        ${sp === 'course' ? '<p class="muted small" style="margin-top:8px">Allure moyenne marche comprise : elle baisse quand tu cours plus longtemps.</p>' : ''}` : ''}
       <h3>Historique</h3>
-      <div class="row" style="margin-bottom:10px"><button data-manual="natation" class="btn-ghost" style="color:var(--swim)">+ Natation</button><button data-manual="course" class="btn-ghost" style="color:var(--run)">+ Course libre</button></div>
+      ${manualButtons(d, 'btn-ghost', null, 'margin-bottom:10px', ' libre')}
       ${sorted.length === 0 ? '<p class="muted">Aucune séance pour l\'instant.</p>' : `<div class="list">${sorted.map(historyRow).join('')}</div>`}
       <h3>Proches</h3>
       <p class="muted small">Le partage de séances avec tes proches n'existe pas encore : pour l'instant, chacun a son compte et ses données. Inviter quelqu'un : Profil.</p>`;
@@ -806,14 +990,14 @@ const screens = {
     const scale = (field, labels) => `<div class="scale">${[1, 2, 3, 4, 5].map((n) => `<button data-scale="${field}" data-v="${n}" class="${b[field] === n ? 'on' : ''}">${n}</button>`).join('')}</div><p class="muted small">${labels}</p>`;
     const nages = ['crawl', 'brasse', 'dos', 'papillon'];
     return `
-      <h1>${swim ? 'Séance de natation' : b.fromPlan ? 'Course du programme' : 'Course libre'}</h1>
+      <h1>${b.sport === 'muscu' ? esc(b.sessionName) : swim ? 'Séance de natation' : b.fromPlan ? 'Course du programme' : 'Course libre'}</h1>
       ${b.fromPlan ? '<p class="muted">Prérempli avec le programme du jour. Corrige ce qui a changé, puis note ton ressenti.</p>' : ''}
       <div class="card">
         <label for="date">Date</label>
         <input id="date" type="date" value="${esc(b.date)}">
         <label for="duree">Durée (minutes)</label>
         <input id="duree" type="number" inputmode="numeric" min="1" max="600" value="${b.elapsedSec ? Math.round(b.elapsedSec / 60) : ''}">
-        ${swim ? `
+        ${b.sport === 'muscu' ? '' : swim ? `
           <label for="bassin">Longueur du bassin (m)</label>
           <select id="bassin">${[25, 50, 33].map((m) => `<option value="${m}" ${b.swim.bassinM === m ? 'selected' : ''}>${m} m</option>`).join('')}</select>
           <label for="longueurs">Nombre de longueurs</label>
@@ -830,10 +1014,13 @@ const screens = {
           <input id="dist" type="number" inputmode="decimal" step="0.01" min="0" value="${b.distanceKm ?? ''}">
           <label style="font-weight:400"><input id="estim" type="checkbox" style="width:auto" ${b.distanceEstimee ? 'checked' : ''}> C'est une estimation</label>
         `}
-        <label>Difficulté</label>
+      </div>
+      ${b.sport === 'muscu' ? muscuForm(b) : ''}
+      <div class="card">
+        <label style="margin-top:0">Difficulté</label>
         ${scale('difficulte', '1 = très facile · 5 = très dur')}
-        <label>Essoufflement</label>
-        ${scale('essoufflement', '1 = je pouvais parler · 5 = à bout de souffle')}
+        ${b.sport === 'muscu' ? '' : `<label>Essoufflement</label>
+        ${scale('essoufflement', '1 = je pouvais parler · 5 = à bout de souffle')}`}
         <label>Fatigue</label>
         ${scale('fatigue', '1 = en forme · 5 = épuisé')}
         <label for="douleur">Une douleur ?</label>
@@ -898,8 +1085,79 @@ const screens = {
         ${a.invite?.kind === 'recover' ? '' : `<label for="acc-prenom">Prénom</label><input id="acc-prenom" maxlength="40" value="${esc(load().profile.prenom)}">`}
         ${needsInvite && !a.invite ? `<label for="acc-invite">Code ou lien d'invitation</label><input id="acc-invite" autocapitalize="off" autocomplete="off">` : ''}
         <p style="margin-top:12px"><button class="btn-dark" data-register style="width:100%" ${a.busy ? 'disabled' : ''}>${a.invite?.kind === 'recover' ? 'Ajouter ce téléphone' : 'Créer mon compte'}</button></p>
-        <p class="muted small">Ton téléphone crée une passkey protégée par Face ID ou ton empreinte. Tes séances déjà enregistrées ici rejoignent ton compte.</p>
+        <p class="muted small">Ton téléphone crée une passkey protégée par Face ID ou ton empreinte. ${load().owner ? 'Les séances du compte déjà utilisé sur ce téléphone ne seront pas reprises : ton compte démarre vide.' : 'Tes séances déjà enregistrées ici rejoignent ton compte.'}</p>
       </div>`;
+  },
+
+  questionnaire() {
+    const d = load();
+    const q = qDraft;
+    const runs = hasRuns(d);
+    const swims = hasSwims(d);
+    const runFromHistory = runs && nextRunLevel(d.history, sameLevelOpts);
+    const errs = questionnaireErrors(q, d);
+    const preview = errs ? [] : upcoming(d.history, d.settings, today(), 14, cleanAnswers(q, d));
+    const firstRun = preview.find((p) => p.sport === 'course');
+    const firstSwim = preview.find((p) => p.sport === 'natation');
+    const firstMuscu = preview.find((p) => p.sport === 'muscu');
+    const fresh = !d.profile.questionnaire;
+    let n = 0;
+    const num = () => `<span class="q-num">${++n}</span>`;
+    return `
+      ${accountUi.info && fresh ? `<div class="notice">${esc(accountUi.info)}</div>` : ''}
+      <p class="eyebrow" style="margin-top:0">${fresh ? 'Avant de commencer' : 'Mon programme'}</p>
+      <h1 class="q-title">Ton programme,<br>à ta mesure</h1>
+      <p class="muted">Tes réponses ne servent qu'à calculer ton programme. Tu peux les changer quand tu veux dans Profil.</p>
+
+      <h3>${num()}Ce que tu pratiques</h3>
+      <div class="q-sports">
+        <button data-qsport="course" class="${q.sports.includes('course') ? 'on course' : ''}">Course</button>
+        <button data-qsport="natation" class="${q.sports.includes('natation') ? 'on natation' : ''}">Natation</button>
+        <button data-qsport="muscu" class="${q.sports.includes('muscu') ? 'on muscu' : ''}">Musculation</button>
+      </div>
+
+      ${q.sports.includes('course') ? `
+        <h3>${num()}Ton objectif en course</h3>
+        ${Object.entries(GOALS_RUN).map(([k, g]) => radio('q-objc', k, q.objectifCourse, g.label, g.detail)).join('')}
+        <h3>${num()}Aujourd'hui, tu cours sans t'arrêter…</h3>
+        ${runs ? `<p class="q-known">Déjà connu grâce à tes séances : <b>palier ${runFromHistory.level}</b>, ${esc(LEVELS[runFromHistory.level - 1].label)}. Le programme continue de là.</p>`
+          : START_RUN.map((x) => radio('q-nivc', x.level, q.niveauCourse, x.label)).join('')}
+        <h3>${num()}Tes jours de course</h3>
+        ${qDays('joursCourse', q.joursCourse)}
+        <p class="muted small" style="margin-top:8px">Garde un jour entre deux courses : sinon la seconde devient un jour de repos.</p>` : ''}
+
+      ${q.sports.includes('natation') ? `
+        <h3>${num()}Ton bassin</h3>
+        <div class="seg"><button data-qbassin="25" class="${q.bassin === 25 ? 'on natation' : ''}">25 m</button><button data-qbassin="50" class="${q.bassin === 50 ? 'on natation' : ''}">50 m</button></div>
+        <h3>${num()}Ton objectif en natation</h3>
+        ${GOALS_SWIM.map((m) => radio('q-objn', m, q.objectifNatation, `Nager ${(m / 1000).toLocaleString('fr-FR')} km par séance`, `${Math.round(m / q.bassin)} longueurs`)).join('')}
+        <h3>${num()}Aujourd'hui, en une séance, tu nages…</h3>
+        ${swims ? '<p class="q-known">Déjà connu grâce à tes séances : le programme repart de ta dernière nage.</p>'
+          : START_SWIM.map((x) => radio('q-nivn', x.longueurs, q.niveauNatation, x.label)).join('')}
+        <h3>${num()}Tes jours de natation</h3>
+        ${qDays('joursNatation', q.joursNatation, 'natation')}` : ''}
+
+      ${q.sports.includes('muscu') ? `
+        <h3>${num()}Ton objectif en musculation</h3>
+        ${Object.entries(GOALS_MUSCU).map(([k, g]) => radio('q-objm', k, q.objectifMuscu, g.label, `${g.series} séries de ${g.min} à ${g.max} répétitions`)).join('')}
+        <h3>${num()}Où tu t'entraînes</h3>
+        ${Object.entries(LIEUX).map(([k, l]) => radio('q-lieu', k, q.lieu, l.label, l.detail)).join('')}
+        <h3>${num()}Où tu en es</h3>
+        ${Object.entries(NIVEAUX_MUSCU).map(([k, n]) => radio('q-nivm', k, q.niveauMuscu, n.label, k === 'regulier' ? '' : 'une série de moins les 4 premières séances')).join('')}
+        <h3>${num()}Tes jours de musculation</h3>
+        ${qDays('joursMuscu', q.joursMuscu, 'muscu')}
+        <p class="muted small" style="margin-top:8px">Jusqu'à 3 jours : corps entier, séances A et B en alternance. 4 jours ou plus : haut du corps et bas du corps.</p>` : ''}
+
+      ${errs ? '' : `<section class="q-preview">
+        <p class="eyebrow" style="margin:0">Ce que ça donne</p>
+        ${firstRun ? `<p><b class="run">Course · ${shortDate(firstRun.date)}</b> Palier ${firstRun.level}/${firstRun.max}, ${esc(firstRun.title)}</p>` : ''}
+        ${firstSwim ? `<p><b class="swim">Natation · ${shortDate(firstSwim.date)}</b> ${firstSwim.longueurs} longueurs, ${firstSwim.distance} m</p>` : ''}
+        ${firstMuscu ? `<p><b class="muscu">Musculation · ${shortDate(firstMuscu.date)}</b> ${esc(firstMuscu.title)} : ${esc(firstMuscu.exercices.map((x) => x.nom.split(' (')[0]).join(', '))}</p>` : ''}
+        <p class="muted small" style="margin:0">Des règles fixes, pas un coach humain : ça monte quand tes bilans sont bons, ça redescend si c'est trop dur ou douloureux.</p>
+      </section>`}
+      ${q.error ? `<div class="alert">${esc(q.error)}</div>` : ''}
+      <button class="btn-primary" data-qsave style="margin-top:14px">${fresh ? 'Créer mon programme' : 'Enregistrer'}</button>
+      ${fresh ? '<button class="btn-ghost" data-tab="accueil" style="width:100%;margin-top:6px">Plus tard</button>' : '<button class="btn-ghost" data-tab="profil" style="width:100%;margin-top:6px">Annuler</button>'}`;
   },
 
   profil() {
@@ -922,12 +1180,11 @@ const screens = {
         <input id="prenom" value="${esc(d.profile.prenom)}" maxlength="40">
       </div>
       <div class="card">
-        <h2>Mes jours d'entraînement</h2>
-        <label>Course</label>
-        <div class="days">${JOURS.map(([n, l]) => `<button data-day="joursCourse" data-v="${n}" class="${(d.settings.joursCourse ?? [1, 5]).includes(n) ? 'on' : ''}">${l}</button>`).join('')}</div>
-        <label>Natation</label>
-        <div class="days natation">${JOURS.map(([n, l]) => `<button data-day="joursNatation" data-v="${n}" class="${(d.settings.joursNatation ?? [3]).includes(n) ? 'on' : ''}">${l}</button>`).join('')}</div>
-        <p class="muted small" style="margin-top:8px">Laisse au moins un jour entre deux courses : sinon la seconde devient un jour de repos.</p>
+        <h2>Mon programme</h2>
+        ${d.profile.questionnaire
+          ? `<ul class="q-summary">${answersSummary(d.profile.questionnaire).map(([sp, t]) => `<li class="${sp}">${esc(t)}</li>`).join('')}</ul>`
+          : '<p class="muted small">Pas encore personnalisé : tu as le programme par défaut (course lundi et vendredi, natation mercredi).</p>'}
+        <button data-questionnaire style="width:100%">${d.profile.questionnaire ? 'Modifier mes réponses' : 'Répondre au questionnaire'}</button>
       </div>
       <div class="card">
         <h2>Signal de changement d'étape</h2>
@@ -959,7 +1216,7 @@ function placeWeek() {
 }
 
 // Onglet allumé pour chaque écran.
-const TAB_OF = { edit: 'programme', live: 'demarrer', bilan: 'progression', saisie: 'progression', compte: 'profil' };
+const TAB_OF = { questionnaire: 'profil', edit: 'programme', live: 'demarrer', bilan: 'progression', saisie: 'progression', compte: 'profil' };
 
 function render() {
   app.innerHTML = screens[current]();
@@ -1027,7 +1284,21 @@ function readEditor() {
   });
 }
 
+// Exercices à noter : ceux d'une séance prévue, avec une case par série.
+const muscuLog = (p) => ({
+  seance: p.seance,
+  sessionName: p.title,
+  exercices: p.exercices.map((x) => ({ slot: x.slot, id: x.id, nom: x.nom, muscle: x.muscle, materiel: x.materiel, unite: x.unite, min: x.min, max: x.max, poids: x.poids, reps: Array(x.series).fill(null) })),
+});
+
 function newManual(sport) {
+  if (sport === 'muscu') {
+    // Séance libre : la prochaine séance du cycle.
+    const d = load();
+    const q = d.profile.questionnaire || {};
+    const p = muscuPlan(nextSeance(d.history, (q.joursMuscu || []).length), d.history, q, d.settings.muscuChoix || {});
+    return { id: uid(), sport, source: 'manuelle', date: today(), elapsedSec: null, ...muscuLog(p), difficulte: null, fatigue: null, douleur: '', commentaire: '' };
+  }
   return {
     id: uid(), sport, source: 'manuelle', date: today(), sessionName: sport === 'natation' ? 'Natation' : 'Course libre',
     elapsedSec: null, distanceKm: null, distanceEstimee: false, structure: '',
@@ -1044,7 +1315,16 @@ function readSaisie() {
   bilan.elapsedSec = Number.isFinite(min) && min > 0 ? min * 60 : null;
   bilan.douleur = v('douleur').value.trim();
   bilan.commentaire = v('comm').value.trim();
-  if (bilan.sport === 'natation') {
+  if (bilan.sport === 'muscu') {
+    bilan.exercices.forEach((x, i) => {
+      const kg = parseFloat(String(v(`kg-${i}`)?.value ?? '').replace(',', '.'));
+      x.poids = Number.isFinite(kg) && kg > 0 ? Math.round(kg * 10) / 10 : null;
+      x.reps = x.reps.map((_, j) => {
+        const n = parseInt(v(`rep-${i}-${j}`)?.value, 10);
+        return Number.isFinite(n) && n > 0 ? n : null;
+      });
+    });
+  } else if (bilan.sport === 'natation') {
     bilan.swim.bassinM = Number(v('bassin').value);
     const n = parseInt(v('longueurs').value, 10);
     bilan.swim.longueurs = Number.isFinite(n) && n >= 0 ? n : null;
@@ -1057,6 +1337,26 @@ function readSaisie() {
     bilan.distanceKm = Number.isFinite(dist) && dist > 0 ? Math.round(dist * 100) / 100 : null;
     bilan.distanceEstimee = v('estim').checked;
   }
+}
+
+// Musculation : charge (une pour toutes les séries) et répétitions faites, série par série.
+function muscuForm(b) {
+  const lieu = load().profile.questionnaire?.lieu || 'salle';
+  return `
+    <p class="muted small">Note ce que tu as vraiment fait : une série vide = pas faite. La charge de la prochaine séance en dépend.</p>
+    ${b.exercices.map((x, i) => {
+      const alts = alternatives(x.muscle, lieu);
+      const body = x.materiel === 'corps';
+      return `
+      <section class="exo-log">
+        <h2>${esc(x.nom)}</h2>
+        <p class="muted small" style="margin:2px 0 0">${esc(x.muscle)} · objectif ${x.min} à ${x.max}${x.unite === 's' ? ' s' : ' répétitions'} par série</p>
+        ${alts.length > 1 ? `<select data-swap="${i}" aria-label="Changer d'exercice">${alts.map((e) => `<option value="${e.id}" ${e.id === x.id ? 'selected' : ''}>${esc(e.nom)}</option>`).join('')}</select>` : ''}
+        ${body ? '' : `<div class="kg"><input id="kg-${i}" type="number" inputmode="decimal" step="0.5" min="0" placeholder="?" value="${x.poids ?? ''}"><span>kg${x.materiel === 'halteres' ? ' par haltère' : x.materiel === 'barre' ? ' au total, barre comprise' : ''}</span></div>`}
+        <div class="sets">${x.reps.map((r, j) => `<label>Série ${j + 1}<input id="rep-${i}-${j}" type="number" inputmode="numeric" min="0" max="300" placeholder="${x.max}" value="${r ?? ''}"></label>`).join('')}</div>
+        <div class="row" style="margin-top:8px"><button class="btn-ghost small-btn" data-mfill="${i}">${x.max} partout</button><button class="btn-ghost small-btn" data-mset="${i}">+ une série</button></div>
+      </section>`;
+    }).join('')}`;
 }
 
 // Fusionne un export (ou un historique préparé) avec les données du téléphone, sans doublon.
@@ -1109,7 +1409,7 @@ document.addEventListener('click', (e) => {
     clearLive();
     render();
   } else if (ds.startplan) {
-    const p = upcoming(load().history, load().settings, today(), 14).find((x) => x.date === ds.startplan && x.sport === 'course');
+    const p = planFor(load()).find((x) => x.date === ds.startplan && x.sport === 'course');
     if (p) startSession({ id: `plan-${p.date}`, name: `Palier ${p.level} · ${p.title}`, steps: p.steps, level: p.level });
   } else if (ds.edit) {
     editing = structuredClone(findSession(ds.edit));
@@ -1149,15 +1449,34 @@ document.addEventListener('click', (e) => {
     }
   } else if ('skip' in ds) {
     nextStep();
-  } else if (ds.day) {
-    const key = ds.day;
-    const n = Number(ds.v);
-    update((d) => {
-      const cur = new Set(d.settings[key] ?? (key === 'joursCourse' ? [1, 5] : [3]));
-      if (cur.has(n)) cur.delete(n); else cur.add(n);
-      d.settings[key] = [...cur].sort();
-    });
+  } else if ('questionnaire' in ds) {
+    openQuestionnaire();
+  } else if (ds.qsport) {
+    const set = new Set(qDraft.sports);
+    if (set.has(ds.qsport)) set.delete(ds.qsport); else set.add(ds.qsport);
+    qDraft.sports = [...set];
+    qDraft.error = null;
     render();
+  } else if (ds.qday) {
+    const n = Number(ds.v);
+    const cur = new Set(qDraft[ds.qday]);
+    if (cur.has(n)) cur.delete(n); else cur.add(n);
+    qDraft[ds.qday] = [...cur].sort();
+    qDraft.error = null;
+    render();
+  } else if (ds.qbassin) {
+    qDraft.bassin = Number(ds.qbassin);
+    render();
+  } else if ('qsave' in ds) {
+    const d = load();
+    qDraft.error = questionnaireErrors(qDraft, d);
+    if (qDraft.error) { render(); return; }
+    const answers = cleanAnswers(qDraft, d);
+    update((x) => { x.profile.questionnaire = answers; });
+    qDraft = null;
+    accountUi.info = null;
+    selDay = today();
+    go('programme');
   } else if ('touchlock' in ds) {
     touchLocked = true;
     renderTouchLock();
@@ -1172,7 +1491,7 @@ document.addEventListener('click', (e) => {
     go('saisie');
   } else if (ds.logplan) {
     // Saisie préremplie avec la séance prévue aujourd'hui ; tout reste modifiable.
-    const p = upcoming(load().history, load().settings, today(), 1).find((x) => x.sport === ds.logplan);
+    const p = planFor(load(), 1).find((x) => x.sport === ds.logplan);
     bilan = newManual(ds.logplan);
     bilan.fromPlan = Boolean(p);
     if (p?.sport === 'natation') {
@@ -1180,16 +1499,31 @@ document.addEventListener('click', (e) => {
       bilan.swim.bassinM = p.bassin;
       bilan.swim.longueurs = p.longueurs;
       bilan.swim.nages = ['crawl', 'brasse', 'dos'].filter((n) => p.plan.some((l) => l.includes(n)));
+    } else if (p?.sport === 'muscu') {
+      Object.assign(bilan, muscuLog(p));
     } else if (p?.sport === 'course') {
       bilan.sessionName = `Palier ${p.level} · ${p.title}`;
       bilan.structure = stepsSummary(p.steps).replace(/ · /g, ', ').replace(/\d+ × [^,]+ de course/, p.title);
       bilan.elapsedSec = Math.round(total(p.steps) / 60) * 60;
     }
     go('saisie');
+  } else if (ds.mfill !== undefined || ds.mset !== undefined) {
+    readSaisie();
+    const x = bilan.exercices[Number(ds.mfill ?? ds.mset)];
+    if (ds.mfill !== undefined) x.reps = x.reps.map(() => x.max);
+    else if (x.reps.length < 10) x.reps.push(null);
+    render();
   } else if ('savemanual' in ds) {
     readSaisie();
+    if (bilan.sport === 'muscu') {
+      // Séries vides = non faites (0) ; un exercice sans aucune série n'est pas gardé.
+      const kept = bilan.exercices.filter((x) => x.reps.some((r) => r > 0)).map((x) => ({ ...x, reps: x.reps.map((r) => r || 0) }));
+      if (!kept.length) { alert('Note au moins une série.'); return; }
+      bilan.exercices = kept;
+    }
     const entry = bilan;
     update((d) => { d.history.push(entry); });
+    progSport = entry.sport; // Progression s'ouvre sur le sport qu'on vient de noter
     bilan = null;
     go('progression');
   } else if ('import' in ds) {
@@ -1239,6 +1573,23 @@ document.addEventListener('change', (e) => {
       alert(`${added} séance(s) ajoutée(s).`);
       go('progression');
     });
+  } else if (current === 'questionnaire' && e.target.name?.startsWith('q-')) {
+    const key = { 'q-objc': 'objectifCourse', 'q-nivc': 'niveauCourse', 'q-objn': 'objectifNatation', 'q-nivn': 'niveauNatation', 'q-objm': 'objectifMuscu', 'q-lieu': 'lieu', 'q-nivm': 'niveauMuscu' }[e.target.name];
+    qDraft[key] = ['niveauCourse', 'objectifNatation', 'niveauNatation'].includes(key) ? Number(e.target.value) : e.target.value;
+    qDraft.error = null;
+    render();
+  } else if (current === 'saisie' && e.target.dataset.swap !== undefined) {
+    // Autre exercice du même muscle : gardé pour les prochaines séances.
+    readSaisie();
+    const i = Number(e.target.dataset.swap);
+    const x = bilan.exercices[i];
+    const ex = byId(e.target.value);
+    const d = load();
+    const goal = GOALS_MUSCU[d.profile.questionnaire?.objectifMuscu] || GOALS_MUSCU.muscle;
+    const next = nextLoad(ex, d.history, goal);
+    bilan.exercices[i] = { ...x, id: ex.id, nom: ex.nom, materiel: ex.materiel, unite: ex.unite, min: next.min, max: next.max, poids: next.poids };
+    if (bilan.seance && x.slot !== undefined) update((dd) => { dd.settings.muscuChoix = { ...dd.settings.muscuChoix, [`${bilan.seance}:${x.slot}`]: ex.id }; });
+    render();
   } else if (current === 'saisie') {
     readSaisie();
     if (e.target.id === 'longueurs' || e.target.id === 'bassin') render();
@@ -1256,13 +1607,23 @@ let accountUi = { busy: false, error: null, info: null, invite: null, inviteFrom
 let syncing = false;
 let pushTimer = null;
 
+// Les données du téléphone appartiennent-elles au compte connecté ? `owner` est posé
+// à la première synchronisation. Des données sans propriétaire (utilisées avant tout
+// compte) rejoignent le compte ; celles d'un autre compte ne sont jamais envoyées.
+const ownLocal = () => {
+  const owner = load().owner;
+  const id = account.session()?.user?.id;
+  return !owner || !id || owner === id;
+};
+
 async function syncNow() {
   if (!account.serverEnabled() || !account.session()) return;
   syncing = true;
   try {
     const { data } = await account.pullData();
-    const merged = account.mergeData(load(), data);
     const user = account.session()?.user;
+    const merged = account.mergeData(ownLocal() ? load() : empty(), data);
+    if (user?.id) merged.owner = user.id;
     if (user?.prenom && !merged.profile?.prenom) merged.profile = { ...merged.profile, prenom: user.prenom };
     replace(merged);
     await account.pushData(load());
@@ -1276,9 +1637,10 @@ async function syncNow() {
 }
 
 onSave(() => {
-  if (syncing || !account.serverEnabled() || !account.session()) return;
+  if (syncing || !account.serverEnabled() || !account.session() || !ownLocal()) return;
   clearTimeout(pushTimer);
   pushTimer = setTimeout(() => {
+    if (!ownLocal()) return;
     account.pushData(load())
       .then(() => { accountUi.sync = `Synchronisé à ${new Date().toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' })}.`; })
       .catch((e) => { accountUi.sync = `Synchronisation en attente : ${e.message}`; });
@@ -1326,13 +1688,14 @@ document.addEventListener('click', (e) => {
     accountAction(async () => {
       const user = await account.register(prenom, code || undefined);
       accountUi.invite = null;
-      update((d) => { d.profile.prenom = user.prenom; });
       await syncNow();
+      update((d) => { d.profile.prenom = user.prenom; });
       const installed = navigator.standalone === true || matchMedia('(display-mode: standalone)').matches;
       accountUi.info = installed
         ? `Compte créé. Bienvenue ${user.prenom} !`
         : `Compte créé. Installe maintenant Foulée sur ton écran d'accueil (Partager > Sur l'écran d'accueil sur iPhone, menu ⋮ > Installer sur Android), ouvre-la et touche « Me connecter ».`;
       await refreshAccount();
+      if (!load().profile.questionnaire) openQuestionnaire();
     });
   } else if ('login' in ds) {
     accountAction(async () => {
@@ -1343,6 +1706,8 @@ document.addEventListener('click', (e) => {
     });
   } else if ('logout' in ds) {
     accountAction(async () => {
+      clearTimeout(pushTimer);
+      if (ownLocal()) await account.pushData(load()).catch(() => {});
       await account.logout();
       accountUi.invites = null;
       accountUi.lastInvite = null;
