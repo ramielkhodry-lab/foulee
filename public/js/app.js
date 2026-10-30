@@ -47,9 +47,14 @@ const ICONS = {
   natation: '<path d="M2 9c2.5-2 4.5-2 7 0s4.5 2 7 0 4.5-2 6 0M2 15c2.5-2 4.5-2 7 0s4.5 2 7 0 4.5-2 6 0"/>',
   muscu: '<path d="M6.5 6.5v11M17.5 6.5v11M3.5 9v6M20.5 9v6M6.5 12h11"/>',
   repos: '<path d="M20 14.5A8 8 0 0 1 9.5 4a8 8 0 1 0 10.5 10.5z"/>',
+  autre: '<circle cx="12" cy="12" r="8"/><path d="M12 8v8M8 12h8"/>',
 };
 const icon = (sport) => `<span class="ico ${sport}"><svg viewBox="0 0 24 24">${ICONS[sport] || ICONS.course}</svg></span>`;
-const SPORT_LABEL = { course: 'Course', natation: 'Natation', muscu: 'Musculation' };
+const SPORT_LABEL = { course: 'Course', natation: 'Natation', muscu: 'Musculation', autre: 'Autre activité' };
+// Activités courantes hors programme, proposées d'un toucher.
+const ACTIVITES = ['Padel', 'Vélo', 'Foot', 'Tennis', 'Randonnée', 'Marche'];
+// « J'ai fait autre chose » : sur la séance du jour, elle est décalée au lieu d'être sautée.
+const autreLink = (p) => `<button class="day-link" data-autre="${p.sport}">J'ai fait autre chose à la place ›</button>`;
 const kgLabel = (kg) => `${String(kg).replace('.', ',')} kg`;
 // « 3 × 8-12 · 40 kg » : la dose d'un exercice prévu.
 const dose = (x) => `${x.series} × ${x.min}–${x.max}${x.unite === 's' ? ' s' : ''}${x.poids ? ` · ${kgLabel(x.poids)}` : x.materiel === 'corps' ? '' : ' · charge à trouver'}`;
@@ -86,7 +91,7 @@ function todayHero(p) {
         <p class="hero-sub">${esc(p.title)} · ${p.repos} s de repos entre les séries</p>
         ${exoList(p)}
         ${whyTips(p)}
-        ${isToday ? '<button class="cta muscu" data-logplan="muscu"><span>Noter ma séance</span><i>›</i></button>' : ''}
+        ${isToday ? `<button class="cta muscu" data-logplan="muscu"><span>Noter ma séance</span><i>›</i></button>${autreLink(p)}` : ''}
       </section>`;
   }
   const mins = Math.round(total(p.steps) / 60);
@@ -162,6 +167,7 @@ function historyRow(h, open = false) {
   if (h.gpsIncomplet) parts.push('GPS incomplet');
   if (h.steps && h.source === 'guidee') parts.push(`${h.completedSteps}/${h.steps.length} étapes`);
   if (sport === 'muscu' && h.exercices?.length) parts.unshift(`${h.sessionName} · ${h.exercices.length} exercices`);
+  if (sport === 'autre') parts.unshift(`${esc(h.activite || 'Autre activité')}${h.remplace ? ` · à la place de la ${SPORT_LABEL[h.remplace].toLowerCase()}` : ''}`);
   const feel = [
     h.difficulte && `difficulté ${h.difficulte}/5`,
     h.essoufflement && `essoufflement ${h.essoufflement}/5`,
@@ -261,7 +267,8 @@ const questionnaireBanner = () => `
 // « + Natation » / « + Course » : seulement les sports de ce profil.
 function manualButtons(d, cls, date = null, style = '', courseSuffix = '') {
   const b = (sport, label, color) => (practiced(d, sport) ? `<button data-manual="${sport}"${date ? ` data-mdate="${date}"` : ''} class="${cls}" style="color:var(${color})">+ ${label}</button>` : '');
-  return `<div class="row"${style ? ` style="${style}"` : ''}>${b('natation', 'Natation', '--swim')}${b('course', `Course${courseSuffix}`, '--run')}${b('muscu', 'Muscu', '--muscu')}</div>`;
+  const autre = `<button data-manual="autre"${date ? ` data-mdate="${date}"` : ''} class="${cls}" style="color:var(--ink)">+ Autre</button>`;
+  return `<div class="row"${style ? ` style="${style}"` : ''}>${b('natation', 'Natation', '--swim')}${b('course', `Course${courseSuffix}`, '--run')}${b('muscu', 'Muscu', '--muscu')}${autre}</div>`;
 }
 
 // Ce que montre le jour choisi : la séance faite, la séance prévue, ou rien.
@@ -310,7 +317,7 @@ function sessionCard(p) {
           ${fact('niveau', p.focus === 'respiration' ? '4 longueurs pour travailler ta respiration' : 'Pauses de 30 s entre les blocs')}
         </ul>
         ${whyTips(p)}
-        ${isToday ? '<button class="cta swim" data-logplan="natation"><span>Noter ma séance</span><i>›</i></button>' : ''}
+        ${isToday ? `<button class="cta swim" data-logplan="natation"><span>Noter ma séance</span><i>›</i></button>${autreLink(p)}` : ''}
         <details class="day-detail natation"><summary>Le détail longueur par longueur <i>›</i></summary>
           <ol class="hero-steps">${p.plan.map((l) => `<li>${esc(l)}</li>`).join('')}</ol></details>
       </section>`;
@@ -350,7 +357,8 @@ function sessionCard(p) {
       ${whyTips(p)}
       ${isToday
         ? `<button class="cta" data-startplan="${esc(p.date)}"><span>Démarrer ma séance</span><i>›</i></button>
-           <button class="day-link" data-logplan="course">Faite sans l'app : la noter ›</button>`
+           <button class="day-link" data-logplan="course">Faite sans l'app : la noter ›</button>
+           ${autreLink(p)}`
         : `<button class="cta ghost" data-startplan="${esc(p.date)}"><span>La faire maintenant</span><i>›</i></button>`}
     </section>`;
 }
@@ -983,7 +991,8 @@ const screens = {
   // Juste après un bilan : ce qui change pour la suite, et pourquoi.
   suite() {
     const r = suite;
-    const tag = { monte: '▲ ça monte', garde: '= on consolide', recul: '▼ on lève le pied', suite: 'la suite' }[r.verdict] || '';
+    const tag = { monte: '▲ ça monte', garde: '= on consolide', recul: '▼ on lève le pied', suite: 'la suite', decale: '→ décalée, pas sautée' }[r.verdict] || '';
+    const nextSport = r.nextSport || r.sport;
     return `
       <h1>Et maintenant ?</h1>
       <section class="hero ${r.sport === 'repos' ? 'rest' : r.sport}">
@@ -996,10 +1005,12 @@ const screens = {
       ${r.ia?.code ? `<div class="alert ia-fail"><strong>Conseils de secours (règles).</strong> ${esc(failureMessage(r.ia))}</div>` : ''}
       ${r.source === 'ia' ? '<p class="ia-ok">Conseils de l’IA, à partir de ton ressenti</p>' : ''}
       <ul class="conseils ${r.sport}">${r.conseils.map((t) => `<li>${esc(t)}</li>`).join('')}</ul>
-      ${r.next ? `<h3>Prochaine ${r.sport === 'natation' ? 'natation' : r.sport === 'muscu' ? 'muscu' : 'course'}</h3><div class="list">${planRow(r.next)}</div>` : ''}
-      <p class="muted small">${r.source === 'ia'
+      ${r.next ? `<h3>Prochaine ${nextSport === 'natation' ? 'natation' : nextSport === 'muscu' ? 'muscu' : 'course'}</h3><div class="list">${planRow(r.next)}</div>` : ''}
+      <p class="muted small">${r.sport === 'autre'
+        ? 'Une activité hors programme compte dans ton temps d’activité, pas dans tes paliers : le programme ne monte que sur ses propres séances.'
+        : r.source === 'ia'
         ? 'La suite du programme est décidée par les règles de Foulée. Les conseils sont écrits par une IA gratuite (Llama, via Cloudflare) : elle peut se tromper, ce n’est pas un coach ni un médecin.'
-        : 'Règles fixes de Foulée, pas un coach : difficulté, essoufflement, fatigue, douleur et les mots de ton ressenti décident.'} Tes conseils restent affichés sur la carte de la prochaine séance.</p>
+        : 'Règles fixes de Foulée, pas un coach : difficulté, essoufflement, fatigue, douleur et les mots de ton ressenti décident.'}${r.sport === 'autre' ? '' : ' Tes conseils restent affichés sur la carte de la prochaine séance.'}</p>
       <div class="row" style="margin-top:14px"><button data-tab="progression">Mon historique</button><button class="btn-dark" data-tab="programme">Mon programme</button></div>`;
   },
 
@@ -1052,15 +1063,20 @@ const screens = {
     const swim = b.sport === 'natation';
     const scale = (field, labels) => `<div class="scale">${[1, 2, 3, 4, 5].map((n) => `<button data-scale="${field}" data-v="${n}" class="${b[field] === n ? 'on' : ''}">${n}</button>`).join('')}</div><p class="muted small">${labels}</p>`;
     const nages = ['crawl', 'brasse', 'dos', 'papillon'];
+    const autre = b.sport === 'autre';
     return `
-      <h1>${b.sport === 'muscu' ? esc(b.sessionName) : swim ? 'Séance de natation' : b.fromPlan ? 'Course du programme' : 'Course libre'}</h1>
+      <h1>${autre ? 'Autre activité' : b.sport === 'muscu' ? esc(b.sessionName) : swim ? 'Séance de natation' : b.fromPlan ? 'Course du programme' : 'Course libre'}</h1>
       ${b.fromPlan ? '<p class="muted">Prérempli avec le programme du jour. Corrige ce qui a changé, puis note ton ressenti.</p>' : ''}
+      ${autre && b.remplace ? `<p class="muted">À la place de ta ${SPORT_LABEL[b.remplace].toLowerCase()} du jour. Elle sera décalée, pas sautée, et ce que tu notes ici ne fait pas monter ton programme.</p>` : ''}
       <div class="card">
-        <label for="date">Date</label>
-        <input id="date" type="date" value="${esc(b.date)}">
+        ${autre ? `<label for="activite" style="margin-top:0">Activité</label>
+        <input id="activite" placeholder="Ex. : padel" maxlength="40" value="${esc(b.activite)}">
+        <div class="chips">${ACTIVITES.map((a) => `<button data-act="${a}" class="${b.activite === a ? 'on' : ''}">${a}</button>`).join('')}</div>` : ''}
+        ${autre && b.remplace ? '' : `<label for="date">Date</label>
+        <input id="date" type="date" value="${esc(b.date)}">`}
         <label for="duree">Durée (minutes)</label>
         <input id="duree" type="number" inputmode="numeric" min="1" max="600" value="${b.elapsedSec ? Math.round(b.elapsedSec / 60) : ''}">
-        ${b.sport === 'muscu' ? '' : swim ? `
+        ${b.sport === 'muscu' || autre ? '' : swim ? `
           <label for="bassin">Longueur du bassin (m)</label>
           <select id="bassin">${[25, 50, 33].map((m) => `<option value="${m}" ${b.swim.bassinM === m ? 'selected' : ''}>${m} m</option>`).join('')}</select>
           <label for="longueurs">Nombre de longueurs</label>
@@ -1082,7 +1098,7 @@ const screens = {
       <div class="card">
         <label style="margin-top:0">Difficulté</label>
         ${scale('difficulte', '1 = très facile · 5 = très dur')}
-        ${b.sport === 'muscu' ? '' : `<label>Essoufflement</label>
+        ${b.sport === 'muscu' || autre ? '' : `<label>Essoufflement</label>
         ${scale('essoufflement', '1 = je pouvais parler · 5 = à bout de souffle')}`}
         <label>Fatigue</label>
         ${scale('fatigue', '1 = en forme · 5 = épuisé')}
@@ -1361,7 +1377,7 @@ async function askIA(id, { force = false } = {}) {
   if (asking.has(id)) return;
   const d = load();
   const entry = d.history.find((h) => h.id === id);
-  if (!entry || (hasIA(entry) && !force)) return;
+  if (!entry || entry.sport === 'autre' || (hasIA(entry) && !force)) return;
   const setState = (ia) => { if (suite?.entryId === id) { suite.ia = ia; if (current === 'suite') render(); } };
   if (!account.serverEnabled()) return; // pas de serveur : les règles seules, sans alerte
   if (!account.session()) { setState({ code: 'nonconnecte' }); return; }
@@ -1410,6 +1426,9 @@ const muscuLog = (p) => ({
 });
 
 function newManual(sport) {
+  if (sport === 'autre') {
+    return { id: uid(), sport, source: 'manuelle', date: today(), activite: '', remplace: null, elapsedSec: null, difficulte: null, fatigue: null, douleur: '', commentaire: '' };
+  }
   if (sport === 'muscu') {
     // Séance libre : la prochaine séance du cycle.
     const d = load();
@@ -1427,13 +1446,15 @@ function newManual(sport) {
 
 function readSaisie() {
   const v = (id) => document.getElementById(id);
-  if (!v('date')) return;
-  bilan.date = v('date').value || today();
+  if (!v('duree')) return;
+  if (v('date')) bilan.date = v('date').value || today();
   const min = parseInt(v('duree').value, 10);
   bilan.elapsedSec = Number.isFinite(min) && min > 0 ? min * 60 : null;
   bilan.douleur = v('douleur').value.trim();
   bilan.commentaire = v('comm').value.trim();
-  if (bilan.sport === 'muscu') {
+  if (bilan.sport === 'autre') {
+    bilan.activite = v('activite').value.trim();
+  } else if (bilan.sport === 'muscu') {
     bilan.exercices.forEach((x, i) => {
       const kg = parseFloat(String(v(`kg-${i}`)?.value ?? '').replace(',', '.'));
       x.poids = Number.isFinite(kg) && kg > 0 ? Math.round(kg * 10) / 10 : null;
@@ -1608,6 +1629,14 @@ document.addEventListener('click', (e) => {
   } else if (ds.progsport) {
     progSport = ds.progsport;
     render();
+  } else if (ds.autre) {
+    bilan = newManual('autre');
+    bilan.remplace = ds.autre;
+    go('saisie');
+  } else if (ds.act) {
+    readSaisie();
+    bilan.activite = ds.act;
+    render();
   } else if (ds.manual) {
     bilan = newManual(ds.manual);
     if (ds.mdate) bilan.date = ds.mdate;
@@ -1644,9 +1673,10 @@ document.addEventListener('click', (e) => {
       if (!kept.length) { alert('Note au moins une série.'); return; }
       bilan.exercices = kept;
     }
+    if (bilan.sport === 'autre' && (!bilan.activite || !bilan.elapsedSec)) { alert('Indique l’activité et sa durée.'); return; }
     const entry = bilan;
     update((d) => { d.history.push(entry); });
-    progSport = entry.sport; // Progression s'ouvre sur le sport qu'on vient de noter
+    if (entry.sport !== 'autre') progSport = entry.sport; // Progression s'ouvre sur le sport qu'on vient de noter
     bilan = null;
     showSuite(entry);
   } else if ('import' in ds) {

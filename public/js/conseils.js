@@ -44,6 +44,12 @@ export function conseils(h) {
   } else if (sport === 'muscu') {
     if ((h.difficulte || 0) >= 5) out.push('Séance très dure : si la technique se dégrade sur les dernières répétitions, baisse la charge de 10 % plutôt que de forcer.');
   }
+  if (sport === 'autre') {
+    // Activité hors programme : rien ne monte ni ne descend, seul le repos compte.
+    if ((h.fatigue || 0) >= 4 || (h.difficulte || 0) >= 4) out.push('Grosse séance : demain, repos complet ou marche tranquille. La séance décalée attend que tu sois récupéré.');
+    if (!out.length) out.push('Rien à rattraper : ne double pas la séance décalée. Reprends le programme à la date prévue.');
+    return out.slice(0, 4);
+  }
   if (/crampe/.test(t)) out.push('Crampes : bois un grand verre d’eau dans l’heure avant, et étire le muscle doucement dès qu’elle arrive.');
   if ((h.fatigue || 0) >= 4 && out.length < 4) out.push('Grosse fatigue : dors bien la veille et mange un peu 1 à 2 h avant (banane, pain, yaourt). Garde au moins un jour de repos avant la suivante.');
   if (!pain && h.difficulte && h.difficulte <= 2) out.push('Séance facile : la prochaine monte d’un cran. Garde la même allure tranquille, c’est le volume qui augmente.');

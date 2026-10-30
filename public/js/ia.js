@@ -64,6 +64,7 @@ export function pendingIA(history, now = Date.now()) {
   const last = {};
   for (const h of history) {
     const sp = sportOf(h);
+    if (sp === 'autre') continue; // activité hors programme : pas lue par l'IA
     if (!last[sp] || String(h.date) > String(last[sp].date)) last[sp] = h;
   }
   return Object.values(last).filter((h) => dateOnly(h.date) >= limit && !hasIA(h) && (!h.iaEchec || now >= retryAt(h.iaEchec)));
@@ -75,6 +76,7 @@ export function failedIA(history, now = Date.now()) {
   const last = {};
   for (const h of history) {
     const sp = sportOf(h);
+    if (sp === 'autre') continue; // activité hors programme : pas lue par l'IA
     if (!last[sp] || String(h.date) > String(last[sp].date)) last[sp] = h;
   }
   return Object.values(last).filter((h) => dateOnly(h.date) >= limit && !hasIA(h) && h.iaEchec);
