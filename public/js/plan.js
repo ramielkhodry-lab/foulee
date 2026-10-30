@@ -3,7 +3,7 @@
 // simplement la suite. Les règles sont volontairement simples et explicables.
 
 import { muscuPlan, nextSeance, followingSeance } from './muscu.js';
-import { tipsOf, tipsSource, breathingIssue } from './conseils.js';
+import { tipsOf, tipsSource, breathingIssue, conseils } from './conseils.js';
 
 // Le programme se calcule à la volée sur cet horizon (12 semaines) : il n'a pas de fin,
 // la fenêtre avance avec les jours.
@@ -194,6 +194,43 @@ function swimPlan(longueurs, focus = null) {
   ].filter(Boolean);
 }
 
+// Autre activité faite à la place d'une séance prévue (sport 'autre', champ `remplace`) :
+// la séance n'est ni sautée ni rattrapée en double. Elle passe au premier jour libre
+// précédé d'un jour sans effort, sauf si le jour habituel de ce sport arrive avant : la séance
+// prévue ce jour-là la remplace, au même niveau. Un report non fait à sa date est abandonné.
+export function reports(history, opts, from) {
+  const jours = { course: opts.joursCourse, natation: opts.joursNatation, muscu: opts.joursMuscu };
+  const sportAt = (date) => SPORTS.find((sp) => jours[sp].includes(weekday(date))) || null;
+  const busy = new Set(history.map((h) => dateOnly(h.date)));
+  const out = [];
+  for (const sport of SPORTS) {
+    if (!jours[sport].length) continue;
+    const swap = history.filter((h) => h.sport === 'autre' && h.remplace === sport).sort((a, b) => String(a.date).localeCompare(String(b.date))).at(-1);
+    if (!swap) continue;
+    const day = dateOnly(swap.date);
+    if (addDays(day, 14) < from) continue; // trop ancien
+    if (history.some((h) => (h.sport || 'course') === sport && dateOnly(h.date) > day)) continue; // déjà refaite
+    let date = null;
+    for (let i = 1; i <= 7; i++) {
+      const d = addDays(day, i);
+      const at = sportAt(d);
+      if (at === sport) break; // le jour habituel arrive d'abord
+      if (at || busy.has(d)) continue;
+      const prev = addDays(d, -1);
+      if (prev === day || sportAt(prev) || busy.has(prev) || out.some((r) => r.date === prev)) continue; // pas de jour de repos avant
+      date = d;
+      break;
+    }
+    if (date && date < from) continue; // jour du report passé : pas de rattrapage
+    out.push({ sport, from: day, activite: swap.activite || 'autre activité', date });
+  }
+  return out;
+}
+
+const SPORT_NOUN = { course: 'Course', natation: 'Natation', muscu: 'Muscu' };
+const shortDay = (iso) => new Date(`${iso}T12:00:00`).toLocaleDateString('fr-FR', { weekday: 'long', day: 'numeric', month: 'long' });
+const reportNote = (r) => `${SPORT_NOUN[r.sport]} du ${shortDay(r.from)} remplacée par : ${r.activite.toLowerCase()}. ${r.date ? 'Décalée ici, après un jour de repos.' : 'Pas de rattrapage : elle reprend ici, au même niveau.'}`;
+
 // Séances prévues de `from` (inclus) sur `days` jours, selon le questionnaire `q`.
 // Jours de la semaine : 0 = dimanche.
 export function upcoming(history, settings, from, days = 14, q = null) {
@@ -201,7 +238,13 @@ export function upcoming(history, settings, from, days = 14, q = null) {
   const { joursCourse, joursNatation, joursMuscu } = opts;
   let seance = joursMuscu.length ? nextSeance(history, joursMuscu.length) : null;
   const firstMuscu = { reason: null };
-  const done = new Set(history.map((h) => `${dateOnly(h.date)}|${h.sport || 'course'}`));
+  const done = new Set(history.map((h) => `${dateOnly(h.date)}|${h.sport === 'autre' ? h.remplace : h.sport || 'course'}`));
+  const moved = reports(history, opts, from);
+  const extra = Object.fromEntries(moved.filter((r) => r.date).map((r) => [r.date, r.sport]));
+  const isDay = (sport, jours, date, wd) => (jours.includes(wd) || extra[date] === sport) && !done.has(`${date}|${sport}`);
+  // Note de report sur la première séance du sport remplacé.
+  const notes = Object.fromEntries(moved.map((r) => [r.sport, reportNote(r)]));
+  const takeNote = (sport, reason) => { const n = notes[sport]; delete notes[sport]; return n ? `${n} ${reason || ''}`.trim() : reason; };
   const lastRun = history.filter((h) => (h.sport || 'course') === 'course').map((h) => dateOnly(h.date)).sort().at(-1);
   const run = nextRunLevel(history, opts);
   const swim = nextSwim(history, opts);
@@ -219,13 +262,13 @@ export function upcoming(history, settings, from, days = 14, q = null) {
   for (let i = 0; i < days; i++) {
     const date = addDays(from, i);
     const wd = weekday(date);
-    if (joursCourse.includes(wd) && !done.has(`${date}|course`)) {
+    if (isDay('course', joursCourse, date, wd)) {
       // Au moins un jour de repos entre deux courses.
       if (runPlaced && daysBetween(runPlaced, date) < 2) {
         out.push({ date, sport: 'repos', reason: 'Course prévue décalée : il faut un jour de repos entre deux courses.' });
       } else {
         const lvl = LEVELS[level - 1];
-        out.push({ date, sport: 'course', level, max: opts.maxLevel, title: lvl.label, steps: levelSteps(level), reason, ...takeTips('course') });
+        out.push({ date, sport: 'course', level, max: opts.maxLevel, title: lvl.label, steps: levelSteps(level), reason: takeNote('course', reason), ...takeTips('course') });
         runPlaced = date;
         // Hypothèse pour les séances suivantes : la séance se passe bien (difficulté 3).
         reason = 'Prévu si la séance précédente se passe bien. Recalculé après ton bilan.';
@@ -233,13 +276,13 @@ export function upcoming(history, settings, from, days = 14, q = null) {
         level = nextRunLevel(sim, opts).level;
         history = sim;
       }
-    } else if (joursNatation.includes(wd) && !done.has(`${date}|natation`)) {
-      out.push({ date, sport: 'natation', longueurs: swimLongueurs, bassin: swim.bassin, distance: swimLongueurs * swim.bassin, plan: swimPlan(swimLongueurs, swimFocus), focus: swimFocus, reason: swimReason, ...takeTips('natation') });
+    } else if (isDay('natation', joursNatation, date, wd)) {
+      out.push({ date, sport: 'natation', longueurs: swimLongueurs, bassin: swim.bassin, distance: swimLongueurs * swim.bassin, plan: swimPlan(swimLongueurs, swimFocus), focus: swimFocus, reason: takeNote('natation', swimReason), ...takeTips('natation') });
       swimLongueurs = Math.min(opts.maxLongueurs, swimLongueurs + 2);
       swimReason = 'Prévu si la séance précédente se passe bien. Recalculé après ton bilan.';
-    } else if (joursMuscu.includes(wd) && !done.has(`${date}|muscu`)) {
+    } else if (isDay('muscu', joursMuscu, date, wd)) {
       const m = muscuPlan(seance, history, q || {}, settings.muscuChoix || {});
-      out.push({ date, sport: 'muscu', ...m, reason: firstMuscu.reason ?? m.reason, ...takeTips('muscu') });
+      out.push({ date, sport: 'muscu', ...m, reason: takeNote('muscu', firstMuscu.reason ?? m.reason), ...takeTips('muscu') });
       firstMuscu.reason = 'Charges recalculées après chaque séance notée.';
       seance = followingSeance(seance, joursMuscu.length);
     }
@@ -251,6 +294,7 @@ export function upcoming(history, settings, from, days = 14, q = null) {
 // comparée à celle qui vient d'être faite, et les conseils pour la faire.
 export function afterBilan(history, entry, settings, from, q = null) {
   const sport = entry.sport || 'course';
+  if (sport === 'autre') return afterAutre(history, entry, settings, from, q);
   const next = upcoming(history, settings, from, HORIZON, q).find((p) => p.sport === sport) || null;
   const out = { sport, entryId: entry.id, next, conseils: tipsOf(entry), source: tipsSource(entry), titre: 'Bilan enregistré', detail: next?.reason || '' };
   if (!next) return out;
@@ -268,5 +312,22 @@ export function afterBilan(history, entry, settings, from, q = null) {
     out.titre = ups.length ? `Charge en hausse sur ${ups.length} exercice${ups.length > 1 ? 's' : ''}` : 'Mêmes charges, une répétition de plus';
     out.detail = next.exercices.map((x) => `${x.nom.split(' (')[0]} : ${x.reason}`).join(' ');
   }
+  return out;
+}
+
+// Après une autre activité : où passe la séance qu'elle remplace.
+function afterAutre(history, entry, settings, from, q) {
+  const out = { sport: 'autre', entryId: entry.id, next: null, conseils: conseils(entry), source: 'regles', titre: 'Activité enregistrée', detail: 'Elle compte dans ton temps d’activité. Le programme ne bouge pas.' };
+  if (!entry.remplace) return out;
+  const next = upcoming(history, settings, from, HORIZON, q).find((p) => p.sport === entry.remplace) || null;
+  out.next = next;
+  out.nextSport = entry.remplace;
+  if (!next) return out;
+  const r = reports(history, planOptions(q, settings), from).find((x) => x.sport === entry.remplace);
+  out.verdict = 'decale';
+  out.titre = `${SPORT_NOUN[entry.remplace]} décalée au ${shortDay(next.date)}`;
+  out.detail = r?.date
+    ? 'Premier jour libre après un jour de repos. Pas de rattrapage en double : le reste du programme suit.'
+    : `Aucune place avant : il faut un jour de repos après chaque effort, et pas de séance en plus. ${entry.remplace === 'course' ? 'Même palier' : 'Même niveau'} : une activité hors programme ne le fait pas monter.`;
   return out;
 }

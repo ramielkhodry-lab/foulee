@@ -1,7 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
-import { LEVELS, levelSteps, nextRunLevel, nextSwim, upcoming } from '../public/js/plan.js';
+import { LEVELS, levelSteps, nextRunLevel, nextSwim, upcoming, afterBilan } from '../public/js/plan.js';
 import { validateSteps } from '../public/js/track.js';
 
 const run = (date, level, extra = {}) => ({ sport: 'course', date, level, ...extra });
@@ -131,4 +131,53 @@ test('course : palier qui monte, conseils selon le ressenti', async () => {
   assert.ok(conseils(run('d', 2, { essoufflement: 4 })).some((t) => /phrase entière/.test(t)));
   assert.ok(conseils(run('d', 2, { commentaire: 'gros point de côté' })).some((t) => /Point de côté/.test(t)));
   assert.equal(conseils(run('d', 2, { difficulte: 3 })).length, 1);
+});
+
+// Autre activité à la place d'une séance prévue : décalée, jamais sautée ni doublée.
+const Q_RAMI = { sports: ['course', 'natation', 'muscu'], joursCourse: [1, 5], joursNatation: [3], joursMuscu: [2, 6], objectifCourse: '10km' };
+const padel = (date, remplace = 'course', extra = {}) => ({ id: 'p1', sport: 'autre', activite: 'Padel', elapsedSec: 5400, date, remplace, ...extra });
+
+test('padel le vendredi à la place de la course : la course passe au lundi, même palier', () => {
+  const h = [run('2026-10-26', 2), padel('2026-10-30')];
+  const plan = upcoming(h, {}, '2026-10-30', 8, Q_RAMI);
+  assert.equal(plan.find((p) => p.date === '2026-10-30'), undefined, 'plus de course ce vendredi');
+  assert.equal(plan.find((p) => p.date === '2026-10-31').sport, 'muscu');
+  assert.equal(plan.find((p) => p.date === '2026-11-01'), undefined, 'dimanche : repos (muscu la veille)');
+  const mon = plan.find((p) => p.date === '2026-11-02');
+  assert.equal(mon.sport, 'course');
+  assert.equal(mon.level, 2, 'le padel ne fait pas monter le palier');
+  assert.match(mon.reason, /remplacée par : padel/);
+  assert.deepEqual(plan.filter((p) => p.sport === 'course').map((p) => p.date), ['2026-11-02', '2026-11-06'], 'pas de course en double');
+});
+
+test('jour libre précédé d’un repos : la séance y est décalée, la suivante attend un jour', () => {
+  // Course L+V seulement : padel vendredi → samedi trop proche, dimanche libre après un samedi libre.
+  const q = { sports: ['course'], joursCourse: [1, 5] };
+  const plan = upcoming([padel('2026-10-30')], {}, '2026-10-30', 5, q);
+  const sun = plan.find((p) => p.date === '2026-11-01');
+  assert.equal(sun.sport, 'course');
+  assert.match(sun.reason, /Décalée ici/);
+  assert.equal(plan.find((p) => p.date === '2026-11-02').sport, 'repos', 'lundi : un jour de repos entre deux courses');
+});
+
+test('report passé sans être fait : pas de rattrapage', () => {
+  const q = { sports: ['course'], joursCourse: [1, 5] };
+  const plan = upcoming([padel('2026-10-30')], {}, '2026-11-02', 7, q);
+  assert.equal(plan.filter((p) => p.sport === 'course' && p.date < '2026-11-06').map((p) => p.date).join(), '2026-11-02');
+});
+
+test('activité sans séance remplacée : le programme ne bouge pas', () => {
+  const h = [run('2026-10-26', 2)];
+  const a = upcoming(h, {}, '2026-10-30', 14, Q_RAMI);
+  const b = upcoming([...h, padel('2026-10-29', null)], {}, '2026-10-30', 14, Q_RAMI);
+  assert.deepEqual(b, a);
+});
+
+test('afterBilan d’une autre activité : où passe la séance', () => {
+  const h = [run('2026-10-26', 2), padel('2026-10-30')];
+  const r = afterBilan(h, h[1], {}, '2026-10-30', Q_RAMI);
+  assert.equal(r.verdict, 'decale');
+  assert.equal(r.next.date, '2026-11-02');
+  assert.match(r.titre, /Course décalée au lundi 2 novembre/);
+  assert.ok(r.conseils.length);
 });

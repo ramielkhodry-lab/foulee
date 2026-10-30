@@ -3,7 +3,8 @@
 @font-face { font-family: "Barlow Condensed"; font-weight: 800; font-style: italic; font-display: swap; src: url("fonts/barlow-condensed-latin-800-italic.woff2") format("woff2"); }
 
 /* Thème unique, sombre : noir profond (économe sur écran OLED, lisible en plein soleil).
-   Vert électrique = la course et les actions. Bleu = la natation, orange = la musculation, et rien d'autre. */
+   Vert électrique = la course et les actions. Bleu = la natation, orange = la musculation, et rien d'autre.
+   Les activités hors programme (padel, vélo…) restent en blanc cassé : elles ne sont pas un sport du programme. */
 :root {
   --bg: #000000;
   --surface: #121214;
@@ -434,3 +435,14 @@ details.hist[open] .li { border-bottom: 0; }
 .q-part.course .q-part-head h2 { color: var(--run); }
 .q-part.natation .q-part-head h2 { color: var(--swim); }
 .q-part.muscu .q-part-head h2 { color: var(--muscu); }
+
+/* Autre activité, hors programme : blanc cassé, sans couleur de sport. */
+.dot.autre { border-color: var(--ink); }
+.dot.done.autre { background: var(--ink); }
+.ico.autre { background: var(--surface-2); color: var(--ink); }
+.hero.autre { background: var(--surface); box-shadow: inset 0 0 0 1px #3A3A40; }
+.conseils.autre li::before { color: var(--ink); }
+.chips { display: flex; flex-wrap: wrap; gap: 6px; margin: 8px 0 4px; }
+.chips button { min-height: 36px; padding: 6px 14px; border-radius: 999px; font-size: 14px; }
+.chips button.on { background: var(--ink); color: var(--on-accent); border-color: var(--ink); }
+.day-card .day-link + .day-link { padding-top: 0; }
