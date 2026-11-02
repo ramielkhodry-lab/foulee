@@ -129,13 +129,24 @@ textarea { min-height: 90px; }
 .live-extra { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-top: 10px; }
 .live-extra button { min-height: 56px; }
 
+/* Verrou tactile : calque presque transparent en haut (compte à rebours lisible), cadenas en bas. */
 #touchlock {
-  position: fixed; inset: 0; z-index: 10; background: rgba(0, 0, 0, 0.55);
-  display: flex; align-items: flex-end; justify-content: center; padding-bottom: calc(40px + env(safe-area-inset-bottom));
-  touch-action: none; user-select: none; -webkit-user-select: none; -webkit-touch-callout: none;
+  position: fixed; inset: 0; z-index: 10;
+  background: linear-gradient(to bottom, rgba(0, 0, 0, 0.1) 0%, rgba(0, 0, 0, 0.1) 60%, rgba(0, 0, 0, 0.97) 70%);
+  display: flex; flex-direction: column; justify-content: flex-end; align-items: center;
+  padding: calc(14px + env(safe-area-inset-top)) 16px calc(28px + env(safe-area-inset-bottom));
+  touch-action: none; user-select: none; -webkit-user-select: none; -webkit-touch-callout: none; overscroll-behavior: none;
 }
-#touchlock .lockhint { background: var(--surface-2); border: 1px solid var(--line); color: var(--ink); border-radius: var(--radius); padding: 18px 24px; text-align: center; font-weight: 700; transition: transform 2s linear, background 2s linear; }
-#touchlock.pressing .lockhint { transform: scale(1.08); background: var(--run); color: var(--on-accent); }
+#touchlock .lock-badge { background: var(--surface-2); border: 1px solid var(--line); color: var(--ink); border-radius: 999px; padding: 6px 14px; font-size: 13px; font-weight: 700; }
+#touchlock .lock-badge::before { content: "🔒 "; }
+#touchlock .lock-zone { display: flex; flex-direction: column; align-items: center; gap: 14px; }
+#touchlock .lock-btn { position: relative; width: 88px; height: 88px; min-height: 0; padding: 0; border-radius: 50%; background: var(--surface-2); border: 1px solid var(--line); font-size: 34px; display: flex; align-items: center; justify-content: center; touch-action: none; -webkit-tap-highlight-color: transparent; }
+#touchlock .lock-btn svg { position: absolute; inset: -6px; width: 100px; height: 100px; transform: rotate(-90deg); pointer-events: none; }
+#touchlock .lock-ring { fill: none; stroke: var(--run); stroke-width: 6; stroke-linecap: round; stroke-dasharray: 289; stroke-dashoffset: 289; }
+#touchlock .lock-btn.holding .lock-ring { stroke-dashoffset: 0; transition: stroke-dashoffset 2s linear; }
+#touchlock .lock-btn span { pointer-events: none; }
+#touchlock .lock-label { margin: 0; color: var(--muted); font-size: 14px; font-weight: 700; text-align: center; }
+.live-extra .lockbtn { border-color: var(--run); color: var(--run); }
 body.flash-course { animation: flash-course 1.5s ease-out; }
 body.flash-marche { animation: flash-marche 1.5s ease-out; }
 @keyframes flash-course { 0%, 40% { background: var(--run); } 100% { background: var(--bg); } }

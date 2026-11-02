@@ -583,25 +583,51 @@ document.addEventListener('visibilitychange', () => {
 });
 
 // Verrou tactile : en poche, l'écran allumé ne doit pas réagir au tissu.
+// Une webapp ne peut pas verrouiller le téléphone : on pose un calque qui avale tous les touchers.
+// Seul un appui long de 2 s sur le bouton cadenas débloque. Le geste est annulé si le doigt bouge,
+// sort du bouton ou si un deuxième contact apparaît (le tissu touche en plusieurs points).
 let touchLocked = false;
-let unlockTimer = null;
+const UNLOCK_MS = 2000;
 function renderTouchLock() {
   let el = document.getElementById('touchlock');
   if (!touchLocked) { el?.remove(); return; }
   if (el) return;
   el = document.createElement('div');
   el.id = 'touchlock';
-  el.innerHTML = '<div class="lockhint">Écran verrouillé<br><span class="small">Appui long 2 secondes pour déverrouiller</span></div>';
-  const cancel = () => { clearTimeout(unlockTimer); el.classList.remove('pressing'); };
+  el.innerHTML = `
+    <div class="lock-zone">
+      <div class="lock-badge">Touches bloquées</div>
+      <button class="lock-btn" type="button" aria-label="Maintenir 2 secondes pour débloquer"><svg viewBox="0 0 100 100" aria-hidden="true"><circle class="lock-ring" cx="50" cy="50" r="46"/></svg><span>🔒</span></button>
+      <p class="lock-label">Maintiens le cadenas 2 secondes pour débloquer</p>
+    </div>`;
+  const btn = el.querySelector('.lock-btn');
+  const pointers = new Set();
+  let hold = null; // { id, x0, y0, timer }
+  const cancel = () => { if (hold) clearTimeout(hold.timer); hold = null; btn.classList.remove('holding'); };
+  const swallow = (e) => { if (e.cancelable) e.preventDefault(); e.stopPropagation(); };
+  for (const type of ['click', 'dblclick', 'contextmenu', 'touchstart', 'touchmove', 'touchend', 'gesturestart', 'wheel']) {
+    el.addEventListener(type, swallow, { passive: false });
+  }
   el.addEventListener('pointerdown', (e) => {
-    e.preventDefault();
-    el.classList.add('pressing');
-    unlockTimer = setTimeout(() => { touchLocked = false; renderTouchLock(); }, 2000);
+    swallow(e);
+    pointers.add(e.pointerId);
+    if (pointers.size > 1) { cancel(); return; } // plusieurs contacts = tissu, pas un doigt
+    if (!btn.contains(e.target)) return;
+    cancel();
+    hold = { id: e.pointerId, x0: e.clientX, y0: e.clientY, timer: setTimeout(() => { hold = null; touchLocked = false; renderTouchLock(); }, UNLOCK_MS) };
+    btn.classList.add('holding');
   });
-  el.addEventListener('pointerup', cancel);
-  el.addEventListener('pointercancel', cancel);
-  el.addEventListener('pointerleave', cancel);
-  el.addEventListener('contextmenu', (e) => e.preventDefault());
+  el.addEventListener('pointermove', (e) => {
+    swallow(e);
+    if (hold && e.pointerId === hold.id && Math.hypot(e.clientX - hold.x0, e.clientY - hold.y0) > 20) cancel();
+  });
+  const end = (e) => {
+    swallow(e);
+    pointers.delete(e.pointerId);
+    if (hold && e.pointerId === hold.id) cancel();
+  };
+  el.addEventListener('pointerup', end);
+  el.addEventListener('pointercancel', end);
   document.body.appendChild(el);
 }
 
@@ -956,7 +982,7 @@ const screens = {
           <button data-skip>Étape suivante</button>
         </div>
         <div class="live-extra">
-          <button data-touchlock>Verrouiller (poche)</button>
+          <button class="lockbtn" data-touchlock>🔒 Bloquer l'écran</button>
           <button data-finish>Terminer</button>
         </div>
       </div>`;

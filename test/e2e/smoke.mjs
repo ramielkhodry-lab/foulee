@@ -47,12 +47,25 @@ for (let i = 1; i <= 10; i++) {
   await page.waitForTimeout(600);
 }
 const gpsLine = await page.textContent('#dist');
-// Verrou tactile : un clic ne passe plus, un appui long déverrouille.
+// Verrou tactile : un clic ne passe plus, un appui long ailleurs non plus, un appui court sur
+// le cadenas non plus ; seul un appui long de 2 s sur le cadenas débloque.
 await page.click('[data-touchlock]');
 const before = await page.evaluate(() => document.getElementById('player').paused);
 await page.mouse.click(100, 650);
-const lockedStill = await page.locator('#touchlock').count();
 await page.mouse.move(195, 400);
+await page.mouse.down();
+await page.waitForTimeout(2500); // appui long hors du cadenas
+await page.mouse.up();
+const lb = await page.locator('#touchlock .lock-btn').boundingBox();
+const kx = lb.x + lb.width / 2, ky = lb.y + lb.height / 2;
+await page.mouse.move(kx, ky);
+await page.mouse.down();
+await page.waitForTimeout(900); // appui trop court sur le cadenas
+await page.screenshot({ path: '/tmp/foulee-verrou-appui.png' });
+await page.mouse.up();
+await page.waitForTimeout(300);
+await page.screenshot({ path: '/tmp/foulee-verrou.png' });
+const lockedStill = await page.locator('#touchlock').count();
 await page.mouse.down();
 await page.waitForTimeout(2300);
 await page.mouse.up();
@@ -157,7 +170,7 @@ const checks = {
   'la piste avance': t1 > 1,
   'GPS mesuré pendant la séance': /^0,0[23]$/.test(gpsLine),
   'verrou tactile bloque les clics': lockedStill === 1 && before === after,
-  'appui long déverrouille': unlocked,
+  'appui long sur le cadenas déverrouille': unlocked,
   'distance GPS reprise au bilan': bilanText.includes('GPS : 0,0'),
   'intro affichée': now1 === 'Prépare-toi',
   'étape suivante': now2.endsWith("Marche d'échauffement"),
