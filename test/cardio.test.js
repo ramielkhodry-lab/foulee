@@ -284,3 +284,11 @@ test('Raccourci sans boucle : colonnes de tailles différentes → refusé avec 
   assert.equal(r.total, 0);
   assert.match(r.reason, /même nombre de lignes/);
 });
+
+test('valeurs en notation scientifique (« 1,2e-05 ») lues avec leur exposant', () => {
+  const NOW2 = Date.parse('2026-11-02T20:00:00+01:00');
+  const r = parseSamples('#dates dist\n2026-11-02T18:01:00+01:00\n2026-11-02T18:02:00+01:00\n#valeurs dist\n1,2e-05\n0,015\n#sources dist\nApple Watch de Rami\nApple Watch de Rami', NOW2);
+  assert.deepEqual(r.autres.dist.map((x) => x[1]), [0.000012, 0.015]);
+  assert.deepEqual(r.sources.dist.noms, ['Apple Watch de Rami']);
+  assert.equal(parseSamples('kcal;2026-11-02T18:01:00+01:00;3.5E+1;Apple Watch', NOW2).autres.kcal[0][1], 35);
+});
