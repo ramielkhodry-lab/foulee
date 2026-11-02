@@ -68,6 +68,7 @@ def main(voice_dir):
         tones("signal_course", [660, 880, 1100])
         tones("signal_marche", [1100, 880, 660])
         tones("signal_fin", [880, 880, 1320, 1320])
+        tones("signal_moitie", [1568, 1175, 1568, 1175])  # mi-séance : ding-dong aigu, ni montée ni descente
 
         for i, (clip_id, text) in enumerate(sorted(phrases.items())):
             wav_path = tmp / f"{clip_id}.wav"

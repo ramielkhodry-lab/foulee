@@ -462,7 +462,7 @@ function weekCurve(history, kind) {
 // --- Sons -------------------------------------------------------------------
 
 // À changer à chaque régénération des clips : l'URL change, donc aucun ancien cache ne sert.
-const AUDIO_VERSION = '3';
+const AUDIO_VERSION = '4';
 let audioAssets = null;
 async function loadAudio() {
   if (audioAssets) return audioAssets;
@@ -762,7 +762,22 @@ function tick() {
     el('next').innerHTML = n ? `<span class="muted">Ensuite</span> ${esc(KINDS[n.kind].label)} · ${minutesLabel(n.duration)}` : 'Dernière étape';
   }
   el('stepno').textContent = i < 0 ? 'Départ' : i >= steps.length ? 'Fin' : `Étape ${i + 1}/${steps.length} · ${KINDS[steps[i].kind].label}`;
-  el('progress').style.width = `${Math.min(100, ((t - starts[0]) / (end - starts[0])) * 100)}%`;
+  // Barre : chaque étape à sa couleur (vert = course, blanc = marche), passé plein, futur estompé.
+  const segs = el('bar')?.querySelectorAll('.seg > i') || [];
+  segs.forEach((f, k) => { f.style.width = `${Math.max(0, Math.min(1, (t - starts[k]) / steps[k].duration)) * 100}%`; });
+  if (el('cursor')) el('cursor').style.left = `${Math.max(0, Math.min(100, ((t - starts[0]) / (end - starts[0])) * 100))}%`;
+  // Mi-séance : même instant que le son gravé dans la piste. Seulement au franchissement
+  // (une reprise après la moitié ne le rejoue pas).
+  const half = live.track.half;
+  if (half && live.lastT !== undefined && live.lastT < half && t >= half && t - live.lastT < 2) {
+    document.body.classList.remove('flash-moitie');
+    void document.body.offsetWidth;
+    document.body.classList.add('flash-moitie');
+    setTimeout(() => document.body.classList.remove('flash-moitie'), 2600);
+    live.halfShownUntil = Date.now() + 8000;
+  }
+  live.lastT = t;
+  el('halfway').hidden = !(live.halfShownUntil > Date.now());
   el('elapsed').textContent = mmss(Math.max(0, t - starts[0]));
   const g = summary(live.gps, Math.max(0, t - starts[0]));
   el('dist').textContent = g.distanceKm ? g.distanceKm.toLocaleString('fr-FR', { minimumFractionDigits: 2 }) : '0,00';
@@ -992,6 +1007,13 @@ const screens = {
   },
 
   live() {
+    const segmentsBar = () => {
+      if (!live) return '<div class="bar"></div>';
+      const { starts, end, half } = live.track;
+      const span = end - starts[0];
+      const pct = (x) => `${((x / span) * 100).toFixed(3)}%`;
+      return `<div class="bar" id="bar">${live.session.steps.map((s, i) => `<span class="seg ${KINDS[s.kind].effort}" style="left:${pct(starts[i] - starts[0])};width:${pct(s.duration)}"><i></i></span>`).join('')}${half ? `<b class="halfmark" style="left:${pct(half - starts[0])}"></b>` : ''}<span class="cursor" id="cursor"></span></div>`;
+    };
     const playing = !audio.paused;
     const interrupted = !playing && live && !live.userPaused && audio.currentTime < live.track.end;
     return `
@@ -1001,7 +1023,8 @@ const screens = {
         <p class="now" id="now"></p>
         <p class="count" id="count"></p>
         <p class="next" id="next"></p>
-        <div class="bar"><div id="progress"></div></div>
+        ${segmentsBar()}
+        <p class="halfway" id="halfway" hidden>Moitié de la séance faite</p>
         <div class="live-stats">
           <div><b id="dist">0,00</b><span>km</span></div>
           <div><b id="pace">–</b><span>allure /km</span></div>

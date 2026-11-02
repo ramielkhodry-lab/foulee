@@ -118,3 +118,18 @@ test('mode signaux : aucune voix, une montée par course, une descente par march
   assert.deepEqual(events.filter((e) => e.truncated), []);
   assert.equal(events.find((e) => e.clip === 'signal_course').at, 307);
 });
+
+test('mi-séance : signal à la moitié du temps d\'effort, sans écraser un autre son', () => {
+  const steps = [{ kind: 'marche', duration: 120 }, { kind: 'course', duration: 120 }, { kind: 'marche', duration: 120 }, { kind: 'course', duration: 120 }];
+  for (const voice of [false, true]) {
+    const { events, starts, end, half } = buildEvents(steps, { voice });
+    const mid = starts[0] + (end - starts[0]) / 2; // tombe pile sur un changement d'étape
+    assert.ok(half !== null && Math.abs(half - mid) <= 10, `half=${half} mid=${mid}`);
+    assert.equal(events.filter((e) => e.clip === 'signal_moitie').length, 1);
+    const others = events.filter((e) => e.clip !== 'signal_moitie');
+    assert.ok(others.every((e) => e.at <= half - 1 || e.at >= half + 1.1), `collision voice=${voice}`);
+  }
+  // Signal entre deux sons : pas de collision même au milieu d'une étape.
+  const { half } = buildEvents([{ kind: 'course', duration: 600 }]);
+  assert.equal(half, LEAD_IN + 300);
+});
