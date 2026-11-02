@@ -16,7 +16,7 @@ export function haversine(a, b) {
 }
 
 export function createTrack() {
-  return { points: [], meters: 0, rejected: 0, gaps: 0 };
+  return { points: [], meters: 0, rejected: 0, gaps: 0, alts: [] };
 }
 
 // Ajoute un point { lat, lon, t (ms), acc (m) }. Renvoie true s'il est retenu.
@@ -34,6 +34,38 @@ export function addPoint(track, p) {
   return true;
 }
 
+// Altitude (m) donnée par l'iPhone avec la position (GPS et baromètre). Gardée seulement si
+// le téléphone la dit précise.
+const MAX_ALT_ACCURACY = 10; // m
+export function addAltitude(track, alt, acc, t) {
+  if (!Number.isFinite(alt) || !(acc <= MAX_ALT_ACCURACY)) return false;
+  (track.alts ||= []).push([t, alt]);
+  return true;
+}
+
+// Dénivelé positif : une montée ne compte qu'une fois qu'elle dépasse 3 m depuis le point
+// le plus bas, pour que le bruit de l'altitude (± quelques mètres) ne s'additionne pas.
+const ALT_STEP = 3; // m
+const MIN_ALTS = 20;
+export function ascent(alts) {
+  if (!alts || alts.length < MIN_ALTS) return null;
+  // Lissage : moyenne glissante sur 5 mesures.
+  const v = alts.map((_, i) => {
+    const w = alts.slice(Math.max(0, i - 2), i + 3).map((a) => a[1]);
+    return w.reduce((x, y) => x + y, 0) / w.length;
+  });
+  let up = 0;
+  let ref = v[0]; // dernier point bas ou haut retenu
+  let climbing = false;
+  for (const a of v) {
+    if (climbing) {
+      if (a > ref) { up += a - ref; ref = a; } else if (a < ref - ALT_STEP) { climbing = false; ref = a; }
+    } else if (a < ref) ref = a;
+    else if (a > ref + ALT_STEP) { up += a - ref; ref = a; climbing = true; }
+  }
+  return Math.round(up);
+}
+
 // La page est passée en arrière-plan : le GPS s'arrête, la mesure devient incomplète.
 export function markGap(track) {
   track.gaps++;
@@ -45,6 +77,7 @@ export function summary(track, movingSec) {
     distanceKm: km > 0 ? km : null,
     allureSecKm: km >= 0.1 && movingSec > 0 ? Math.round(movingSec / km) : null,
     gpsIncomplet: track.gaps > 0,
+    deniveleM: ascent(track.alts),
     points: track.points.map((p) => [Math.round(p.lat * 1e6) / 1e6, Math.round(p.lon * 1e6) / 1e6, p.t]),
   };
 }
