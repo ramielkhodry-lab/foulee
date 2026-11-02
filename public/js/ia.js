@@ -27,6 +27,9 @@ export function seanceText(h) {
     if (h.steps && h.completedSteps !== undefined) parts.push(`${h.completedSteps} étapes faites sur ${h.steps.length}`);
   }
   if (h.cardio) parts.push(cardioText(h.cardio));
+  if (h.montre?.puissance) parts.push(`puissance moyenne ${h.montre.puissance} W`);
+  if (h.montre?.cadence) parts.push(`cadence ${h.montre.cadence} pas/min`);
+  if (h.deniveleM) parts.push(`dénivelé positif ${h.deniveleM} m`);
   return parts.join(', ');
 }
 
