@@ -1,4 +1,5 @@
 import { conseils, hasIA } from './conseils.js';
+import { cardioText } from './cardio.js';
 
 // Conseils de l'IA côté app : ce qu'on envoie au serveur, quand réessayer après un échec,
 // et le message qui dit pourquoi l'IA n'a pas répondu et quand elle reprend.
@@ -25,6 +26,7 @@ export function seanceText(h) {
     if (h.distanceKm) parts.push(`${h.distanceKm} km`);
     if (h.steps && h.completedSteps !== undefined) parts.push(`${h.completedSteps} étapes faites sur ${h.steps.length}`);
   }
+  if (h.cardio) parts.push(cardioText(h.cardio));
   return parts.join(', ');
 }
 

@@ -1,0 +1,138 @@
+process.env.TZ = 'Europe/Paris';
+import { test } from 'node:test';
+import assert from 'node:assert/strict';
+import { bodyText, parseSamples, importMessage } from '../worker/src/cardio.js';
+import { stepTimes, summarize, windowOf, cardioText } from '../public/js/cardio.js';
+import { nextRunLevel } from '../public/js/plan.js';
+import { seanceText } from '../public/js/ia.js';
+
+const NOW = Date.parse('2026-11-02T19:00:00+01:00');
+
+test('Raccourci : lignes « date ISO;valeur » lues, doublons et valeurs absurdes écartés', () => {
+  const text = [
+    '2026-11-02T18:00:05+01:00;92',
+    '2026-11-02T18:00:10+01:00;95,0',
+    '2026-11-02T18:00:10+01:00;95', // doublon
+    '2026-11-02T18:00:15+0100;101 bpm',
+    '2026-11-02T18:00:20Z;400', // impossible
+    '',
+  ].join('\n');
+  const { samples, rejected } = parseSamples(text, NOW);
+  assert.deepEqual(samples, [
+    [Date.parse('2026-11-02T17:00:05Z'), 92],
+    [Date.parse('2026-11-02T17:00:10Z'), 95],
+    [Date.parse('2026-11-02T17:00:15Z'), 101],
+  ]);
+  assert.equal(rejected, 1);
+});
+
+test('Raccourci : corps JSON (champ texte) ou texte brut', () => {
+  assert.equal(bodyText('{"mesures":"a\\nb"}'), 'a\nb');
+  assert.equal(bodyText('["a","b"]'), 'a\nb');
+  assert.equal(bodyText('2026-11-02T18:00:05+01:00;92'), '2026-11-02T18:00:05+01:00;92');
+});
+
+test('Raccourci mal réglé : le message dit quel réglage corriger', () => {
+  assert.match(parseSamples('2026-11-02;92\n2026-11-02;95', NOW).reason, /Inclure l’heure/);
+  assert.match(parseSamples('2026-11-02T18:00:05;92', NOW).reason, /fuseau/);
+  assert.match(parseSamples('2 nov. 2026 à 18:00;92', NOW).reason, /Aucune mesure/);
+  assert.match(parseSamples('2026-10-01T18:00:05+01:00;92', NOW).reason, /trop anciennes/);
+  assert.match(importMessage(parseSamples('2026-11-02T18:00:05+01:00;92\n2026-11-02T18:40:05+01:00;120', NOW).samples, 2), /2 mesures de cardio reçues, lundi 2 novembre, de 18:00 à 18:40/);
+});
+
+// Séance de 4 étapes, piste qui commence à 3 s, pause de 60 s au milieu de la 2e étape.
+const steps = [{ kind: 'echauffement', duration: 300 }, { kind: 'course_lente', duration: 180 }, { kind: 'marche', duration: 120 }, { kind: 'recuperation', duration: 300 }];
+const starts = [3, 303, 483, 603];
+const end = 903;
+const T0 = Date.parse('2026-11-02T18:00:00+01:00');
+const at = (s) => T0 + s * 1000;
+
+test('heure réelle de chaque étape, pause comprise', () => {
+  const anchors = [[0, at(0)], [3, at(3)], [303, at(303)], [393, at(453)] /* reprise après 60 s de pause à 393 s */, [483, at(543)], [603, at(663)]];
+  const ms = stepTimes(anchors, starts, end, end);
+  assert.deepEqual(ms.map((t) => (t - T0) / 1000), [3, 303, 543, 663, 963]);
+});
+
+test('étape passée (saut) : durée nulle, pas de temps inventé', () => {
+  const anchors = [[0, at(0)], [303, at(303)], [483, at(320)] /* saut à la marche à 320 s */];
+  const ms = stepTimes(anchors, starts, end, 700);
+  assert.deepEqual(ms.map((t) => (t - T0) / 1000), [3, 303, 320, 440, 537]);
+});
+
+const entry = (extra = {}) => ({
+  id: 'x', sport: 'course', source: 'guidee', date: '2026-11-02T18:00:00', level: 2, steps, elapsedSec: 900,
+  stepMs: [at(3), at(303), at(483), at(603), at(903)], ...extra,
+});
+// Mesure toutes les 5 s : 100 bpm en marche, 150 en course.
+const samplesFor = (h, course = 150, marche = 100) => {
+  const out = [];
+  for (let s = 0; s <= 960; s += 5) {
+    const t = at(s);
+    const i = h.stepMs.findIndex((x, k) => t >= x && t < h.stepMs[k + 1]);
+    out.push([t, i === 1 ? course : marche]);
+  }
+  return out;
+};
+
+test('résumé : moyenne, max, en course, en marche, courbe compacte', () => {
+  const h = entry();
+  const c = summarize(h, [[at(-600), 70], ...samplesFor(h), [at(3000), 70]]);
+  assert.equal(c.max, 150);
+  assert.equal(c.course, 150);
+  assert.equal(c.marche, 100);
+  assert.ok(c.avg > 100 && c.avg < 150);
+  assert.equal(c.pts.length, 30); // 900 s / 30 s
+  assert.deepEqual(c.bandes, [[300, 480]]);
+  assert.equal(c.n, 180); // de 5 s à 900 s, dans la séance (3 s → 903 s)
+  assert.match(cardioText(c), /en course 150, en marche 100/);
+});
+
+test('pas de cardio sans mesures pendant la séance, ni sans heure connue', () => {
+  const h = entry();
+  assert.equal(summarize(h, [[at(-600), 70], [at(5000), 80]]), null);
+  assert.equal(summarize(h, samplesFor(h).slice(0, 5)), null);
+  assert.equal(windowOf({ sport: 'course', source: 'manuelle', date: '2026-11-02' }), null);
+  // Anciennes séances guidées sans heures d'étapes : début + durée, sans phases.
+  const old = summarize({ ...entry(), stepMs: undefined }, samplesFor(entry()));
+  assert.ok(old.avg && !old.course && !old.bandes);
+});
+
+test('le cardio passe dans le résumé envoyé à l’IA', () => {
+  const h = entry();
+  h.cardio = summarize(h, samplesFor(h));
+  assert.match(seanceText(h), /cardio mesuré par la montre : moyenne \d+ bpm, max 150, en course 150, en marche 100/);
+});
+
+const withHr = (date, course, extra = {}) => {
+  const h = entry({ date, ...extra });
+  h.cardio = summarize(h, samplesFor(h, course));
+  return h;
+};
+
+test('programme : cardio nettement plus haut au même palier → on consolide au lieu de monter', () => {
+  const a = withHr('2026-10-30T18:00:00', 150, { difficulte: 3 });
+  const b = withHr('2026-11-02T18:00:00', 160, { difficulte: 3 });
+  const r = nextRunLevel([a, b], { maxLevel: 18 });
+  assert.equal(r.level, 2);
+  assert.match(r.reason, /Cardio en course plus haut que la dernière fois à ce palier \(160 bpm contre 150\)/);
+  // Même une course notée facile ne monte pas.
+  assert.equal(nextRunLevel([a, { ...b, difficulte: 2 }], { maxLevel: 18 }).level, 2);
+});
+
+test('programme : cardio stable ou en baisse → les règles habituelles, avec le progrès dit', () => {
+  const a = withHr('2026-10-30T18:00:00', 156, { difficulte: 3 });
+  const b = withHr('2026-11-02T18:00:00', 150, { difficulte: 3 });
+  const r = nextRunLevel([a, b], { maxLevel: 18 });
+  assert.equal(r.level, 3);
+  assert.match(r.reason, /Cardio en course en baisse à palier égal \(150 bpm contre 156\)/);
+  // +5 bpm : variation normale d'un jour à l'autre, ça monte quand même.
+  assert.equal(nextRunLevel([a, withHr('2026-11-02T18:00:00', 161, { difficulte: 3 })], { maxLevel: 18 }).level, 3);
+});
+
+test('programme : le cardio ne fait jamais redescendre, et rien sans comparaison au même palier', () => {
+  const a = withHr('2026-10-30T18:00:00', 140, { level: 1, difficulte: 2 });
+  const b = withHr('2026-11-02T18:00:00', 175, { difficulte: 2 });
+  assert.equal(nextRunLevel([a, b], { maxLevel: 18 }).level, 3); // palier différent : pas de comparaison
+  const c = withHr('2026-11-05T18:00:00', 190, { difficulte: 4 });
+  assert.equal(nextRunLevel([b, c], { maxLevel: 18 }).level, 2); // difficulté 4 : même palier, pas moins
+});

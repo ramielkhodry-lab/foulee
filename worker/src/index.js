@@ -13,6 +13,7 @@ import {
 } from '@simplewebauthn/server';
 import { isoBase64URL } from '@simplewebauthn/server/helpers';
 import { conseilsIA, IaError } from './ia.js';
+import { bodyText, parseSamples, importMessage, MAX_BODY, KEEP_DAYS } from './cardio.js';
 
 const SESSION_DAYS = 180;
 const INVITE_DAYS = 14;
@@ -43,6 +44,8 @@ function cors(env) {
     Vary: 'Origin',
   };
 }
+
+const plain = (text, status = 200) => new Response(text, { status, headers: { 'Content-Type': 'text/plain; charset=utf-8' } });
 
 const json = (env, body, status = 200) =>
   new Response(JSON.stringify(body), { status, headers: { 'Content-Type': 'application/json', ...cors(env) } });
@@ -299,12 +302,80 @@ const routes = {
     ).bind(u.id).all();
     return { invites: rows.results };
   },
+
+  // Cardio de l'Apple Watch. Le jeton d'import ne sert qu'à ajouter des mesures : il ne lit
+  // rien du compte. Il n'est montré qu'une fois ; en créer un nouveau invalide l'ancien.
+  'GET /me/cardio/token': async (req, env) => {
+    const u = await currentUser(req, env);
+    const row = await env.DB.prepare('SELECT created_at, last_used_at, last_count FROM cardio_tokens WHERE user_id = ?').bind(u.id).first();
+    return row ? { active: true, createdAt: row.created_at, lastUsedAt: row.last_used_at, lastCount: row.last_count } : { active: false };
+  },
+
+  'POST /me/cardio/token': async (req, env) => {
+    const u = await currentUser(req, env);
+    const token = `fc_${randomId(24)}`;
+    await env.DB.batch([
+      env.DB.prepare('DELETE FROM cardio_tokens WHERE user_id = ?').bind(u.id),
+      env.DB.prepare('INSERT INTO cardio_tokens (token_hash, user_id, created_at) VALUES (?, ?, ?)').bind(await sha256(token), u.id, now()),
+    ]);
+    return { url: `${new URL(req.url).origin}/cardio?k=${token}`, createdAt: now() };
+  },
+
+  'DELETE /me/cardio/token': async (req, env) => {
+    const u = await currentUser(req, env);
+    await env.DB.prepare('DELETE FROM cardio_tokens WHERE user_id = ?').bind(u.id).run();
+    return { active: false };
+  },
+
+  // Mesures d'une plage (4 jours au plus), pour les rattacher aux séances sur le téléphone.
+  'GET /me/cardio': async (req, env) => {
+    const u = await currentUser(req, env);
+    const q = new URL(req.url).searchParams;
+    const from = Number(q.get('from'));
+    const to = Number(q.get('to'));
+    if (!q.get('from') || !q.get('to') || !Number.isFinite(from) || !Number.isFinite(to) || to < from || to - from > 4 * 86400_000) throw new HttpError(400, 'Plage invalide');
+    const rows = await env.DB.prepare('SELECT t, bpm FROM cardio_samples WHERE user_id = ? AND t >= ? AND t <= ? ORDER BY t LIMIT 20000').bind(u.id, from, to).all();
+    return { samples: rows.results.map((r) => [r.t, r.bpm]) };
+  },
 };
+
+// Import par le Raccourci iPhone : réponse en texte, affichée telle quelle par le Raccourci.
+async function importCardio(request, env) {
+  if (request.method !== 'POST') return plain('Foulée : le Raccourci doit utiliser la méthode POST.', 405);
+  const token = new URL(request.url).searchParams.get('k') || (request.headers.get('Authorization') || '').replace(/^Bearer /, '');
+  const hash = token ? await sha256(token) : null;
+  const row = hash ? await env.DB.prepare('SELECT user_id FROM cardio_tokens WHERE token_hash = ?').bind(hash).first() : null;
+  if (!row) return plain('Foulée : lien d’import inconnu ou remplacé. Copie le nouveau lien depuis Foulée > Profil > Cardio Apple Watch.', 401);
+  const raw = await request.text();
+  if (raw.length > MAX_BODY) return plain('Foulée : trop de mesures d’un coup. Dans le Raccourci, garde seulement les mesures d’aujourd’hui.', 413);
+  const { samples, reason } = parseSamples(bodyText(raw), now());
+  if (!samples.length) return plain(`Foulée : ${reason}`, 400);
+  const stmts = [];
+  for (let i = 0; i < samples.length; i += 30) {
+    const part = samples.slice(i, i + 30);
+    stmts.push(env.DB.prepare(`INSERT OR IGNORE INTO cardio_samples (user_id, t, bpm) VALUES ${part.map(() => '(?, ?, ?)').join(', ')}`)
+      .bind(...part.flatMap(([t, bpm]) => [row.user_id, t, bpm])));
+  }
+  const inserts = stmts.length;
+  stmts.push(env.DB.prepare('DELETE FROM cardio_samples WHERE user_id = ? AND t < ?').bind(row.user_id, now() - KEEP_DAYS * 86400_000));
+  stmts.push(env.DB.prepare('UPDATE cardio_tokens SET last_used_at = ?, last_count = ? WHERE token_hash = ?').bind(now(), samples.length, hash));
+  const res = await env.DB.batch(stmts);
+  const added = res.slice(0, inserts).reduce((a, r) => a + (r.meta?.changes || 0), 0);
+  return plain(importMessage(samples, added));
+}
 
 export default {
   async fetch(request, env) {
     if (request.method === 'OPTIONS') return new Response(null, { status: 204, headers: cors(env) });
     const url = new URL(request.url);
+    if (url.pathname === '/cardio') {
+      try {
+        return await importCardio(request, env);
+      } catch (e) {
+        console.error(e);
+        return plain('Foulée : erreur du serveur, réessaie dans un moment.', 500);
+      }
+    }
     const handler = routes[`${request.method} ${url.pathname}`];
     if (!handler) return json(env, { error: 'Introuvable' }, 404);
     try {

@@ -94,6 +94,10 @@ export const createInvite = (kind = 'join') => api('/me/invites', { method: 'POS
 export const listInvites = () => api('/me/invites', { auth: true });
 export const pullData = () => api('/me/data', { auth: true });
 export const askConseils = (input) => api('/me/conseils', { method: 'POST', body: input, auth: true });
+export const cardioStatus = () => api('/me/cardio/token', { auth: true });
+export const cardioNewLink = () => api('/me/cardio/token', { method: 'POST', auth: true });
+export const cardioDisable = () => api('/me/cardio/token', { method: 'DELETE', auth: true });
+export const cardioSamples = (from, to) => api(`/me/cardio?from=${Math.round(from)}&to=${Math.round(to)}`, { auth: true });
 export const pushData = (data) => api('/me/data', { method: 'PUT', body: { data }, auth: true });
 
 // Fusion sans perte : séances réalisées et séances perso réunies par identifiant.

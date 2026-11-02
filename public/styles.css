@@ -457,3 +457,32 @@ details.hist[open] .li { border-bottom: 0; }
 .chips button { min-height: 36px; padding: 6px 14px; border-radius: 999px; font-size: 14px; }
 .chips button.on { background: var(--ink); color: var(--on-accent); border-color: var(--ink); }
 .day-card .day-link + .day-link { padding-top: 0; }
+
+/* Cardio de la montre : rouge cœur pour le chiffre, la courbe reste dans la couleur de la course. */
+.hr-box { background: var(--surface-2); border-radius: 16px; padding: 12px 14px; margin: 12px 0; }
+.hr-head { display: flex; align-items: baseline; gap: 6px; margin: 0; }
+.hr-head b { font: 800 italic 40px/1 var(--display); }
+.hr-head small { color: var(--muted); font-size: 13px; }
+.hr-heart { color: #FF4D6D; font-size: 20px; }
+.hr-max { margin-left: auto; color: var(--muted); font-size: 14px; }
+.hr-max b { font: 800 italic 24px/1 var(--display); color: var(--ink); }
+.hr-phases { display: flex; gap: 16px; margin: 6px 0 4px; font-size: 14px; color: var(--muted); }
+.hr-phases .on { color: var(--run); }
+.hr-phases b { color: var(--ink); font-size: 16px; }
+.hr-curve { display: block; width: 100%; height: auto; margin-top: 6px; }
+.hr-band { fill: var(--run-soft); }
+.hr-line { stroke: #FF4D6D; stroke-width: 2; stroke-linejoin: round; stroke-linecap: round; }
+.hr-dot { fill: #FF4D6D; }
+.hr-axis { fill: var(--muted); font-size: 10px; }
+.hr-wait { border: 1px dashed var(--line); border-radius: 14px; padding: 12px; margin: 12px 0; }
+.hr-trend { display: flex; gap: 6px; align-items: flex-end; overflow-x: auto; padding: 4px 0; }
+.hr-col { flex: 1 0 36px; display: flex; flex-direction: column; align-items: center; gap: 3px; font-size: 11px; }
+.hr-col b { font-size: 14px; }
+.hr-col i { display: block; width: 100%; max-width: 30px; background: #FF4D6D; border-radius: 6px 6px 2px 2px; opacity: .85; }
+.cardio-card input[readonly] { font-size: 13px; }
+.cardio-card details summary { padding: 10px 0; font-weight: 700; cursor: pointer; }
+.steps-guide { padding-left: 20px; margin: 4px 0 8px; font-size: 14px; }
+.steps-guide li { margin: 0 0 8px; }
+.steps-guide ul { padding-left: 16px; margin: 4px 0 0; color: var(--muted); }
+.code { font-family: ui-monospace, Menlo, monospace; background: var(--surface-2); border-radius: 6px; padding: 1px 6px; color: var(--ink); white-space: nowrap; }
+.steps-guide .code { white-space: normal; overflow-wrap: anywhere; }
