@@ -4,7 +4,7 @@ import { load, update, uid, PRESETS, onSave, replace, empty } from './store.js';
 import * as account from './account.js';
 import { createTrack, addPoint, addAltitude, markGap, summary, encodeTrace, decodeTrace } from './gps.js';
 import { drawTrace } from './map.js';
-import { stepTimes, summarize, summarizeMontre, mergeDistance, recovery, recoveryAt, zoneLimits, zoneOf, zoneTimes, cardioLine, curveSvg, windowOf } from './cardio.js';
+import { stepTimes, summarize, summarizeMontre, montreStale, MONTRE_V, mergeDistance, recovery, recoveryAt, zoneLimits, zoneOf, zoneTimes, cardioLine, curveSvg, windowOf } from './cardio.js';
 import { iaInput, pendingIA, failedIA, failureMessage } from './ia.js';
 import { tipsOf, tipsSource, hasIA } from './conseils.js';
 import { GOALS_MUSCU, LIEUX, NIVEAUX_MUSCU, MUSCLES, alternatives, byId, muscuPlan, nextSeance, nextLoad, tonnage } from './muscu.js';
@@ -2170,7 +2170,7 @@ function cardioCard(sess) {
 
 // Séances guidées des 3 derniers jours sans cardio ou sans les autres mesures de la montre (et
 // le bilan en cours) : on demande les mesures de leur plage horaire et on les y rattache.
-const missing = (h) => !h.cardio || !h.montre || !h.cardio.apres;
+const missing = (h) => !h.cardio || !h.montre || montreStale(h.montre) || !h.cardio.apres;
 async function fetchCardio({ force = false } = {}) {
   if (!cardioOn() || cardioUi.busy) return;
   if (!force && Date.now() - cardioUi.lastTry < 20_000) return;
@@ -2201,7 +2201,11 @@ async function fetchCardio({ force = false } = {}) {
   const found = [];
   for (const h of saved) {
     const c = h.cardio ? null : summarize(h, samples);
-    const m = h.montre ? null : summarizeMontre(h, autres);
+    // Mesures de la montre résumées par un ancien calcul : recalculées avec les données du serveur.
+    const stale = montreStale(h.montre);
+    // Serveur injoignable : on ne touche à rien. Plus rien sur le serveur : l'ancien résumé reste,
+    // marqué à jour pour ne pas le redemander sans fin.
+    const m = h.montre && !stale ? null : stale && cardioUi.message ? null : summarizeMontre(h, autres) || (stale ? { ...h.montre, v: MONTRE_V } : null);
     const ap = h.cardio && !h.cardio.apres ? recovery(windowOf(h)[1], samples) : null;
     if (c || m || ap) found.push([h.id, c, m, ap]);
   }
