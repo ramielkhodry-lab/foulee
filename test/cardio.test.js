@@ -147,20 +147,33 @@ test('Raccourci : distance, calories, puissance, pas ; ceux de l’iPhone écart
     'puiss;2026-11-02T18:01:00+01:00;118;Apple Watch de Rami',
     'pas;2026-11-02T18:01:00+01:00;150;Apple Watch de Rami',
     'pas;2026-11-02T18:01:00+01:00;140;iPhone de Rami',
-    'Distance de marche et de course;2026-11-02T18:03:00+01:00;0,1',
+    'Distance de marche et de course;2026-11-02T18:03:00+01:00;0,1', // sans source, alors que la montre en a : écartée
     'Steps;2026-11-02T18:03:00+01:00;120',
+    'pas;2026-11-02T18:04:00+01:00;90;Téléphone de Rami', // iPhone renommé : écarté quand même
     'Poids;2026-11-02T18:03:00+01:00;80', // type inconnu : ignoré
   ].join('\n');
   const r = parseSamples(text, NOW);
   const t = (hm) => Date.parse(`2026-11-02T${hm}:00+01:00`);
   assert.equal(r.samples.length, 1);
-  assert.deepEqual(r.autres.dist, [[t('18:01'), 0.15], [t('18:02'), 0.14], [t('18:03'), 0.1]]);
+  assert.deepEqual(r.autres.dist, [[t('18:01'), 0.15], [t('18:02'), 0.14]]);
   assert.deepEqual(r.autres.kcal, [[t('18:01'), 12.5]]);
   assert.deepEqual(r.autres.puiss, [[t('18:01'), 118]]);
-  assert.deepEqual(r.autres.pas, [[t('18:01'), 150], [t('18:03'), 120]]);
-  assert.equal(r.total, 8);
+  assert.deepEqual(r.autres.pas, [[t('18:01'), 150]]);
+  assert.equal(r.total, 6);
+  assert.equal(r.fromPhone, 5);
+  assert.deepEqual(r.sources.pas.noms, ['Apple Watch de Rami', 'iPhone de Rami', 'Téléphone de Rami']);
   assert.equal(r.rejected, 0);
-  assert.match(importMessage(r.samples, 1, r.autres), /1 mesures de cardio, 3 de distance, 1 d’énergie, 1 de puissance, 2 de pas reçues/);
+  assert.match(importMessage(r.samples, 1, r.autres), /1 mesures de cardio, 2 de distance, 1 d’énergie, 1 de puissance, 1 de pas reçues/);
+  const msg = importMessage(r.samples, 1, r.autres, r);
+  assert.match(msg, /5 d’un autre appareil que la montre écartées/);
+  assert.match(msg, /appareils vus : Apple Watch de Rami, iPhone de Rami, Téléphone de Rami/);
+  // Sans colonne « Source » : on prévient que l'iPhone ne peut pas être écarté.
+  const sans = parseSamples('#dates dist\n2026-11-02T18:01:00+01:00\n#valeurs dist\n0,15', NOW);
+  assert.match(importMessage(sans.samples, 0, sans.autres, sans), /mesures de distance sans « Source »/);
+  // Colonnes de tailles différentes pour un type : signalé même si les autres passent.
+  const mis = parseSamples('#dates dist\n2026-11-02T18:01:00+01:00\n#valeurs dist\n0,15\n0,2\n#dates pas\n2026-11-02T18:01:00+01:00\n#valeurs pas\n150', NOW);
+  assert.equal(mis.autres.pas.length, 1);
+  assert.match(importMessage(mis.samples, 0, mis.autres, mis), /1 type\(s\) refusé\(s\)/);
   // Sans cardio du tout, les autres mesures passent quand même.
   assert.equal(parseSamples('pas;2026-11-02T18:01:00+01:00;150', NOW).total, 1);
 });
