@@ -229,3 +229,45 @@ test('cardio après l’effort : 3 minutes après la fin, valeurs à 0, 1 et 2 m
   const h = entry();
   assert.deepEqual(summarize(h, [...samplesFor(h).filter(([t]) => t <= end), ...s.slice(1)]).apres, ap);
 });
+
+test('Raccourci sans boucle : listes entières en colonnes (#dates / #valeurs / #sources), recollées ligne à ligne', () => {
+  const text = [
+    '2026-11-02T18:00:05+01:00;92', // cardio à l’ancienne, avant les colonnes
+    '#dates dist',
+    '2026-11-02T18:00:00+01:00',
+    '2026-11-02T18:00:30+01:00',
+    '2026-11-02T18:00:30+01:00',
+    '#valeurs dist',
+    '0,08',
+    '0,09',
+    '0,05',
+    '#sources dist',
+    'Apple Watch de Rami',
+    'Apple Watch de Rami',
+    'iPhone de Rami', // même minute, iPhone : écarté
+    '#dates pas',
+    '2026-11-02T18:00:00+01:00',
+    '#valeurs pas',
+    '1 234', // séparateur de milliers iOS
+    '#dates fc',
+    '2026-11-02T18:01:00+01:00',
+    '#valeurs fc',
+    '130',
+  ].join('\n');
+  const r = parseSamples(text, NOW);
+  assert.deepEqual(r.samples, [
+    [Date.parse('2026-11-02T17:00:05Z'), 92],
+    [Date.parse('2026-11-02T17:01:00Z'), 130],
+  ]);
+  assert.deepEqual(r.autres.dist, [
+    [Date.parse('2026-11-02T17:00:00Z'), 0.08],
+    [Date.parse('2026-11-02T17:00:30Z'), 0.09],
+  ]);
+  assert.deepEqual(r.autres.pas, [[Date.parse('2026-11-02T17:00:00Z'), 1234]]);
+});
+
+test('Raccourci sans boucle : colonnes de tailles différentes → refusé avec le réglage à corriger', () => {
+  const r = parseSamples('#dates kcal\n2026-11-02T18:00:00+01:00\n2026-11-02T18:01:00+01:00\n#valeurs kcal\n3', NOW);
+  assert.equal(r.total, 0);
+  assert.match(r.reason, /même nombre de lignes/);
+});
