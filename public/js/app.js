@@ -4,6 +4,7 @@ import { load, update, uid, PRESETS, onSave, replace, empty } from './store.js';
 import * as account from './account.js';
 import { createTrack, addPoint, markGap, summary, encodeTrace, decodeTrace } from './gps.js';
 import { drawTrace } from './map.js';
+import { stepTimes, summarize, cardioLine, curveSvg, windowOf } from './cardio.js';
 import { iaInput, pendingIA, failedIA, failureMessage } from './ia.js';
 import { tipsOf, tipsSource, hasIA } from './conseils.js';
 import { GOALS_MUSCU, LIEUX, NIVEAUX_MUSCU, MUSCLES, alternatives, byId, muscuPlan, nextSeance, nextLoad, tonnage } from './muscu.js';
@@ -156,6 +157,28 @@ function coachTips(h) {
     </details>`;
 }
 
+// Cardio mesuré par la montre : rien du tout s'il n'a pas été mesuré.
+const cardioBlock = (c) => (c ? `
+  <div class="hr-box">
+    <p class="hr-head"><span class="hr-heart">♥</span><b>${c.avg}</b><small>bpm de moyenne</small><span class="hr-max">max <b>${c.max}</b></span></p>
+    ${c.course || c.marche ? `<p class="hr-phases">${c.course ? `<span class="on">En course <b>${c.course}</b></span>` : ''}${c.marche ? `<span>En marche <b>${c.marche}</b></span>` : ''}</p>` : ''}
+    ${curveSvg(c)}
+    <p class="muted small" style="margin:4px 0 0">Mesuré par ta montre (${c.n} mesures)${c.bandes?.length ? ', phases de course en fond' : ''}.</p>
+  </div>` : '');
+
+// Progression : cardio des dernières courses mesurées par la montre. Comparer au même palier.
+function cardioTrend(runs) {
+  const list = runs.filter((h) => h.cardio).sort((a, b) => String(a.date).localeCompare(String(b.date))).slice(-8);
+  if (!list.length) return '';
+  const val = (h) => h.cardio.course ?? h.cardio.avg;
+  const hi = Math.max(...list.map(val));
+  const lo = Math.min(...list.map(val)) - 10;
+  return `
+    <h3>Cardio en course</h3>
+    <div class="hr-trend">${list.map((h) => `<div class="hr-col"><b>${val(h)}</b><i style="height:${Math.round(18 + ((val(h) - lo) / (hi - lo || 1)) * 52)}px"></i><span>${shortDate(h.date).replace(/\.$/, '')}</span><span class="muted">${runLevel(h) ? `P${runLevel(h)}` : ''}</span></div>`).join('')}</div>
+    <p class="muted small">Bpm moyens pendant les phases de course (moyenne de la séance si les phases manquent). À palier égal, un cardio qui baisse veut dire que tu progresses. Mesuré par ta montre, rien n'est estimé.</p>`;
+}
+
 // Séance passée : ligne dépliable, le détail reste à un toucher.
 function historyRow(h, open = false) {
   const sport = sportOf(h);
@@ -166,6 +189,7 @@ function historyRow(h, open = false) {
   if (h.allureSecKm) parts.push(`allure ${allure(h.allureSecKm)}`);
   if (h.gpsIncomplet) parts.push('GPS incomplet');
   if (h.steps && h.source === 'guidee') parts.push(`${h.completedSteps}/${h.steps.length} étapes`);
+  if (h.cardio) parts.push(`♥ ${h.cardio.avg} bpm`);
   if (sport === 'muscu' && h.exercices?.length) parts.unshift(`${h.sessionName} · ${h.exercices.length} exercices`);
   if (sport === 'autre') parts.unshift(`${esc(h.activite || 'Autre activité')}${h.remplace ? ` · à la place de la ${SPORT_LABEL[h.remplace].toLowerCase()}` : ''}`);
   const feel = [
@@ -184,6 +208,7 @@ function historyRow(h, open = false) {
       <summary class="li">${icon(sport)}<div class="li-main"><b>${dateLabel(h.date)}</b><span>${parts.length ? parts.join(' · ') : esc(h.structure || h.sessionName || SPORT_LABEL[sport])}</span></div><span class="li-side ${sport}">${side}</span></summary>
       <div class="li-more">
         ${traceOf(h).length ? `<div class="map" data-map="${esc(h.id)}"></div>` : ''}
+        ${cardioBlock(h.cardio)}
         ${sport === 'muscu' && h.exercices?.length ? `<ul class="steps">${h.exercices.map((x) => `<li><span>${esc(x.nom)}</span><span class="muted small">${x.poids ? `${kgLabel(x.poids)} · ` : ''}${(x.reps || []).filter((r) => r > 0).join(' / ')}${x.unite === 's' ? ' s' : ''}</span></li>`).join('')}</ul>${tonnage(h) ? '<p class="muted small">Total soulevé : charge × répétitions, hors poids du corps.</p>' : ''}` : ''}
         ${sport === 'natation' && h.swim?.nages?.length ? `<p class="small">${esc(h.swim.nages.join(', '))}${h.swim.detail ? ` · ${esc(h.swim.detail)}` : ''}</p>` : ''}
         ${h.structure ? `<p class="small">${esc(h.structure)}</p>` : ''}
@@ -490,6 +515,7 @@ function startSession(session, resume = null) {
   live = {
     session, track, url, skipped: new Set(resume?.skipped || []), maxTime: resume?.pos || 0, lastStep: null,
     startedAt: resume?.startedAt || localNow(), gps: createTrack(), gpsError: null, userPaused: false,
+    anchors: [], // repères (position dans la piste, heure) : heure réelle de chaque étape, pour le cardio
   };
   if (resume) live.gps.gaps = 1; // la mesure d'avant l'interruption est perdue
   applyAudioMode();
@@ -673,12 +699,18 @@ function updateMediaMetadata(i) {
   } catch {}
 }
 
+const anchor = () => {
+  if (live && !live.done && live.anchors.length < 1000) live.anchors.push([audio.currentTime, Date.now()]);
+};
+audio.addEventListener('seeked', anchor);
+audio.addEventListener('playing', anchor);
 audio.addEventListener('timeupdate', () => {
   if (!live) return;
   live.maxTime = Math.max(live.maxTime, audio.currentTime);
   if (Date.now() - lastLiveSave > 5000) saveLive();
   const i = stepAt(live.track.starts, live.track.end, audio.currentTime);
   if (i !== live.lastStep) {
+    anchor();
     live.lastStep = i;
     updateMediaMetadata(i);
   }
@@ -998,6 +1030,11 @@ const screens = {
         <p class="muted">${mmss(b.elapsedSec)} de séance · ${b.completedSteps} étape(s) sur ${b.steps.length}${b.skipped.length ? ` · ${b.skipped.length} passée(s)` : ''}</p>
         ${b.trace ? `<div class="map" data-map="bilan"></div>${b.gpsIncomplet ? '<p class="muted small">En pointillés : écran verrouillé, le GPS ne suivait plus.</p>' : ''}` : ''}
         ${b.distanceSource === 'gps' ? `<p class="small">GPS : ${b.distanceKm.toLocaleString('fr-FR')} km${b.allureSecKm ? ` · ${allure(b.allureSecKm)}` : ''}${b.gpsIncomplet ? ' · <strong>incomplet</strong> (écran verrouillé un moment)' : ''}</p>` : ''}
+        ${b.cardio ? cardioBlock(b.cardio) : cardioOn() && windowOf(b) ? `<div class="hr-wait">
+          <p class="small" style="margin:0"><b>Cardio de ta montre :</b> arrête la séance sur la montre, attends une minute, lance ton Raccourci « Foulée cardio » puis reviens ici.</p>
+          ${cardioUi.message ? `<p class="muted small" style="margin:6px 0 0">${esc(cardioUi.message || 'Pas encore de mesures de la montre pour cette séance.')}</p>` : ''}
+          <button class="btn-ghost" data-cardiofetch style="width:100%;margin-top:8px">${cardioUi.busy ? 'Recherche…' : 'J’ai lancé le Raccourci'}</button>
+        </div>` : ''}
         <label for="dist">Distance (km${b.distanceSource === 'gps' ? ', corrige si besoin' : ', facultatif'})</label>
         <input id="dist" type="number" inputmode="decimal" step="0.01" min="0" value="${b.distanceKm ?? ''}">
         <label style="font-weight:400"><input id="estim" type="checkbox" style="width:auto" ${b.distanceEstimee ? 'checked' : ''}> C'est une estimation</label>
@@ -1076,7 +1113,8 @@ const screens = {
           <div class="course"><b>${paces.length ? allure(Math.min(...paces)).replace('/km', '') : '–'}</b><span>meilleure allure</span></div>` : ''}
           ${practiced(d, 'natation') || swims.length ? `<div class="natation"><b>${bestSwim || '–'}<small>m</small></b><span>plus longue nage</span></div>` : ''}
         </div>`}
-        ${sp === 'course' ? '<p class="muted small" style="margin-top:8px">Allure moyenne marche comprise : elle baisse quand tu cours plus longtemps.</p>' : ''}` : ''}
+        ${sp === 'course' ? '<p class="muted small" style="margin-top:8px">Allure moyenne marche comprise : elle baisse quand tu cours plus longtemps.</p>' : ''}
+        ${sp === 'course' ? cardioTrend(runs) : ''}` : ''}
       <h3>Historique</h3>
       ${manualButtons(d, 'btn-ghost', null, 'margin-bottom:10px', ' libre')}
       ${sorted.length === 0 ? '<p class="muted">Aucune séance pour l\'instant.</p>' : `<div class="list">${sorted.map(historyRow).join('')}</div>`}
@@ -1280,6 +1318,7 @@ const screens = {
         <p class="muted small">${sess ? 'Sauvegarde de tes séances, invitations, nouveau téléphone.' : 'Crée ton compte ou connecte-toi pour sauvegarder tes séances et inviter tes proches.'}</p>
         <button data-tab="compte" style="width:100%">${sess ? 'Gérer mon compte et inviter' : 'Connexion / créer mon compte'}</button>
       </div>
+      ${account.serverEnabled() ? cardioCard(sess) : ''}
       <div class="card">
         <label for="prenom" style="margin-top:0">Ton prénom</label>
         <input id="prenom" value="${esc(d.profile.prenom)}" maxlength="40">
@@ -1334,6 +1373,7 @@ function render() {
 
 function go(screen) {
   if (screen === 'bilan' && live) {
+    if (!audio.paused) anchor();
     audio.pause();
     const { starts, end } = live.track;
     const steps = live.session.steps;
@@ -1363,12 +1403,15 @@ function go(screen) {
       allureSecKm: gps.allureSecKm,
       gpsIncomplet: gps.gpsIncomplet,
       trace: encodeTrace(gps.points),
+      stepMs: stepTimes(live.anchors, starts, end, reached),
+      endedAt: localNow(),
       difficulte: null,
       fatigue: null,
       douleur: '',
       commentaire: '',
     };
   }
+  if (screen !== 'profil') cardioUi.link = null; // le lien d'import ne reste affiché que sur Profil
   current = screen;
   render();
   window.scrollTo(0, 0);
@@ -1835,6 +1878,7 @@ async function refreshAccount() {
     accountUi.error = e.message;
   }
   if (current === 'compte') render();
+  refreshCardio();
 }
 
 async function accountAction(fn) {
@@ -1906,6 +1950,173 @@ document.addEventListener('click', (e) => {
   }
 });
 
+// --- Cardio de l'Apple Watch ----------------------------------------------------
+// Le Raccourci iPhone envoie au serveur la fréquence cardiaque lue dans Santé ; l'app
+// récupère les mesures de la plage horaire de chaque séance guidée récente et les y rattache.
+
+let cardioUi = { status: null, link: null, busy: false, message: null, lastTry: 0, copied: false };
+const cardioOn = () => Boolean(account.serverEnabled() && account.session() && load().settings.cardio);
+const hm = (t) => new Date(t).toLocaleString('fr-FR', { weekday: 'short', day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' });
+
+// Étapes du Raccourci, à faire une seule fois dans l'app Raccourcis de l'iPhone.
+const raccourciSteps = () => `
+  <ol class="steps-guide">
+    <li>Ouvre l'app <b>Raccourcis</b>, touche <b>+</b> en haut à droite, nomme le raccourci <b>Foulée cardio</b>.</li>
+    <li>Ajoute l'action <b>Rechercher des échantillons de santé</b>.
+      Règle : <b>Type</b> est <b>Fréquence cardiaque</b> · <b>Date de début</b> est <b>aujourd'hui</b> · Trier par <b>Date de début</b>, <b>Plus ancien d'abord</b> · <b>Limite</b> désactivée.</li>
+    <li>Ajoute l'action <b>Répéter avec chaque élément</b> (elle prend les échantillons de santé toute seule).</li>
+    <li>À l'intérieur de la boucle, ajoute l'action <b>Texte</b> et mets dedans les deux variables séparées par un point-virgule :
+      <span class="code">Élément de répétition;Élément de répétition</span>
+      <ul>
+        <li>Pour insérer <b>Élément de répétition</b> : touche le champ, puis « Élément de répétition » dans la barre au-dessus du clavier.</li>
+        <li>Touche le 1er, choisis <b>Date de début</b>, puis <b>Format de date : ISO 8601</b> et active <b>Inclure l'heure</b>.</li>
+        <li>Touche le 2e, choisis <b>Valeur</b>.</li>
+      </ul></li>
+    <li>Après <b>Fin de la répétition</b>, ajoute <b>Combiner le texte</b> : <b>Résultats de Répéter</b> avec <b>Nouvelles lignes</b>.</li>
+    <li>Ajoute <b>Obtenir le contenu de l'URL</b>. Colle ton lien Foulée à la place de l'URL. Touche la flèche pour déplier :
+      <b>Méthode : POST</b> · <b>Corps de la requête : JSON</b> · <b>Ajouter un champ</b> → <b>Texte</b>, clé <span class="code">mesures</span>, valeur <b>Texte combiné</b>.</li>
+    <li>Ajoute <b>Afficher le résultat</b> (avec <b>Contenu de l'URL</b>). Touche <b>OK</b>.</li>
+    <li>Lance-le une fois : accepte l'accès à <b>Santé (fréquence cardiaque)</b> et la connexion au serveur Foulée (<b>Toujours autoriser</b>). Il affiche « Foulée : … mesures reçues ».</li>
+    <li>Pratique : dans le raccourci, ⓘ → <b>Ajouter à l'écran d'accueil</b>.</li>
+  </ol>`;
+
+const raccourciUsage = `
+  <ol class="steps-guide">
+    <li>Avant de partir : lance une séance <b>Course extérieure</b> sur ta montre, puis ta séance dans Foulée.</li>
+    <li>À la fin : arrête la séance sur la montre, attends une minute (le temps qu'elle passe le cardio à l'iPhone).</li>
+    <li>Lance <b>Foulée cardio</b>, puis reviens dans Foulée : le cardio s'ajoute tout seul à la séance.</li>
+  </ol>
+  <p class="muted small">Oublié ? Lance-le plus tard dans la journée, ça marche aussi. Le relancer ne crée pas de doublon. Natation : ta montre de 1re génération n'est pas faite pour nager, ne la porte pas à la piscine.</p>`;
+
+function cardioCard(sess) {
+  if (!sess) {
+    return `<div class="card"><h2>Cardio Apple Watch</h2><p class="muted small">Connecte-toi à ton compte pour ajouter à tes courses le cardio mesuré par ta montre.</p></div>`;
+  }
+  const st = cardioUi.status;
+  const link = cardioUi.link;
+  return `
+    <div class="card cardio-card">
+      <h2>Cardio Apple Watch</h2>
+      ${link ? `
+        <p class="small"><b>Ton lien d'import.</b> Il n'est affiché qu'une fois : copie-le maintenant et colle-le dans le Raccourci (étape 6).</p>
+        <input id="cardio-link" readonly value="${esc(link)}">
+        <div class="row"><button class="btn-dark" data-cardiocopy>${cardioUi.copied ? 'Lien copié ✓' : 'Copier le lien'}</button></div>
+        <p class="muted small">Ce lien sert seulement à envoyer du cardio sur ton compte, il ne lit rien. Garde-le pour toi : ne l'envoie à personne, pas de capture d'écran.</p>
+        <details open><summary>Créer le Raccourci (une seule fois, 5 min)</summary>${raccourciSteps()}</details>`
+      : st?.active ? `
+        <p class="small">Import activé.${st.lastUsedAt ? ` Dernier envoi : ${esc(hm(st.lastUsedAt))} (${st.lastCount} mesures).` : ' Aucun envoi reçu pour l’instant.'}</p>
+        <details><summary>Après chaque course</summary>${raccourciUsage}</details>
+        <details><summary>Créer le Raccourci</summary>${raccourciSteps()}<p class="muted small">Lien perdu ? « Nouveau lien » ci-dessous : l'ancien cesse de marcher, colle le nouveau dans le Raccourci.</p></details>
+        <div class="row"><button data-cardiolink>Nouveau lien</button><button data-cardiooff>Désactiver</button></div>`
+      : `
+        <p class="muted small">Ta montre mesure ton cardio pendant la course, l'iPhone le range dans Santé. Un Raccourci l'envoie à Foulée : moyenne, maximum, cardio en course et en marche, courbe. Le programme s'en sert : si ton cœur travaille nettement plus que la dernière fois au même palier, on consolide avant de monter.</p>
+        <p class="muted small">Sans montre, rien ne change et aucun cardio n'est affiché.</p>
+        <button class="btn-dark" data-cardiolink style="width:100%">Activer l'import du cardio</button>`}
+      ${cardioUi.message && current === 'profil' ? `<p class="muted small">${esc(cardioUi.message)}</p>` : ''}
+    </div>`;
+}
+
+// Séances guidées des 3 derniers jours sans cardio (et le bilan en cours) : on demande les
+// mesures de leur plage horaire et on les y rattache.
+async function fetchCardio({ force = false } = {}) {
+  if (!cardioOn() || cardioUi.busy) return;
+  if (!force && Date.now() - cardioUi.lastTry < 20_000) return;
+  const limit = Date.now() - 3 * 86400_000;
+  const saved = load().history.filter((h) => !h.cardio && windowOf(h) && windowOf(h)[1] > limit);
+  const pending = current === 'bilan' && bilan && !bilan.cardio && windowOf(bilan) ? [bilan] : [];
+  const all = [...saved, ...pending];
+  if (!all.length) return;
+  const from = Math.max(limit, Math.min(...all.map((h) => windowOf(h)[0])));
+  const to = Math.min(from + 4 * 86400_000 - 1, Math.max(...all.map((h) => windowOf(h)[1])));
+  cardioUi.busy = true;
+  cardioUi.lastTry = Date.now();
+  if (current === 'bilan') { readBilan(); render(); }
+  let samples = [];
+  try {
+    samples = (await account.cardioSamples(from, to)).samples;
+    cardioUi.message = null;
+  } catch (e) {
+    cardioUi.message = `Cardio non récupéré : ${e.message}`;
+  }
+  cardioUi.busy = false;
+  const found = [];
+  for (const h of saved) {
+    const c = summarize(h, samples);
+    if (c) found.push([h.id, c]);
+  }
+  if (found.length) {
+    update((d) => {
+      for (const [id, c] of found) {
+        const h = d.history.find((x) => x.id === id);
+        if (!h) continue;
+        h.cardio = c;
+        // Les conseils de l'IA du dernier bilan ont été écrits sans le cardio : ils sont redemandés.
+        const latest = d.history.every((x) => sportOf(x) !== sportOf(h) || String(x.date) <= String(h.date));
+        if (latest) { delete h.conseilsIA; delete h.iaEchec; }
+      }
+    });
+    for (const [id] of found) {
+      if (suite?.entryId === id) {
+        const d = load();
+        const entry = d.history.find((x) => x.id === id);
+        suite = { ...afterBilan(d.history, entry, d.settings, today(), d.profile.questionnaire), ia: null };
+        askIA(id);
+      }
+    }
+    retryIA();
+  }
+  if (pending.length) {
+    const c = summarize(bilan, samples);
+    if (c) bilan.cardio = c;
+    else if (!cardioUi.message) cardioUi.message = samples.length ? 'Des mesures sont arrivées, mais aucune pendant cette séance. La montre a-t-elle bien suivi la séance ?' : 'Pas encore de mesures de la montre pour cette séance. Relance le Raccourci dans une minute.';
+  }
+  if (current === 'bilan') readBilan();
+  if (current !== 'live') render();
+}
+
+async function refreshCardio() {
+  if (!account.serverEnabled() || !account.session()) return;
+  try {
+    cardioUi.status = await account.cardioStatus();
+    // Le réglage suit le serveur : un import activé depuis un autre téléphone s'applique ici.
+    if (Boolean(load().settings.cardio) !== cardioUi.status.active) update((d) => { d.settings.cardio = cardioUi.status.active; });
+  } catch {}
+  if (current === 'profil') render();
+}
+
+document.addEventListener('click', (e) => {
+  const t = e.target.closest('button');
+  if (!t) return;
+  const ds = t.dataset;
+  if ('cardiolink' in ds) {
+    if (cardioUi.status?.active && !confirm('Un nouveau lien remplace l’ancien : le Raccourci devra utiliser le nouveau. Continuer ?')) return;
+    cardioUi.busy = true;
+    account.cardioNewLink()
+      .then((r) => {
+        cardioUi.link = r.url;
+        cardioUi.copied = false;
+        cardioUi.message = null;
+        cardioUi.status = { active: true };
+        update((d) => { d.settings.cardio = true; });
+      })
+      .catch((err) => { cardioUi.message = err.message; })
+      .finally(() => { cardioUi.busy = false; render(); });
+  } else if ('cardiocopy' in ds) {
+    const input = document.getElementById('cardio-link');
+    const done = () => { cardioUi.copied = true; render(); };
+    if (navigator.clipboard?.writeText) navigator.clipboard.writeText(cardioUi.link).then(done, () => { input.select(); });
+    else { input.select(); document.execCommand?.('copy'); done(); }
+  } else if ('cardiooff' in ds) {
+    if (!confirm('Désactiver l’import ? Le lien du Raccourci cessera de marcher. Le cardio déjà ajouté à tes séances reste.')) return;
+    account.cardioDisable()
+      .then(() => { cardioUi = { ...cardioUi, status: { active: false }, link: null }; update((d) => { d.settings.cardio = false; }); })
+      .catch((err) => { cardioUi.message = err.message; })
+      .finally(() => render());
+  } else if ('cardiofetch' in ds) {
+    fetchCardio({ force: true });
+  }
+});
+
 // Lien d'invitation : ?invite=CODE ouvre directement la création de compte.
 const inviteParam = new URLSearchParams(location.search).get('invite');
 if (inviteParam && account.serverEnabled()) {
@@ -1917,8 +2128,13 @@ if (inviteParam && account.serverEnabled()) {
     .finally(() => render());
 }
 refreshAccount();
-syncNow().then(retryIA);
-document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'visible' && current !== 'live') retryIA(); });
+syncNow().then(retryIA).then(() => fetchCardio());
+// Retour dans l'app (après le Raccourci, par exemple) : cardio et conseils en attente.
+document.addEventListener('visibilitychange', () => {
+  if (document.visibilityState !== 'visible' || current === 'live') return;
+  retryIA();
+  fetchCardio({ force: current === 'bilan' });
+});
 
 if ('serviceWorker' in navigator) navigator.serviceWorker.register('sw.js').catch(() => {});
 navigator.storage?.persist?.().catch(() => {});

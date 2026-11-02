@@ -45,7 +45,7 @@ export function cleanInput(body = {}) {
     suite: clip(body.suite, 400),
     objectif: clip(body.objectif, 120),
     base: (Array.isArray(body.base) ? body.base : []).slice(0, 4).map((s) => clip(s, 400)),
-    precedentes: (Array.isArray(body.precedentes) ? body.precedentes : []).slice(0, 5).map((s) => clip(s, 200)),
+    precedentes: (Array.isArray(body.precedentes) ? body.precedentes : []).slice(0, 5).map((s) => clip(s, 300)),
   };
 }
 
@@ -78,7 +78,8 @@ Règles :
 - Chaque geste, exercice ou consigne technique vient de la FICHE TECHNIQUE ci-dessous ou des « conseils de base » fournis. N'invente aucun exercice, aucune position, aucune consigne qui n'y figure pas. Ne contredis jamais la fiche.
 - Tu ne changes jamais le programme (palier, durée, longueurs, charges) : il est déjà décidé et t'est donné dans « suite ». Tu peux l'expliquer.
 - Douleur : aucun diagnostic. Dis de ne pas forcer et de voir un médecin si elle dure plus de 3 jours ou augmente.
-- N'invente aucun chiffre que la personne n'a pas donné (pas de fréquence cardiaque, pas d'allure).
+- N'invente aucun chiffre que la personne n'a pas donné (pas d'allure, pas de fréquence cardiaque si elle n'est pas fournie).
+- Si un « cardio mesuré par la montre » est fourni, tu peux le citer et le comparer aux séances précédentes du même palier : à effort égal, un cardio plus bas = progrès, plus haut = fatigue, chaleur ou allure trop rapide. Ne parle jamais de zones, de pourcentage de fréquence maximale ni de seuils : la fréquence maximale de la personne est inconnue.
 - Pas de formule creuse ni de félicitations génériques.
 Réponds uniquement avec ce JSON, sans texte autour : {"conseils": ["...", "..."]}
 

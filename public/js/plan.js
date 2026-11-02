@@ -4,6 +4,7 @@
 
 import { muscuPlan, nextSeance, followingSeance } from './muscu.js';
 import { tipsOf, tipsSource, breathingIssue, conseils } from './conseils.js';
+import { runBpm } from './cardio.js';
 
 // Le programme se calcule à la volée sur cet horizon (12 semaines) : il n'a pas de fin,
 // la fenêtre avance avec les jours.
@@ -111,6 +112,21 @@ export function runLevel(h) {
   return found ? found.id : null;
 }
 
+// Cardio de la montre (s'il a été mesuré) : la dernière course comparée à la précédente au
+// même palier, en course si les phases sont connues, sinon en moyenne. Écart en bpm, ou null.
+export const CARDIO_HAUSSE = 8; // bpm : au-delà des variations d'un jour à l'autre
+export function cardioDelta(runs) {
+  const last = runs.at(-1);
+  if (!last || !runBpm(last)) return null;
+  const prev = runs.slice(0, -1).reverse().find((h) => h.level === last.level && runBpm(h));
+  if (!prev) return null;
+  const both = last.cardio.course && prev.cardio.course;
+  const cur = both ? last.cardio.course : last.cardio.avg;
+  const before = both ? prev.cardio.course : prev.cardio.avg;
+  return { cur, before, delta: cur - before, what: both ? 'en course' : 'moyen' };
+}
+const cardioBonus = (c) => (c && c.delta <= -3 ? ` Cardio ${c.what} en baisse à palier égal (${c.cur} bpm contre ${c.before}) : tu progresses.` : '');
+
 export function nextRunLevel(history, opts = {}) {
   const max = opts.maxLevel ?? 12;
   const start = Math.min(max, opts.startLevel ?? 1);
@@ -133,15 +149,21 @@ export function nextRunLevel(history, opts = {}) {
   if (last.essoufflement === 5 || last.fatigue === 5) {
     return { level: Math.min(max, last.level), reason: `Tu étais ${last.fatigue === 5 ? 'épuisé' : 'à bout de souffle'} : on consolide le même palier.` };
   }
+  // Le cardio ne fait jamais monter ni descendre : il retient seulement une montée de palier
+  // quand le cœur a nettement plus travaillé que la dernière fois pour le même effort.
+  const hr = cardioDelta(runs);
+  if (hr && hr.delta >= CARDIO_HAUSSE && last.level < max) {
+    return { level: Math.min(max, last.level), reason: `Cardio ${hr.what} plus haut que la dernière fois à ce palier (${hr.cur} bpm contre ${hr.before}) : on consolide avant de monter.` };
+  }
   if (last.difficulte && last.difficulte <= 2) {
     if (last.level >= max) return { level: max, reason: 'Objectif atteint : on garde ce palier.' };
-    return { level: Math.min(max, last.level + 1), reason: 'Dernière course facile : on passe au palier suivant.' };
+    return { level: Math.min(max, last.level + 1), reason: `Dernière course facile : on passe au palier suivant.${cardioBonus(hr)}` };
   }
   const sameLevel = [];
   for (let i = runs.length - 1; i >= 0 && runs[i].level === last.level; i--) sameLevel.push(runs[i]);
   if (last.level >= max) return { level: max, reason: 'Objectif atteint : on garde ce palier.' };
   if (sameLevel.length >= 2) {
-    return { level: Math.min(max, last.level + 1), reason: 'Deux séances réussies à ce palier : on passe au suivant.' };
+    return { level: Math.min(max, last.level + 1), reason: `Deux séances réussies à ce palier : on passe au suivant.${cardioBonus(hr)}` };
   }
   return {
     level: Math.min(max, last.level),
