@@ -1,5 +1,7 @@
-// Carte du parcours : Leaflet (livré avec l'app) et fond de carte CARTO sombre,
-// construit sur OpenStreetMap. Gratuit, sans clé ; chargé seulement quand une carte s'affiche.
+// Carte du parcours : Leaflet (livré avec l'app) et fond de carte OpenStreetMap, gratuit et
+// sans clé (CARTO exige désormais une clé : ses tuiles affichaient « API KEY REQUIRED »).
+// Les tuiles OSM sont claires : on les assombrit en CSS (.map-osm), le tracé garde ses couleurs.
+// Chargé seulement quand une carte s'affiche.
 
 let leaflet = null;
 function loadLeaflet() {
@@ -30,10 +32,10 @@ export async function drawTrace(el, segments) {
     return;
   }
   const map = L.map(el, { zoomControl: false, attributionControl: true, scrollWheelZoom: false });
-  L.tileLayer('https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png', {
+  L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png', {
     maxZoom: 19,
-    subdomains: 'abcd',
-    attribution: '© OpenStreetMap · © CARTO',
+    className: 'map-osm',
+    attribution: '© <a href="https://www.openstreetmap.org/copyright">les contributeurs OpenStreetMap</a>',
   }).addTo(map);
   const lines = segments.map((seg) => seg.map(([lat, lon]) => [lat, lon]));
   for (const line of lines) {
