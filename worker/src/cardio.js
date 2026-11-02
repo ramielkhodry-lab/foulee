@@ -122,7 +122,9 @@ export function parseSamples(text, now = Date.now()) {
     if (!/(Z|[+-]\d{2}:?\d{2})$/.test(date)) { noZone++; continue; }
     const t = Date.parse(date.replace(',', '.').replace(/([+-]\d{2})(\d{2})$/, '$1:$2'));
     const rest = chunk.slice(chunk.indexOf(date) + date.length);
-    const m = rest.match(/\d+(?:[.,]\d+)?/);
+    // Santé écrit les toutes petites valeurs en notation scientifique (« 1,2e-05 » km) : sans
+    // l'exposant, on lisait 1,2 km pour un bout de foulée, d'où des km en double et des splits en 0'01.
+    const m = rest.match(/\d+(?:[.,]\d+)?(?:[eE][+-]?\d+)?/);
     const v = m ? Number(m[0].replace(',', '.')) : NaN;
     // Source après la valeur (« ;iPhone de Rami ») : Santé garde les pas et la distance de
     // l'iPhone ET de la montre, les deux additionnés compteraient tout en double. On garde la montre.
@@ -138,7 +140,7 @@ export function parseSamples(text, now = Date.now()) {
       if (!(v >= k.min && v <= k.max)) { badValue++; continue; }
       // Distance : en km ; une valeur au-delà de 5 par mesure ne peut être qu'en mètres.
       const val = kind === 'dist' && v > 5 ? v / 1000 : v;
-      cand[kind].push({ t, v: Math.round(val * 1000) / 1000, source });
+      cand[kind].push({ t, v: Math.round(val * 1e6) / 1e6, source });
     }
   }
   // Par type : si des mesures viennent d'une montre, on ne garde qu'elles (le nom de l'iPhone
