@@ -353,7 +353,8 @@ async function importCardio(request, env) {
   if (!row) return plain('Foulée : lien d’import inconnu ou remplacé. Copie le nouveau lien depuis Foulée > Profil > Cardio Apple Watch.', 401);
   const raw = await request.text();
   if (raw.length > MAX_BODY) return plain('Foulée : trop de mesures d’un coup. Dans le Raccourci, garde seulement les mesures d’aujourd’hui.', 413);
-  const { samples, autres, total, reason } = parseSamples(bodyText(raw), now());
+  const parsed = parseSamples(bodyText(raw), now());
+  const { samples, autres, total, reason } = parsed;
   if (!total) return plain(`Foulée : ${reason}`, 400);
   const stmts = [];
   for (let i = 0; i < samples.length; i += 30) {
@@ -363,6 +364,9 @@ async function importCardio(request, env) {
   }
   const inserts = stmts.length;
   for (const [kind, list] of Object.entries(autres)) {
+    // Un nouvel import remplace ce qui était stocké sur la même période : des mesures d'un autre
+    // appareil gardées par un ancien import (distance comptée en double) disparaissent ainsi.
+    if (list.length) stmts.push(env.DB.prepare('DELETE FROM sante_samples WHERE user_id = ? AND kind = ? AND t >= ? AND t <= ?').bind(row.user_id, kind, list[0][0], list.at(-1)[0]));
     for (let i = 0; i < list.length; i += 25) {
       const part = list.slice(i, i + 25);
       stmts.push(env.DB.prepare(`INSERT OR REPLACE INTO sante_samples (user_id, kind, t, v) VALUES ${part.map(() => '(?, ?, ?, ?)').join(', ')}`)
@@ -375,7 +379,7 @@ async function importCardio(request, env) {
   stmts.push(env.DB.prepare('UPDATE cardio_tokens SET last_used_at = ?, last_count = ? WHERE token_hash = ?').bind(now(), total, hash));
   const res = await env.DB.batch(stmts);
   const added = res.slice(0, inserts).reduce((a, r) => a + (r.meta?.changes || 0), 0);
-  return plain(importMessage(samples, added, autres));
+  return plain(importMessage(samples, added, autres, parsed));
 }
 
 export default {

@@ -114,6 +114,7 @@ export function parseSamples(text, now = Date.now()) {
   let badValue = 0;
   let outside = 0;
   let fromPhone = 0;
+  const cand = Object.fromEntries(Object.keys(KINDS).map((k) => [k, []]));
   for (const { kind, chunk } of items) {
     if (!kind) continue; // type inconnu : ignoré
     const date = chunk.match(ISO)[0];
@@ -125,8 +126,7 @@ export function parseSamples(text, now = Date.now()) {
     const v = m ? Number(m[0].replace(',', '.')) : NaN;
     // Source après la valeur (« ;iPhone de Rami ») : Santé garde les pas et la distance de
     // l'iPhone ET de la montre, les deux additionnés compteraient tout en double. On garde la montre.
-    const source = m ? rest.slice(m.index + m[0].length) : '';
-    if (kind !== 'fc' && /iphone/i.test(source)) { fromPhone++; continue; }
+    const source = m ? rest.slice(m.index + m[0].length).replace(/^[\s;]+/, '').trim() : '';
     if (!Number.isFinite(t)) { noTime++; continue; }
     if (t > now + 10 * 60_000 || t < now - PAST_DAYS * 86400_000) { outside++; continue; }
     if (kind === 'fc') {
@@ -138,7 +138,20 @@ export function parseSamples(text, now = Date.now()) {
       if (!(v >= k.min && v <= k.max)) { badValue++; continue; }
       // Distance : en km ; une valeur au-delà de 5 par mesure ne peut être qu'en mètres.
       const val = kind === 'dist' && v > 5 ? v / 1000 : v;
-      if (others[kind].size < MAX_SAMPLES) others[kind].set(t, Math.round(val * 1000) / 1000);
+      cand[kind].push({ t, v: Math.round(val * 1000) / 1000, source });
+    }
+  }
+  // Par type : si des mesures viennent d'une montre, on ne garde qu'elles (le nom de l'iPhone
+  // est libre, « iPhone » n'y figure pas toujours) ; sinon on écarte au moins l'iPhone.
+  const sources = {};
+  for (const [kind, list] of Object.entries(cand)) {
+    if (!list.length) continue;
+    const watch = list.some((x) => /watch/i.test(x.source));
+    const keep = (x) => (watch ? /watch/i.test(x.source) : !/iphone/i.test(x.source));
+    sources[kind] = { sans: list.filter((x) => !x.source).length, noms: [...new Set(list.map((x) => x.source).filter(Boolean))] };
+    for (const x of list) {
+      if (!keep(x)) { fromPhone++; continue; }
+      if (others[kind].size < MAX_SAMPLES) others[kind].set(x.t, x.v);
     }
   }
   const sorted = (map) => [...map.entries()].sort((a, b) => a[0] - b[0]);
@@ -154,7 +167,7 @@ export function parseSamples(text, now = Date.now()) {
     else if (badValue) reason = 'Les valeurs ne sont pas des battements par minute. Dans le Raccourci, mets « Valeur » après le point-virgule.';
     else if (outside) reason = 'Mesures trop anciennes (plus de 8 jours) ou dans le futur : rien n’a été gardé.';
   }
-  return { samples, autres, total, rejected: noTime + noZone + badValue + outside, reason };
+  return { samples, autres, total, rejected: noTime + noZone + badValue + outside, reason, fromPhone, sources, mismatch };
 }
 
 const hm = (t) => new Date(t).toLocaleTimeString('fr-FR', { timeZone: 'Europe/Paris', hour: '2-digit', minute: '2-digit' });
@@ -162,7 +175,7 @@ const day = (t) => new Date(t).toLocaleDateString('fr-FR', { timeZone: 'Europe/P
 
 // Message affiché par le Raccourci à la fin.
 const NOMS = { dist: 'de distance', kcal: 'd’énergie', puiss: 'de puissance', pas: 'de pas' };
-export function importMessage(samples, added, autres = {}) {
+export function importMessage(samples, added, autres = {}, diag = {}) {
   const all = [...samples, ...Object.values(autres).flat()].map((x) => x[0]).sort((a, b) => a - b);
   if (!all.length) return 'Foulée : aucune mesure reçue.';
   const first = all[0];
@@ -171,5 +184,14 @@ export function importMessage(samples, added, autres = {}) {
   const neuves = added === samples.length ? '' : added === 0 ? ' (déjà reçues avant)' : ` (dont ${added} nouvelles)`;
   const extra = Object.entries(autres).filter(([, l]) => l.length).map(([k, l]) => `${l.length} ${NOMS[k]}`);
   const parts = [samples.length ? `${samples.length} mesures de cardio${neuves}` : '', ...extra].filter(Boolean);
-  return `Foulée : ${parts.join(', ')} reçues, ${span}. Ouvre Foulée : elles s’ajoutent toutes seules à ta séance.`;
+  // Diagnostic : d'où viennent les mesures, pour repérer un Raccourci mal réglé.
+  const notes = [];
+  if (diag.fromPhone) notes.push(`${diag.fromPhone} d’un autre appareil que la montre écartées`);
+  const sansSource = Object.entries(diag.sources || {}).filter(([, s]) => s.sans && !s.noms.length).map(([k]) => NOMS[k]);
+  if (sansSource.length) notes.push(`attention, mesures ${sansSource.join(', ')} sans « Source » : celles de l’iPhone ne peuvent pas être écartées`);
+  if (diag.mismatch) notes.push(`attention, ${diag.mismatch} type(s) refusé(s) : « #dates » et « #valeurs » n’ont pas le même nombre de lignes`);
+  const noms = [...new Set(Object.values(diag.sources || {}).flatMap((s) => s.noms))];
+  if (noms.length) notes.push(`appareils vus : ${noms.join(', ')}`);
+  const info = notes.length ? ` (${notes.join(' ; ')})` : '';
+  return `Foulée : ${parts.join(', ')} reçues, ${span}${info}. Ouvre Foulée : elles s’ajoutent toutes seules à ta séance.`;
 }
