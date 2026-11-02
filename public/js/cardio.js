@@ -5,6 +5,8 @@ import { KINDS } from './phrases.js';
 
 const MIN_SAMPLES = 10; // en dessous, pas assez de mesures pour dire quoi que ce soit
 const BUCKET = 30; // courbe gardée : une valeur toutes les 30 s
+const HIST_MAX_MS = 10_000;
+const RECOVERY_SEC = 180; // cardio après l'effort : les 3 minutes qui suivent la fin
 const mean = (a) => (a.length ? Math.round(a.reduce((x, y) => x + y, 0) / a.length) : null);
 
 // Pendant la séance, on note des repères (position dans la piste en s, heure en ms) à chaque
@@ -44,7 +46,17 @@ export function summarize(h, samples) {
   const inside = (samples || []).filter(([t]) => t >= w[0] && t <= w[1]).sort((x, y) => x[0] - y[0]);
   if (inside.length < MIN_SAMPLES) return null;
   const bpms = inside.map((s) => s[1]);
-  const c = { avg: mean(bpms), max: Math.max(...bpms), min: Math.min(...bpms), n: inside.length, t0: w[0], pas: BUCKET, source: 'montre' };
+  const c = { avg: mean(bpms), max: Math.max(...bpms), min: Math.min(...bpms), n: inside.length, t0: w[0], t1: w[1], pas: BUCKET, source: 'montre' };
+  // Temps passé à chaque bpm (s) : chaque mesure vaut jusqu'à la suivante, 10 s au plus.
+  // Sert au temps par zone, recalculable si les zones changent.
+  c.hist = {};
+  inside.forEach(([t, bpm], i) => {
+    const next = inside[i + 1]?.[0];
+    const sec = Math.min(next !== undefined ? next - t : 5000, HIST_MAX_MS) / 1000;
+    c.hist[bpm] = Math.round(((c.hist[bpm] || 0) + sec) * 10) / 10;
+  });
+  const ap = recovery(w[1], samples);
+  if (ap) c.apres = ap;
   // Par phase : seulement si on connaît l'heure de chaque étape.
   if (h.stepMs?.length === (h.steps?.length || 0) + 1) {
     const effortAt = (t) => {
@@ -180,4 +192,33 @@ export function mergeDistance(gpsKm, gpsIncomplet, montreKm) {
   if (!gpsKm || gpsIncomplet) return { km: montreKm, source: 'montre' };
   if (Math.abs(gpsKm - montreKm) / montreKm > ECART_MAX) return { km: montreKm, source: 'montre', ecart: true };
   return { km: Math.round(((gpsKm + montreKm) / 2) * 100) / 100, source: 'moyenne' };
+}
+
+// Cardio après la séance : [[secondes après la fin, bpm], …] sur 3 min, ou null.
+export function recovery(end, samples) {
+  const pts = (samples || []).filter(([t]) => t > end && t <= end + RECOVERY_SEC * 1000).sort((a, b) => a[0] - b[0]).map(([t, bpm]) => [Math.round((t - end) / 1000), bpm]);
+  return pts.length >= 3 ? pts : null;
+}
+// Bpm le plus proche de `sec` secondes après la fin (à 20 s près), ou null.
+export function recoveryAt(apres, sec) {
+  let best = null;
+  for (const p of apres || []) if (Math.abs(p[0] - sec) <= 20 && (!best || Math.abs(p[0] - sec) < Math.abs(best[0] - sec))) best = p;
+  return best ? best[1] : null;
+}
+
+// Zones de l'utilisateur : bornes hautes des zones 1 à 4 (comme l'app Forme : zone 1 < 140,
+// zone 2 141–151…). Valides seulement si croissantes et plausibles.
+export function zoneLimits(z) {
+  const l = (z || []).map(Number);
+  if (l.length !== 4 || l.some((v) => !Number.isFinite(v) || v < 60 || v > 230)) return null;
+  for (let i = 1; i < 4; i++) if (l[i] <= l[i - 1]) return null;
+  return l;
+}
+export const zoneOf = (bpm, l) => { const i = l.findIndex((v) => bpm <= v); return i < 0 ? 4 : i; };
+// Temps (s) dans chaque zone, d'après le temps passé à chaque bpm.
+export function zoneTimes(hist, l) {
+  if (!hist || !l) return null;
+  const out = [0, 0, 0, 0, 0];
+  for (const [bpm, sec] of Object.entries(hist)) out[zoneOf(Number(bpm), l)] += sec;
+  return out.map(Math.round);
 }

@@ -2,7 +2,7 @@ process.env.TZ = 'Europe/Paris';
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { bodyText, parseSamples, importMessage } from '../worker/src/cardio.js';
-import { stepTimes, summarize, summarizeMontre, montreLine, splits, mergeDistance, windowOf, cardioText } from '../public/js/cardio.js';
+import { stepTimes, summarize, summarizeMontre, montreLine, splits, mergeDistance, recovery, recoveryAt, zoneLimits, zoneTimes, windowOf, cardioText } from '../public/js/cardio.js';
 import { nextRunLevel } from '../public/js/plan.js';
 import { seanceText } from '../public/js/ia.js';
 
@@ -202,4 +202,30 @@ test('distance téléphone + montre : moyenne si elles concordent, sinon la mont
   assert.deepEqual(mergeDistance(4.75, true, 4.78), { km: 4.78, source: 'montre' }); // GPS coupé : pas de moyenne
   assert.deepEqual(mergeDistance(null, false, 4.78), { km: 4.78, source: 'montre' });
   assert.equal(mergeDistance(4.7, false, null), null);
+});
+
+test('zones : temps par zone d’après le temps passé à chaque bpm, zones de l’app Forme', () => {
+  const h = entry();
+  const c = summarize(h, samplesFor(h)); // 150 en course (180 s), 100 sinon (720 s)
+  const l = zoneLimits([140, 151, 163, 175]);
+  const zt = zoneTimes(c.hist, l);
+  assert.equal(zt[0] + zt[1] + zt[2] + zt[3] + zt[4], 900); // mesures de 5 s à 900 s, la dernière compte 5 s
+  assert.ok(Math.abs(zt[1] - 180) <= 5, `zone 2 : ${zt[1]}`);
+  assert.equal(zt[2] + zt[3] + zt[4], 0);
+  assert.equal(zoneLimits([140, 130, 163, 175]), null); // pas croissantes
+  assert.equal(zoneLimits([140, 151]), null);
+  assert.equal(zoneTimes(c.hist, null), null); // pas de zones : rien d'inventé
+});
+
+test('cardio après l’effort : 3 minutes après la fin, valeurs à 0, 1 et 2 min', () => {
+  const end = at(903);
+  const s = [[end - 5000, 150], [end + 2000, 133], [end + 30_000, 125], [end + 61_000, 110], [end + 119_000, 105], [end + 200_000, 99]];
+  const ap = recovery(end, s);
+  assert.deepEqual(ap, [[2, 133], [30, 125], [61, 110], [119, 105]]);
+  assert.equal(recoveryAt(ap, 0), 133);
+  assert.equal(recoveryAt(ap, 60), 110);
+  assert.equal(recoveryAt(ap, 120), 105);
+  assert.equal(recovery(end, s.slice(0, 2)), null);
+  const h = entry();
+  assert.deepEqual(summarize(h, [...samplesFor(h).filter(([t]) => t <= end), ...s.slice(1)]).apres, ap);
 });

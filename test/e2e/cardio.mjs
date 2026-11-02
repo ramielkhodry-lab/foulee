@@ -197,6 +197,24 @@ try {
   checks['historique : ♥ bpm et courbe'] = (await text(page)).includes('♥') && (await page.locator('details.hist[open] .hr-box').count()) >= 1;
   await page.screenshot({ path: `${OUT}/4-progression.png`, fullPage: true });
 
+  // 4 bis. Zones de l'app Forme recopiées dans Profil, puis détail du cardio en un toucher.
+  await page.click('[data-tab="profil"]');
+  await page.locator('summary', { hasText: 'Mes zones cardio' }).click();
+  for (const [i, v] of ['140', '130', '163', '175'].entries()) await page.fill(`#zone${i}`, v);
+  await page.click('[data-zonessave]');
+  checks['zones absurdes refusées'] = (await text(page)).includes('Quatre nombres croissants');
+  await page.fill('#zone1', '151');
+  await page.click('[data-zonessave]');
+  checks['zones enregistrées'] = JSON.stringify((await stored(page)).settings.zones) === '[140,151,163,175]';
+  await page.click('[data-tab="progression"]');
+  await page.locator('details.hist').first().evaluate((el) => { el.open = true; });
+  await page.locator('details.hist[open] .hr-box').first().click();
+  await page.waitForSelector('.hr-sheet');
+  checks['détail du cardio : moyenne et 5 zones'] = (await page.locator('.hr-zones li').count()) === 5 && (await page.textContent('.hr-sheet')).includes('Fréq. cardiaque moy.');
+  await page.screenshot({ path: `${OUT}/7-detail-cardio-e2e.png` });
+  await page.click('[data-hrclose]');
+  checks['détail fermé'] = !(await page.$('.hr-sheet'));
+
   // 5. Sécurité du lien.
   const bad = await fetch(`${API}/cardio?k=fc_faux`, { method: 'POST', body: 'x' });
   checks['faux lien refusé'] = bad.status === 401 && (await bad.text()).includes('lien d’import inconnu');
