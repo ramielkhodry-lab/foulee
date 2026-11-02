@@ -126,6 +126,10 @@ export function curveSvg(c, cls = 'course') {
 // Autres mesures de la montre ({ dist, kcal, puiss, pas } : [[t, valeur], …]) pendant la
 // séance : distance, énergie active, puissance moyenne, cadence moyenne (pas par minute,
 // marche comprise, comme l'app Forme). null si rien n'a été mesuré.
+// Version du calcul : une séance résumée avec une version plus ancienne est recalculée (le
+// 2/11/2026, les valeurs « 1,2e-05 » km étaient lues 1,2 km par le serveur : 6,93 km au lieu de 4,8).
+export const MONTRE_V = 2;
+export const montreStale = (m) => Boolean(m) && m.v !== MONTRE_V;
 export function summarizeMontre(h, autres) {
   const w = windowOf(h);
   if (!w || !autres) return null;
@@ -143,7 +147,7 @@ export function summarizeMontre(h, autres) {
   const pas = sum(inside('pas'));
   const minutes = (w[1] - w[0]) / 60000;
   if (pas >= 50 && minutes >= 1) m.cadence = Math.round(pas / minutes);
-  return Object.keys(m).length ? m : null;
+  return Object.keys(m).length ? { ...m, v: MONTRE_V } : null;
 }
 
 // Temps de chaque kilomètre (s), d'après la distance de la montre mesure par mesure. Santé

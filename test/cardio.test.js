@@ -2,7 +2,7 @@ process.env.TZ = 'Europe/Paris';
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { bodyText, parseSamples, importMessage } from '../worker/src/cardio.js';
-import { stepTimes, summarize, summarizeMontre, montreLine, splits, mergeDistance, recovery, recoveryAt, zoneLimits, zoneTimes, windowOf, cardioText } from '../public/js/cardio.js';
+import { stepTimes, summarize, summarizeMontre, montreStale, MONTRE_V, montreLine, splits, mergeDistance, recovery, recoveryAt, zoneLimits, zoneTimes, windowOf, cardioText } from '../public/js/cardio.js';
 import { nextRunLevel } from '../public/js/plan.js';
 import { seanceText } from '../public/js/ia.js';
 
@@ -187,7 +187,11 @@ test('montre : distance, calories, puissance et cadence de la séance seulement'
     pas: [[at(100), 1000], [at(600), 800], [at(5000), 3000]],
   };
   const m = summarizeMontre(h, autres);
-  assert.deepEqual({ ...m, splits: undefined }, { distKm: 2.8, kcal: 150, puissance: 120, cadence: 120, splits: undefined });
+  assert.deepEqual({ ...m, splits: undefined }, { distKm: 2.8, kcal: 150, puissance: 120, cadence: 120, splits: undefined, v: MONTRE_V });
+  // Résumé d'avant la correction du 2/11 (sans version) : à recalculer ; résumé actuel : non.
+  assert.equal(montreStale({ distKm: 6.93 }), true);
+  assert.equal(montreStale(m), false);
+  assert.equal(montreStale(null), false);
   assert.equal(m.splits.km.length, 2);
   assert.equal(montreLine(m), '2,8 km · 150 kcal · 120 W · 120 pas/min');
   assert.equal(summarizeMontre(h, { pas: [[at(100), 20]] }), null); // trop peu : rien
