@@ -110,3 +110,34 @@ export function curveSvg(c, cls = 'course') {
     <text x="2" y="${H - 1}" class="hr-axis">0</text><text x="${W - 2}" y="${H - 1}" text-anchor="end" class="hr-axis">${min} min</text>
   </svg>`;
 }
+
+// Autres mesures de la montre ({ dist, kcal, puiss, pas } : [[t, valeur], …]) pendant la
+// séance : distance, énergie active, puissance moyenne, cadence moyenne (pas par minute,
+// marche comprise, comme l'app Forme). null si rien n'a été mesuré.
+export function summarizeMontre(h, autres) {
+  const w = windowOf(h);
+  if (!w || !autres) return null;
+  const inside = (k) => (autres[k] || []).filter(([t]) => t >= w[0] && t < w[1]).map((x) => x[1]);
+  const sum = (a) => a.reduce((x, y) => x + y, 0);
+  const m = {};
+  const dist = sum(inside('dist'));
+  if (dist >= 0.1) m.distKm = Math.round(dist * 100) / 100;
+  const kcal = sum(inside('kcal'));
+  if (kcal >= 1) m.kcal = Math.round(kcal);
+  const puiss = inside('puiss').filter((v) => v > 0);
+  if (puiss.length >= 3) m.puissance = Math.round(sum(puiss) / puiss.length);
+  const pas = sum(inside('pas'));
+  const minutes = (w[1] - w[0]) / 60000;
+  if (pas >= 50 && minutes >= 1) m.cadence = Math.round(pas / minutes);
+  return Object.keys(m).length ? m : null;
+}
+
+export function montreLine(m) {
+  if (!m) return '';
+  return [
+    m.distKm && `${m.distKm.toLocaleString('fr-FR')} km`,
+    m.kcal && `${m.kcal} kcal`,
+    m.puissance && `${m.puissance} W`,
+    m.cadence && `${m.cadence} pas/min`,
+  ].filter(Boolean).join(' · ');
+}

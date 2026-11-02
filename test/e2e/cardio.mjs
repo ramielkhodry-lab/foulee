@@ -79,6 +79,14 @@ const shortcut = (link, from, to, bpm) => {
   for (let t = from, i = 0; t <= to; t += 250, i++) lines.push(`${iso(t)};${bpm(i)}`);
   return fetch(link, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ mesures: lines.join('\n') }) });
 };
+// Les autres mesures : « type;date;valeur;source », celles de l'iPhone en double.
+const shortcutMontre = (link, from, to) => {
+  const lines = [];
+  for (let t = from; t <= to; t += 250) {
+    lines.push(`dist;${iso(t)};0,01;Apple Watch de Rami`, `dist;${iso(t)};0,012;iPhone de Rami`, `kcal;${iso(t)};0,5;Apple Watch de Rami`, `puiss;${iso(t)};121;Apple Watch de Rami`);
+  }
+  return fetch(link, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ mesures: lines.join('\n') }) });
+};
 // Séance de test de 4 min, jouée quelques secondes puis amenée à la fin.
 async function guidedRun(page) {
   await page.click('[data-tab="programme"]');
@@ -161,16 +169,24 @@ try {
   // 3. Deuxième course : le Raccourci est lancé avant le bilan, le bouton va chercher le cardio.
   const run2 = await guidedRun(page);
   await shortcut(link, run2.start, run2.end, (i) => (i % 8 < 5 ? 156 : 131));
+  const n = Math.floor((run2.end - run2.start) / 250) + 1;
+  const montreMsg = await (await shortcutMontre(link, run2.start, run2.end)).text();
+  checks['Raccourci : autres mesures reçues, iPhone écarté'] = montreMsg.includes(`${n} de distance, ${n} d’énergie, ${n} de puissance`);
   await page.click('[data-cardiofetch]');
   await page.waitForSelector('.hr-box', { timeout: 8000 });
   const b = await text(page);
   checks['bilan : cardio affiché'] = /bpm de moyenne/.test(b) && b.includes('max');
+  const km = Math.round(n * 0.01 * 100) / 100;
+  // Seules les mesures prises pendant la séance comptent (pas le compte à rebours), et pas celles de l'iPhone.
+  const shown = Number(await page.inputValue('#dist'));
+  checks['bilan : distance, kcal, puissance de la montre'] = shown > 0.05 && shown <= km && b.includes('121W de puissance') && /\d+kcal actives/.test(b) && !b.includes('pas/min');
   await page.screenshot({ path: `${OUT}/3-bilan-cardio.png`, fullPage: true });
   await page.click('[data-scale="difficulte"][data-v="2"]');
   await page.click('[data-savebilan]');
   await page.waitForSelector('text=Et maintenant');
   const h2 = (await stored(page)).history.filter((h) => h.sessionName).sort((x, y) => String(x.date).localeCompare(String(y.date))).at(-1);
   checks['cardio enregistré avec le bilan'] = h2?.cardio?.max === 156;
+  checks['distance de la montre enregistrée'] = h2?.distanceSource === 'montre' && h2?.distanceKm === shown && h2?.montre?.distKm === shown && h2?.montre?.puissance === 121 && h2?.allureSecKm > 0;
 
   // 4. Historique et Progression.
   await page.click('[data-tab="progression"]');

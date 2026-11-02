@@ -2,7 +2,7 @@ process.env.TZ = 'Europe/Paris';
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { bodyText, parseSamples, importMessage } from '../worker/src/cardio.js';
-import { stepTimes, summarize, windowOf, cardioText } from '../public/js/cardio.js';
+import { stepTimes, summarize, summarizeMontre, montreLine, windowOf, cardioText } from '../public/js/cardio.js';
 import { nextRunLevel } from '../public/js/plan.js';
 import { seanceText } from '../public/js/ia.js';
 
@@ -135,4 +135,49 @@ test('programme : le cardio ne fait jamais redescendre, et rien sans comparaison
   assert.equal(nextRunLevel([a, b], { maxLevel: 18 }).level, 3); // palier différent : pas de comparaison
   const c = withHr('2026-11-05T18:00:00', 190, { difficulte: 4 });
   assert.equal(nextRunLevel([b, c], { maxLevel: 18 }).level, 2); // difficulté 4 : même palier, pas moins
+});
+
+test('Raccourci : distance, calories, puissance, pas ; ceux de l’iPhone écartés (comptés en double sinon)', () => {
+  const text = [
+    '2026-11-02T18:00:05+01:00;92',
+    'dist;2026-11-02T18:01:00+01:00;0,15;Apple Watch de Rami',
+    'dist;2026-11-02T18:01:00+01:00;0,16;iPhone de Rami', // même course vue par le téléphone
+    'dist;2026-11-02T18:02:00+01:00;140;Apple Watch de Rami', // en mètres
+    'kcal;2026-11-02T18:01:00+01:00;12,5;Apple Watch de Rami',
+    'puiss;2026-11-02T18:01:00+01:00;118;Apple Watch de Rami',
+    'pas;2026-11-02T18:01:00+01:00;150;Apple Watch de Rami',
+    'pas;2026-11-02T18:01:00+01:00;140;iPhone de Rami',
+    'Distance de marche et de course;2026-11-02T18:03:00+01:00;0,1',
+    'Steps;2026-11-02T18:03:00+01:00;120',
+    'Poids;2026-11-02T18:03:00+01:00;80', // type inconnu : ignoré
+  ].join('\n');
+  const r = parseSamples(text, NOW);
+  const t = (hm) => Date.parse(`2026-11-02T${hm}:00+01:00`);
+  assert.equal(r.samples.length, 1);
+  assert.deepEqual(r.autres.dist, [[t('18:01'), 0.15], [t('18:02'), 0.14], [t('18:03'), 0.1]]);
+  assert.deepEqual(r.autres.kcal, [[t('18:01'), 12.5]]);
+  assert.deepEqual(r.autres.puiss, [[t('18:01'), 118]]);
+  assert.deepEqual(r.autres.pas, [[t('18:01'), 150], [t('18:03'), 120]]);
+  assert.equal(r.total, 8);
+  assert.equal(r.rejected, 0);
+  assert.match(importMessage(r.samples, 1, r.autres), /1 mesures de cardio, 3 de distance, 1 d’énergie, 1 de puissance, 2 de pas reçues/);
+  // Sans cardio du tout, les autres mesures passent quand même.
+  assert.equal(parseSamples('pas;2026-11-02T18:01:00+01:00;150', NOW).total, 1);
+});
+
+test('montre : distance, calories, puissance et cadence de la séance seulement', () => {
+  const h = entry(); // 3 s → 903 s, 15 min
+  const autres = {
+    dist: [[at(-300), 0.5], [at(60), 1.2], [at(400), 1.3], [at(900), 0.3], [at(2000), 2]],
+    kcal: [[at(60), 100], [at(500), 50.4]],
+    puiss: [[at(100), 110], [at(200), 0], [at(300), 120], [at(400), 130]],
+    pas: [[at(100), 1000], [at(600), 800], [at(5000), 3000]],
+  };
+  const m = summarizeMontre(h, autres);
+  assert.deepEqual(m, { distKm: 2.8, kcal: 150, puissance: 120, cadence: 120 });
+  assert.equal(montreLine(m), '2,8 km · 150 kcal · 120 W · 120 pas/min');
+  assert.equal(summarizeMontre(h, { pas: [[at(100), 20]] }), null); // trop peu : rien
+  assert.equal(summarizeMontre({ sport: 'course', source: 'manuelle', date: '2026-11-02' }, autres), null);
+  h.montre = m;
+  assert.match(seanceText(h), /puissance moyenne 120 W, cadence 120 pas\/min/);
 });

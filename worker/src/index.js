@@ -334,8 +334,13 @@ const routes = {
     const from = Number(q.get('from'));
     const to = Number(q.get('to'));
     if (!q.get('from') || !q.get('to') || !Number.isFinite(from) || !Number.isFinite(to) || to < from || to - from > 4 * 86400_000) throw new HttpError(400, 'Plage invalide');
-    const rows = await env.DB.prepare('SELECT t, bpm FROM cardio_samples WHERE user_id = ? AND t >= ? AND t <= ? ORDER BY t LIMIT 20000').bind(u.id, from, to).all();
-    return { samples: rows.results.map((r) => [r.t, r.bpm]) };
+    const [rows, other] = await env.DB.batch([
+      env.DB.prepare('SELECT t, bpm FROM cardio_samples WHERE user_id = ? AND t >= ? AND t <= ? ORDER BY t LIMIT 20000').bind(u.id, from, to),
+      env.DB.prepare('SELECT kind, t, v FROM sante_samples WHERE user_id = ? AND t >= ? AND t <= ? ORDER BY t LIMIT 20000').bind(u.id, from, to),
+    ]);
+    const autres = {};
+    for (const r of other.results) (autres[r.kind] ||= []).push([r.t, r.v]);
+    return { samples: rows.results.map((r) => [r.t, r.bpm]), autres };
   },
 };
 
@@ -348,8 +353,8 @@ async function importCardio(request, env) {
   if (!row) return plain('Foulée : lien d’import inconnu ou remplacé. Copie le nouveau lien depuis Foulée > Profil > Cardio Apple Watch.', 401);
   const raw = await request.text();
   if (raw.length > MAX_BODY) return plain('Foulée : trop de mesures d’un coup. Dans le Raccourci, garde seulement les mesures d’aujourd’hui.', 413);
-  const { samples, reason } = parseSamples(bodyText(raw), now());
-  if (!samples.length) return plain(`Foulée : ${reason}`, 400);
+  const { samples, autres, total, reason } = parseSamples(bodyText(raw), now());
+  if (!total) return plain(`Foulée : ${reason}`, 400);
   const stmts = [];
   for (let i = 0; i < samples.length; i += 30) {
     const part = samples.slice(i, i + 30);
@@ -357,11 +362,20 @@ async function importCardio(request, env) {
       .bind(...part.flatMap(([t, bpm]) => [row.user_id, t, bpm])));
   }
   const inserts = stmts.length;
-  stmts.push(env.DB.prepare('DELETE FROM cardio_samples WHERE user_id = ? AND t < ?').bind(row.user_id, now() - KEEP_DAYS * 86400_000));
-  stmts.push(env.DB.prepare('UPDATE cardio_tokens SET last_used_at = ?, last_count = ? WHERE token_hash = ?').bind(now(), samples.length, hash));
+  for (const [kind, list] of Object.entries(autres)) {
+    for (let i = 0; i < list.length; i += 25) {
+      const part = list.slice(i, i + 25);
+      stmts.push(env.DB.prepare(`INSERT OR REPLACE INTO sante_samples (user_id, kind, t, v) VALUES ${part.map(() => '(?, ?, ?, ?)').join(', ')}`)
+        .bind(...part.flatMap(([t, v]) => [row.user_id, kind, t, v])));
+    }
+  }
+  const old = now() - KEEP_DAYS * 86400_000;
+  stmts.push(env.DB.prepare('DELETE FROM cardio_samples WHERE user_id = ? AND t < ?').bind(row.user_id, old));
+  stmts.push(env.DB.prepare('DELETE FROM sante_samples WHERE user_id = ? AND t < ?').bind(row.user_id, old));
+  stmts.push(env.DB.prepare('UPDATE cardio_tokens SET last_used_at = ?, last_count = ? WHERE token_hash = ?').bind(now(), total, hash));
   const res = await env.DB.batch(stmts);
   const added = res.slice(0, inserts).reduce((a, r) => a + (r.meta?.changes || 0), 0);
-  return plain(importMessage(samples, added));
+  return plain(importMessage(samples, added, autres));
 }
 
 export default {

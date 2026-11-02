@@ -486,3 +486,8 @@ details.hist[open] .li { border-bottom: 0; }
 .steps-guide ul { padding-left: 16px; margin: 4px 0 0; color: var(--muted); }
 .code { font-family: ui-monospace, Menlo, monospace; background: var(--surface-2); border-radius: 6px; padding: 1px 6px; color: var(--ink); white-space: nowrap; }
 .steps-guide .code { white-space: normal; overflow-wrap: anywhere; }
+.montre-box { background: var(--surface-2); border-radius: 16px; padding: 12px 14px; margin: 12px 0; }
+.montre-cells { display: flex; flex-wrap: wrap; gap: 10px 18px; }
+.montre-cells span { display: flex; align-items: baseline; gap: 4px; }
+.montre-cells b { font: 800 italic 24px/1 var(--display); color: var(--ink); }
+.montre-cells small { color: var(--muted); font-size: 13px; }
