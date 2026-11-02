@@ -47,12 +47,57 @@ const kindOf = (prefix) => {
   return null;
 };
 
+// Format « en colonnes », sans boucle dans le Raccourci (une boucle fait un tour par mesure :
+// des milliers pour une course, plusieurs minutes, voire bloqué). Le Raccourci insère les
+// listes entières dans un seul Texte, une valeur par ligne :
+//   #dates dist      ← puis une date par ligne (Date de début, ISO 8601)
+//   #valeurs dist    ← puis une valeur par ligne, dans le même ordre
+//   #sources dist    ← (facultatif) puis une source par ligne
+// On recolle ligne à ligne en « dist;date;valeur;source ». Une colonne se termine au titre
+// suivant ou dès qu'une ligne n'a pas la forme attendue (date dans les dates, pas de date ailleurs).
+const COL = /^\s*#\s*(dates?|valeurs?|values?|sources?)\s+(.+?)\s*$/i;
+function expandColumns(lines) {
+  const rest = [];
+  const blocks = new Map(); // nom du type → { dates, valeurs, sources }
+  let cur = null;
+  for (const line of lines) {
+    const h = line.match(COL);
+    if (h) {
+      const col = /^d/i.test(h[1]) ? 'dates' : /^s/i.test(h[1]) ? 'sources' : 'valeurs';
+      const name = h[2].toLowerCase();
+      if (!blocks.has(name)) blocks.set(name, { dates: [], valeurs: [], sources: [] });
+      cur = blocks.get(name)[col];
+      cur.col = col;
+      continue;
+    }
+    if (cur && line.trim() === '') continue;
+    if (cur) {
+      const hasDate = ISO.test(line);
+      if (cur.col === 'dates' ? hasDate : !hasDate) { cur.push(line.trim()); continue; }
+      cur = null; // ligne d'une autre forme : fin de la colonne
+    }
+    rest.push(line);
+  }
+  const out = [];
+  let mismatch = 0;
+  for (const [name, b] of blocks) {
+    if (b.dates.length !== b.valeurs.length) { mismatch++; continue; }
+    const withSource = b.sources.length === b.dates.length;
+    b.dates.forEach((d, i) => {
+      const v = b.valeurs[i].replace(/[\s  ]/g, ''); // « 1 234 » → « 1234 »
+      out.push(`${name};${d.match(ISO)[0]};${v}${withSource ? `;${b.sources[i]}` : ''}`);
+    });
+  }
+  return { lines: [...rest, ...out], mismatch };
+}
+
 // Texte → mesures triées, sans doublon. Cardio : `samples` [[t (ms), bpm], …] (une ligne
 // « date;bpm », sans préfixe). Le reste : `autres` { dist, kcal, puiss, pas }. `reason`
 // explique un échec dans les mots du Raccourci, pour savoir quel réglage corriger.
 export function parseSamples(text, now = Date.now()) {
   const items = [];
-  for (const line of String(text ?? '').split(/\r?\n/)) {
+  const { lines, mismatch } = expandColumns(String(text ?? '').split(/\r?\n/));
+  for (const line of lines) {
     const n = (line.match(new RegExp(ISO.source, 'g')) || []).length;
     if (!n) continue;
     if (n === 1) {
@@ -102,7 +147,8 @@ export function parseSamples(text, now = Date.now()) {
   const total = samples.length + Object.values(autres).reduce((a, l) => a + l.length, 0);
   let reason = null;
   if (!total) {
-    if (!items.length) reason = 'Aucune mesure reçue. Vérifie que le Raccourci trouve bien des échantillons de fréquence cardiaque (Santé > Fréquence cardiaque doit avoir des données aujourd’hui).';
+    if (mismatch && !items.length) reason = 'Les colonnes « #dates » et « #valeurs » n’ont pas le même nombre de lignes. Dans le Raccourci, les deux doivent venir du même « Échantillons de Santé ».';
+    else if (!items.length) reason = 'Aucune mesure reçue. Vérifie que le Raccourci trouve bien des échantillons de fréquence cardiaque (Santé > Fréquence cardiaque doit avoir des données aujourd’hui).';
     else if (noTime) reason = 'Les dates n’ont pas d’heure. Dans le Raccourci, touche « Date de début », choisis le format ISO 8601 et active « Inclure l’heure ».';
     else if (noZone) reason = 'Les dates n’ont pas de fuseau horaire. Dans le Raccourci, choisis le format de date ISO 8601.';
     else if (badValue) reason = 'Les valeurs ne sont pas des battements par minute. Dans le Raccourci, mets « Valeur » après le point-virgule.';

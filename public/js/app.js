@@ -2100,9 +2100,16 @@ const raccourciSteps = () => `
         <li>Touche le 2e, choisis <b>Valeur</b>.</li>
       </ul></li>
     <li>Toujours dans la boucle, sous le Texte : <b>Ajouter à la variable</b>, avec <b>Texte</b>, variable nommée <span class="code">Mesures</span>.</li>
-    <li>Distance, calories, puissance, cadence (facultatif) : après <b>Fin de la répétition</b>, refais les étapes 2 à 5 pour chacune de ces mesures. Change seulement le <b>Type</b>, et écris le petit mot devant les variables du Texte :
-      <ul>${AUTRES_MESURES.map(([t, k]) => `<li><b>${t}</b> → <span class="code">${k};</span></li>`).join('')}</ul>
-      Le Texte devient : <span class="code">dist;Élément de répétition;Élément de répétition;Élément de répétition</span> (Date de début en ISO 8601 avec l'heure ; Valeur ; <b>Source</b>). La Source sert à ne pas compter deux fois les pas et la distance, déjà comptés par l'iPhone.</li>
+    <li>Distance, calories, puissance, cadence (facultatif), <b>sans boucle</b> (une boucle ferait un tour par mesure : des milliers pour une course, le Raccourci bloque) : après <b>Fin de la répétition</b>, pour chaque mesure ci-dessous :
+      <ul>
+        <li>Ajoute <b>Rechercher des échantillons de santé</b> : <b>Type</b> (ci-dessous) · <b>Date de début</b> est <b>aujourd'hui</b> · <b>Limite</b> désactivée.</li>
+        <li>Juste dessous, ajoute un <b>Texte</b> sur 6 lignes (touche Retour entre chaque) :
+          <span class="code">#dates dist</span> · <b>Échantillons de Santé</b> (touche-le : <b>Date de début</b>, ISO 8601 avec l'heure) · <span class="code">#valeurs dist</span> · <b>Échantillons de Santé</b> (<b>Valeur</b>) · <span class="code">#sources dist</span> · <b>Échantillons de Santé</b> (<b>Source</b>).</li>
+        <li>Dessous : <b>Ajouter à la variable</b>, <b>Texte</b> à <span class="code">Mesures</span>.</li>
+      </ul>
+      Remplace <span class="code">dist</span> par le petit mot de chaque mesure :
+      <ul>${AUTRES_MESURES.map(([t, k]) => `<li><b>${t}</b> → <span class="code">${k}</span></li>`).join('')}</ul>
+      La Source sert à ne pas compter deux fois les pas et la distance, déjà comptés par l'iPhone.</li>
     <li>Tout en bas, ajoute <b>Combiner le texte</b> : <b>Mesures</b> avec <b>Nouvelles lignes</b>.</li>
     <li>Ajoute <b>Obtenir le contenu de l'URL</b>. Colle ton lien Foulée à la place de l'URL. Touche la flèche pour déplier :
       <b>Méthode : POST</b> · <b>Corps de la requête : JSON</b> · <b>Ajouter un champ</b> → <b>Texte</b>, clé <span class="code">mesures</span>, valeur <b>Texte combiné</b>.</li>
