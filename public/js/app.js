@@ -1298,8 +1298,8 @@ const screens = {
       </div>
       <div class="card">
         <h2>Son pendant la séance</h2>
-        <label class="choice"><input type="radio" name="mode" value="musique" ${d.settings.son !== 'exclusif' ? 'checked' : ''}><span><strong>Avec ma musique</strong> : les signaux passent par-dessus ta musique. Garde l'écran allumé.</span></label>
-        <label class="choice"><input type="radio" name="mode" value="exclusif" ${d.settings.son === 'exclusif' ? 'checked' : ''}><span><strong>Sans musique</strong> : continue même écran verrouillé, mais met ta musique en pause.</span></label>
+        <label class="choice"><input type="radio" name="mode" value="musique" ${d.settings.son !== 'exclusif' ? 'checked' : ''}><span><strong>Avec ma musique</strong> : les signaux passent par-dessus ta musique sans la couper. L'écran doit rester allumé (sinon plus de signaux ni de GPS) : utilise le bouton « Bloquer l'écran » pendant la séance pour la poche.</span></label>
+        <label class="choice"><input type="radio" name="mode" value="exclusif" ${d.settings.son === 'exclusif' ? 'checked' : ''}><span><strong>Sans musique</strong> : les signaux continuent même téléphone verrouillé, mais ta musique est coupée pour toute la séance. Téléphone verrouillé, le GPS s'arrête : pas de distance ni de tracé.</span></label>
         ${supported ? '' : '<p class="muted small">Ce navigateur ne permet pas de choisir : le mode par défaut s\'applique.</p>'}
       </div>
       <div class="card">
