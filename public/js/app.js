@@ -2,9 +2,9 @@ import { KINDS } from './phrases.js';
 import { assemble, stepAt } from './track.js';
 import { load, update, uid, PRESETS, onSave, replace, empty } from './store.js';
 import * as account from './account.js';
-import { createTrack, addPoint, markGap, summary, encodeTrace, decodeTrace } from './gps.js';
+import { createTrack, addPoint, addAltitude, markGap, summary, encodeTrace, decodeTrace } from './gps.js';
 import { drawTrace } from './map.js';
-import { stepTimes, summarize, summarizeMontre, cardioLine, curveSvg, windowOf } from './cardio.js';
+import { stepTimes, summarize, summarizeMontre, mergeDistance, cardioLine, curveSvg, windowOf } from './cardio.js';
 import { iaInput, pendingIA, failedIA, failureMessage } from './ia.js';
 import { tipsOf, tipsSource, hasIA } from './conseils.js';
 import { GOALS_MUSCU, LIEUX, NIVEAUX_MUSCU, MUSCLES, alternatives, byId, muscuPlan, nextSeance, nextLoad, tonnage } from './muscu.js';
@@ -170,16 +170,25 @@ const cardioBlock = (c) => (c ? `
 function montreBlock(h) {
   const m = h?.montre;
   if (!m) return '';
+  const fromWatch = h.distanceSource === 'montre' || h.distanceSource === 'moyenne';
   const cells = [
-    m.distKm && [m.distKm.toLocaleString('fr-FR'), 'km'],
-    m.distKm && h.distanceSource === 'montre' && h.allureSecKm && [allure(h.allureSecKm).replace('/km', ''), '/km'],
+    m.distKm && [(fromWatch ? h.distanceKm : m.distKm).toLocaleString('fr-FR'), 'km'],
+    m.distKm && fromWatch && h.allureSecKm && [allure(h.allureSecKm).replace('/km', ''), '/km'],
     m.kcal && [m.kcal, 'kcal actives'],
     m.puissance && [m.puissance, 'W de puissance'],
     m.cadence && [m.cadence, 'pas/min'],
   ].filter(Boolean);
-  const gps = h.distanceSource === 'montre' && h.distanceGpsKm ? ` La distance vient de la montre (GPS du téléphone : ${h.distanceGpsKm.toLocaleString('fr-FR')} km).` : '';
+  const fr = (km) => `${km.toLocaleString('fr-FR')} km`;
+  const gps = !h.distanceGpsKm ? ''
+    : h.distanceSource === 'moyenne' ? `, sauf la distance : moyenne de la montre (${fr(m.distKm)}) et du téléphone (${fr(h.distanceGpsKm)})`
+    : h.distanceSource === 'montre' ? `. Le téléphone donnait ${fr(h.distanceGpsKm)} (${h.gpsIncomplet ? 'GPS coupé un moment' : 'trop d’écart pour faire la moyenne'})`
+    : '';
+  const sp = m.splits;
+  const best = sp ? Math.min(...sp.km) : 0;
+  const splitsHtml = sp ? `<ol class="splits">${sp.km.map((sec, i) => `<li class="${sec === best && sp.km.length > 1 ? 'best' : ''}"><span>Km ${i + 1}</span><b>${allure(sec).replace('/km', '')}</b></li>`).join('')}${sp.fin ? `<li><span>${sp.fin.km.toLocaleString('fr-FR')} km</span><b>${mmss(sp.fin.sec)}</b></li>` : ''}</ol>` : '';
   return `<div class="montre-box"><div class="montre-cells">${cells.map(([v, u]) => `<span><b>${v}</b><small>${u}</small></span>`).join('')}</div>
-    <p class="muted small" style="margin:4px 0 0">Mesuré par ta montre pendant la séance.${gps}</p></div>`;
+    ${splitsHtml}
+    <p class="muted small" style="margin:4px 0 0">Mesuré par ta montre pendant la séance${gps}.</p></div>`;
 }
 
 // Progression : cardio des dernières courses mesurées par la montre. Comparer au même palier.
@@ -207,6 +216,7 @@ function historyRow(h, open = false) {
   if (h.steps && h.source === 'guidee') parts.push(`${h.completedSteps}/${h.steps.length} étapes`);
   if (h.cardio) parts.push(`♥ ${h.cardio.avg} bpm`);
   if (h.montre?.kcal) parts.push(`${h.montre.kcal} kcal`);
+  if (h.deniveleM) parts.push(`D+ ${h.deniveleM} m`);
   if (sport === 'muscu' && h.exercices?.length) parts.unshift(`${h.sessionName} · ${h.exercices.length} exercices`);
   if (sport === 'autre') parts.unshift(`${esc(h.activite || 'Autre activité')}${h.remplace ? ` · à la place de la ${SPORT_LABEL[h.remplace].toLowerCase()}` : ''}`);
   const feel = [
@@ -227,6 +237,7 @@ function historyRow(h, open = false) {
         ${traceOf(h).length ? `<div class="map" data-map="${esc(h.id)}"></div>` : ''}
         ${cardioBlock(h.cardio)}
         ${montreBlock(h)}
+        ${h.deniveleM != null ? `<p class="muted small">Dénivelé : +${h.deniveleM} m, mesuré par le téléphone.</p>` : ''}
         ${sport === 'muscu' && h.exercices?.length ? `<ul class="steps">${h.exercices.map((x) => `<li><span>${esc(x.nom)}</span><span class="muted small">${x.poids ? `${kgLabel(x.poids)} · ` : ''}${(x.reps || []).filter((r) => r > 0).join(' / ')}${x.unite === 's' ? ' s' : ''}</span></li>`).join('')}</ul>${tonnage(h) ? '<p class="muted small">Total soulevé : charge × répétitions, hors poids du corps.</p>' : ''}` : ''}
         ${sport === 'natation' && h.swim?.nages?.length ? `<p class="small">${esc(h.swim.nages.join(', '))}${h.swim.detail ? ` · ${esc(h.swim.detail)}` : ''}</p>` : ''}
         ${h.structure ? `<p class="small">${esc(h.structure)}</p>` : ''}
@@ -581,6 +592,7 @@ function startGps() {
       live.gpsError = null;
       // Pas de distance pendant une pause : on ne compte que le temps de séance.
       if (audio.paused) return;
+      if (pos.coords.accuracy <= 30) addAltitude(live.gps, pos.coords.altitude, pos.coords.altitudeAccuracy, pos.timestamp);
       addPoint(live.gps, { lat: pos.coords.latitude, lon: pos.coords.longitude, t: pos.timestamp, acc: pos.coords.accuracy });
     },
     (err) => { if (live) live.gpsError = err.code === 1 ? 'GPS refusé' : 'GPS en attente'; },
@@ -1048,13 +1060,14 @@ const screens = {
         <p class="muted">${mmss(b.elapsedSec)} de séance · ${b.completedSteps} étape(s) sur ${b.steps.length}${b.skipped.length ? ` · ${b.skipped.length} passée(s)` : ''}</p>
         ${b.trace ? `<div class="map" data-map="bilan"></div>${b.gpsIncomplet ? '<p class="muted small">En pointillés : écran verrouillé, le GPS ne suivait plus.</p>' : ''}` : ''}
         ${b.distanceSource === 'gps' ? `<p class="small">GPS : ${b.distanceKm.toLocaleString('fr-FR')} km${b.allureSecKm ? ` · ${allure(b.allureSecKm)}` : ''}${b.gpsIncomplet ? ' · <strong>incomplet</strong> (écran verrouillé un moment)' : ''}</p>` : ''}
+        ${b.deniveleM != null ? `<p class="small">Dénivelé : <b>+${b.deniveleM} m</b> <span class="muted">(mesuré par le téléphone${b.gpsIncomplet ? ', incomplet' : ''})</span></p>` : ''}
         ${montreBlock(b)}
         ${b.cardio ? cardioBlock(b.cardio) : cardioOn() && windowOf(b) ? `<div class="hr-wait">
           <p class="small" style="margin:0"><b>Cardio de ta montre :</b> arrête la séance sur la montre, attends une minute, lance ton Raccourci « Foulée cardio » puis reviens ici.</p>
           ${cardioUi.message ? `<p class="muted small" style="margin:6px 0 0">${esc(cardioUi.message || 'Pas encore de mesures de la montre pour cette séance.')}</p>` : ''}
           <button class="btn-ghost" data-cardiofetch style="width:100%;margin-top:8px">${cardioUi.busy ? 'Recherche…' : 'J’ai lancé le Raccourci'}</button>
         </div>` : ''}
-        <label for="dist">Distance (km${b.distanceSource === 'gps' || b.distanceSource === 'montre' ? ', corrige si besoin' : ', facultatif'})</label>
+        <label for="dist">Distance (km${['gps', 'montre', 'moyenne'].includes(b.distanceSource) ? ', corrige si besoin' : ', facultatif'})</label>
         <input id="dist" type="number" inputmode="decimal" step="0.01" min="0" value="${b.distanceKm ?? ''}">
         <label style="font-weight:400"><input id="estim" type="checkbox" style="width:auto" ${b.distanceEstimee ? 'checked' : ''}> C'est une estimation</label>
         <label>Difficulté</label>
@@ -1421,6 +1434,7 @@ function go(screen) {
       distanceSource: gps.distanceKm ? 'gps' : null,
       allureSecKm: gps.allureSecKm,
       gpsIncomplet: gps.gpsIncomplet,
+      deniveleM: gps.deniveleM,
       trace: encodeTrace(gps.points),
       stepMs: stepTimes(live.anchors, starts, end, reached),
       endedAt: localNow(),
@@ -2119,10 +2133,11 @@ function attachMontre(h, m) {
   h.montre = m;
   if (!m.distKm || h.distanceSource === 'manuelle') return;
   if (h.distanceSource === 'gps' && h.distanceKm) h.distanceGpsKm = h.distanceKm;
-  h.distanceKm = m.distKm;
-  h.distanceSource = 'montre';
+  const d = mergeDistance(h.distanceGpsKm, h.gpsIncomplet, m.distKm);
+  h.distanceKm = d.km;
+  h.distanceSource = d.source;
   h.distanceEstimee = false;
-  h.allureSecKm = h.elapsedSec ? Math.round(h.elapsedSec / m.distKm) : null;
+  h.allureSecKm = h.elapsedSec ? Math.round(h.elapsedSec / d.km) : null;
 }
 
 async function refreshCardio() {

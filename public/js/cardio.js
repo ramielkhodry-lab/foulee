@@ -122,6 +122,8 @@ export function summarizeMontre(h, autres) {
   const m = {};
   const dist = sum(inside('dist'));
   if (dist >= 0.1) m.distKm = Math.round(dist * 100) / 100;
+  const sp = splits((autres.dist || []).filter(([t]) => t >= w[0] && t < w[1]));
+  if (sp) m.splits = sp;
   const kcal = sum(inside('kcal'));
   if (kcal >= 1) m.kcal = Math.round(kcal);
   const puiss = inside('puiss').filter((v) => v > 0);
@@ -132,6 +134,33 @@ export function summarizeMontre(h, autres) {
   return Object.keys(m).length ? m : null;
 }
 
+// Temps de chaque kilomètre (s), d'après la distance de la montre mesure par mesure. Santé
+// donne l'heure de début de chaque mesure : sa distance est répartie jusqu'à la mesure
+// suivante (60 s au plus, pour ne pas l'étaler sur une pause). Dernier km entamé : sa
+// distance et son temps s'il fait au moins 100 m. null s'il n'y a pas un km entier.
+const SPLIT_MAX_SEC = 60;
+export function splits(dist) {
+  if (!dist?.length) return null;
+  const km = [];
+  let cum = 0;
+  let lastCut = dist[0][0];
+  let end = lastCut;
+  dist.forEach(([t, d], i) => {
+    const next = dist[i + 1]?.[0];
+    const prevLen = i > 0 ? t - dist[i - 1][0] : 5000;
+    end = t + Math.min(next !== undefined ? next - t : prevLen, SPLIT_MAX_SEC * 1000);
+    while (d > 0 && cum + d >= km.length + 1) {
+      const cut = t + ((km.length + 1 - cum) / d) * (end - t);
+      km.push(Math.round((cut - lastCut) / 1000));
+      lastCut = cut;
+    }
+    cum += d;
+  });
+  if (!km.length) return null;
+  const rest = Math.round((cum - km.length) * 100) / 100;
+  return { km, ...(rest >= 0.1 ? { fin: { km: rest, sec: Math.round((end - lastCut) / 1000) } } : {}) };
+}
+
 export function montreLine(m) {
   if (!m) return '';
   return [
@@ -140,4 +169,15 @@ export function montreLine(m) {
     m.puissance && `${m.puissance} W`,
     m.cadence && `${m.cadence} pas/min`,
   ].filter(Boolean).join(' · ');
+}
+
+// Distance retenue quand le téléphone (GPS) et la montre l'ont mesurée tous les deux : leur
+// moyenne si elles concordent (moins de 5 % d'écart) et que le GPS n'a pas été coupé ; sinon
+// celle de la montre (une moyenne avec une mesure fausse serait fausse aussi).
+const ECART_MAX = 0.05;
+export function mergeDistance(gpsKm, gpsIncomplet, montreKm) {
+  if (!montreKm) return null;
+  if (!gpsKm || gpsIncomplet) return { km: montreKm, source: 'montre' };
+  if (Math.abs(gpsKm - montreKm) / montreKm > ECART_MAX) return { km: montreKm, source: 'montre', ecart: true };
+  return { km: Math.round(((gpsKm + montreKm) / 2) * 100) / 100, source: 'moyenne' };
 }

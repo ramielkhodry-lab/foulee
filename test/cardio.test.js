@@ -2,7 +2,7 @@ process.env.TZ = 'Europe/Paris';
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { bodyText, parseSamples, importMessage } from '../worker/src/cardio.js';
-import { stepTimes, summarize, summarizeMontre, montreLine, windowOf, cardioText } from '../public/js/cardio.js';
+import { stepTimes, summarize, summarizeMontre, montreLine, splits, mergeDistance, windowOf, cardioText } from '../public/js/cardio.js';
 import { nextRunLevel } from '../public/js/plan.js';
 import { seanceText } from '../public/js/ia.js';
 
@@ -174,10 +174,32 @@ test('montre : distance, calories, puissance et cadence de la séance seulement'
     pas: [[at(100), 1000], [at(600), 800], [at(5000), 3000]],
   };
   const m = summarizeMontre(h, autres);
-  assert.deepEqual(m, { distKm: 2.8, kcal: 150, puissance: 120, cadence: 120 });
+  assert.deepEqual({ ...m, splits: undefined }, { distKm: 2.8, kcal: 150, puissance: 120, cadence: 120, splits: undefined });
+  assert.equal(m.splits.km.length, 2);
   assert.equal(montreLine(m), '2,8 km · 150 kcal · 120 W · 120 pas/min');
   assert.equal(summarizeMontre(h, { pas: [[at(100), 20]] }), null); // trop peu : rien
   assert.equal(summarizeMontre({ sport: 'course', source: 'manuelle', date: '2026-11-02' }, autres), null);
   h.montre = m;
   assert.match(seanceText(h), /puissance moyenne 120 W, cadence 120 pas\/min/);
+});
+
+test('splits : temps de chaque km d’après la distance de la montre, pause non étalée', () => {
+  // 2,5 km à 6 min/km : 10 m toutes les 3,6 s.
+  const d = [];
+  for (let i = 0; i < 250; i++) d.push([i * 3600, 0.01]);
+  assert.deepEqual(splits(d), { km: [360, 360], fin: { km: 0.5, sec: 180 } });
+  // Pause de 5 min après 500 m : le 1er km la compte (temps réel), sans étaler la distance dessus.
+  const p = d.slice(0, 50).concat(d.slice(50).map(([t, v]) => [t + 300_000, v]));
+  const r = splits(p);
+  assert.equal(r.km[0], 660);
+  assert.equal(r.km[1], 360);
+  assert.equal(splits([[0, 0.5], [3000, 0.3]]), null); // pas un km entier
+});
+
+test('distance téléphone + montre : moyenne si elles concordent, sinon la montre', () => {
+  assert.deepEqual(mergeDistance(4.70, false, 4.78), { km: 4.74, source: 'moyenne' });
+  assert.deepEqual(mergeDistance(4.10, false, 4.78), { km: 4.78, source: 'montre', ecart: true }); // 14 % d'écart
+  assert.deepEqual(mergeDistance(4.75, true, 4.78), { km: 4.78, source: 'montre' }); // GPS coupé : pas de moyenne
+  assert.deepEqual(mergeDistance(null, false, 4.78), { km: 4.78, source: 'montre' });
+  assert.equal(mergeDistance(4.7, false, null), null);
 });

@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { haversine, createTrack, addPoint, markGap, summary } from '../public/js/gps.js';
+import { haversine, createTrack, addPoint, addAltitude, ascent, markGap, summary } from '../public/js/gps.js';
 
 // Point à `m` mètres au nord d'un point de Courbevoie.
 const at = (m, t, acc = 5) => ({ lat: 48.897 + m / 111195, lon: 2.253, t: t * 1000, acc });
@@ -60,4 +60,20 @@ test('tracé compact : aller-retour encodage, coupure GPS, taille', async () => 
   // ~2,2 km : bien moins de 10 Ko une fois en JSON.
   assert.ok(JSON.stringify(tr).length < 10000, `taille ${JSON.stringify(tr).length}`);
   assert.equal(encodeTrace([]), null);
+});
+
+test('dénivelé du téléphone : montées comptées, bruit de ± 2 m ignoré', () => {
+  const tr = createTrack();
+  // Plat bruité (100 ± 2 m), montée de 30 m, descente, plat bruité.
+  const alts = [];
+  for (let i = 0; i < 40; i++) alts.push(100 + (i % 2 ? 2 : -2));
+  for (let i = 1; i <= 30; i++) alts.push(100 + i);
+  for (let i = 1; i <= 30; i++) alts.push(130 - i);
+  for (let i = 0; i < 40; i++) alts.push(100 + (i % 2 ? 2 : -2));
+  alts.forEach((a, i) => addAltitude(tr, a, 5, i * 1000));
+  assert.equal(addAltitude(tr, 500, 40, 999_999), false); // altitude imprécise : ignorée
+  const up = summary(tr, 600).deniveleM;
+  assert.ok(up >= 27 && up <= 33, `dénivelé ${up}`);
+  assert.equal(ascent(alts.slice(0, 40).map((a, i) => [i, a])), 0);
+  assert.equal(ascent([[0, 1]]), null); // trop peu de mesures : rien
 });
