@@ -2,6 +2,8 @@
 // essoufflement, fatigue), douleur et mots du ressenti. Des règles fixes et lisibles,
 // pas une IA : chaque conseil vient d'une règle ci-dessous.
 
+import { unfinished } from './extend.js';
+
 const norm = (s) => String(s || '').toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g, '');
 const words = (h) => norm([h.commentaire, h.douleur, h.swim?.detail, h.structure].join(' '));
 
@@ -37,7 +39,7 @@ export function conseils(h) {
     }
     if ((h.essoufflement || 0) >= 4 || (h.fatigue || 0) >= 4) out.push('Essoufflé ou fatigué : arrête-toi 20 à 30 s au bord dès que tu en as besoin. Le nombre de longueurs compte, pas de les enchaîner.');
   } else if (sport === 'course') {
-    const incomplete = h.steps && h.completedSteps !== undefined && h.completedSteps < h.steps.length;
+    const incomplete = unfinished(h);
     if (incomplete) out.push('Tu as arrêté avant la fin : la prochaine fois, ralentis dès la première course plutôt que de t’arrêter. Finir lentement vaut mieux que finir tôt.');
     if ((h.essoufflement || 0) >= 4 || /souffle|essouffl/.test(t)) out.push('Trop essoufflé : ralentis jusqu’à pouvoir dire une phrase entière en courant. Si ça te paraît trop lent, c’est la bonne allure.');
     if (/point de cote/.test(t)) out.push('Point de côté : ralentis et souffle fort quand le pied gauche touche le sol. Ne mange rien de lourd dans les 2 h avant.');

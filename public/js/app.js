@@ -1,5 +1,6 @@
 import { KINDS } from './phrases.js';
 import { assemble, stepAt } from './track.js';
+import { MAX_EXTRA, extendState, canExtend, canRetract, extend, retract, extraSummary } from './extend.js';
 import { load, update, uid, PRESETS, onSave, replace, empty } from './store.js';
 import * as account from './account.js';
 import { createTrack, addPoint, addAltitude, markGap, summary, encodeTrace, decodeTrace } from './gps.js';
@@ -292,6 +293,14 @@ function cardioTrend(runs) {
     <p class="muted small">Bpm moyens pendant les phases de course (moyenne de la séance si les phases manquent). À palier égal, un cardio qui baisse veut dire que tu progresses. Mesuré par ta montre, rien n'est estimé.</p>`;
 }
 
+// Répétitions ajoutées en direct : prévu contre réalisé.
+function extraLine(h) {
+  const done = h.extraFaites ?? 0;
+  const prevues = h.repsPrevues;
+  if (!done) return `Répétition${h.extra > 1 ? 's' : ''} ajoutée${h.extra > 1 ? 's' : ''} en direct, mais pas terminée${h.extra > 1 ? 's' : ''} : ${prevues} prévues.`;
+  return `<b>${prevues + done} répétitions au lieu de ${prevues}</b> : +${done} ajoutée${done > 1 ? 's' : ''} en direct${done < h.extra ? ` (${h.extra - done} lancée${h.extra - done > 1 ? 's' : ''} sans être finie${h.extra - done > 1 ? 's' : ''})` : ''}.`;
+}
+
 // Séance passée : ligne dépliable, le détail reste à un toucher.
 function historyRow(h, open = false) {
   const sport = sportOf(h);
@@ -302,6 +311,7 @@ function historyRow(h, open = false) {
   if (h.allureSecKm) parts.push(`allure ${allure(h.allureSecKm)}`);
   if (h.gpsIncomplet) parts.push('GPS incomplet');
   if (h.steps && h.source === 'guidee') parts.push(`${h.completedSteps}/${h.steps.length} étapes`);
+  if (h.extra) parts.push(`+${h.extraFaites ?? h.extra} répétition${(h.extraFaites ?? h.extra) > 1 ? 's' : ''}`);
   if (h.cardio) parts.push(`♥ ${h.cardio.avg} bpm`);
   if (h.montre?.kcal) parts.push(`${h.montre.kcal} kcal`);
   if (h.deniveleM) parts.push(`D+ ${h.deniveleM} m`);
@@ -739,15 +749,20 @@ function renderTouchLock() {
   el = document.createElement('div');
   el.id = 'touchlock';
   el.innerHTML = `
+    <button class="lock-extend" type="button" hidden><i></i><span>+1 répétition</span><small></small><em>Maintiens 2 secondes</em></button>
     <div class="lock-zone">
       <div class="lock-badge">Touches bloquées</div>
       <button class="lock-btn" type="button" aria-label="Maintenir 2 secondes pour débloquer"><svg viewBox="0 0 100 100" aria-hidden="true"><circle class="lock-ring" cx="50" cy="50" r="46"/></svg><span>🔒</span></button>
       <p class="lock-label">Maintiens le cadenas 2 secondes pour débloquer</p>
     </div>`;
-  const btn = el.querySelector('.lock-btn');
+  // Deux boutons à appui long : le cadenas débloque, « +1 répétition » prolonge sans débloquer.
+  const holdable = [
+    [el.querySelector('.lock-btn'), () => { touchLocked = false; renderTouchLock(); }],
+    [el.querySelector('.lock-extend'), () => { extendLive(); if (live) updateExtend(liveStep()); }],
+  ];
   const pointers = new Set();
-  let hold = null; // { id, x0, y0, timer }
-  const cancel = () => { if (hold) clearTimeout(hold.timer); hold = null; btn.classList.remove('holding'); };
+  let hold = null; // { id, x0, y0, timer, btn }
+  const cancel = () => { if (hold) { clearTimeout(hold.timer); hold.btn.classList.remove('holding'); } hold = null; };
   const swallow = (e) => { if (e.cancelable) e.preventDefault(); e.stopPropagation(); };
   for (const type of ['click', 'dblclick', 'contextmenu', 'touchstart', 'touchmove', 'touchend', 'gesturestart', 'wheel']) {
     el.addEventListener(type, swallow, { passive: false });
@@ -756,9 +771,11 @@ function renderTouchLock() {
     swallow(e);
     pointers.add(e.pointerId);
     if (pointers.size > 1) { cancel(); return; } // plusieurs contacts = tissu, pas un doigt
-    if (!btn.contains(e.target)) return;
+    const target = holdable.find(([b]) => !b.hidden && b.contains(e.target));
+    if (!target) return;
     cancel();
-    hold = { id: e.pointerId, x0: e.clientX, y0: e.clientY, timer: setTimeout(() => { hold = null; touchLocked = false; renderTouchLock(); }, UNLOCK_MS) };
+    const [btn, action] = target;
+    hold = { id: e.pointerId, x0: e.clientX, y0: e.clientY, btn, timer: setTimeout(() => { btn.classList.remove('holding'); hold = null; action(); }, UNLOCK_MS) };
     btn.classList.add('holding');
   });
   el.addEventListener('pointermove', (e) => {
@@ -787,6 +804,48 @@ function nextStep() {
   const cur = stepAt(live.track.starts, live.track.end, audio.currentTime);
   if (cur >= 0 && cur < live.session.steps.length) live.skipped.add(cur);
   seekToStep(cur + 1);
+}
+
+// Prolonger en direct : la piste est regravée avec les étapes ajoutées (ou retirées) et
+// reprend au même instant. Les étapes déjà passées gardent leur position dans la piste.
+function reshapeSession(next) {
+  if (!live || next === live.session) return;
+  let track;
+  try {
+    track = assemble(next.steps, audioAssets.index, audioAssets.pack, { voice: load().settings.annonces === 'voix' });
+  } catch (e) {
+    alert(`Impossible d'ajouter la répétition : ${e.message}`);
+    return;
+  }
+  const pos = audio.currentTime;
+  const wasPlaying = !audio.paused;
+  const oldUrl = live.url;
+  live.session = next;
+  live.track = track;
+  live.url = URL.createObjectURL(new Blob([track.bytes], { type: 'audio/mpeg' }));
+  live.swapping = true;
+  audio.src = live.url;
+  audio.currentTime = pos;
+  const done = () => {
+    if (!live || !live.swapping) return;
+    if (Math.abs(audio.currentTime - pos) > 0.5) audio.currentTime = pos;
+    live.swapping = false;
+  };
+  audio.addEventListener('loadedmetadata', done, { once: true });
+  setTimeout(done, 3000);
+  if (wasPlaying) audio.play().catch((e) => { if (e.name !== 'AbortError') alert(`Lecture impossible : ${e.message}`); });
+  URL.revokeObjectURL(oldUrl);
+  saveLive();
+  if (current === 'live') render();
+}
+const liveStep = () => (live ? stepAt(live.track.starts, live.track.end, audio.currentTime) : -1);
+function extendLive() {
+  const i = liveStep();
+  if (live && canExtend(live.session, i)) reshapeSession(extend(live.session, i, audio.currentTime - live.track.starts[i]));
+}
+function retractLive() {
+  const i = liveStep();
+  if (live && canRetract(live.session, i)) reshapeSession(retract(live.session, i));
 }
 
 function setupMediaSession() {
@@ -818,12 +877,12 @@ function updateMediaMetadata(i) {
 }
 
 const anchor = () => {
-  if (live && !live.done && live.anchors.length < 1000) live.anchors.push([audio.currentTime, Date.now()]);
+  if (live && !live.swapping && !live.done && live.anchors.length < 1000) live.anchors.push([audio.currentTime, Date.now()]);
 };
 audio.addEventListener('seeked', anchor);
 audio.addEventListener('playing', anchor);
 audio.addEventListener('timeupdate', () => {
-  if (!live) return;
+  if (!live || live.swapping) return;
   live.maxTime = Math.max(live.maxTime, audio.currentTime);
   if (Date.now() - lastLiveSave > 5000) saveLive();
   const i = stepAt(live.track.starts, live.track.end, audio.currentTime);
@@ -845,9 +904,41 @@ audio.addEventListener('play', () => {
   if (current === 'live') render();
 });
 
+// Bouton « +1 répétition » : pendant la récupération seulement. Elle devient la marche du
+// palier, puis une course, puis une nouvelle récupération.
+const repLabel = (st) => `marche ${minutesLabel(st.walk.duration)}, puis ${minutesLabel(st.run.duration)} de course`;
+function updateExtend(i) {
+  const box = document.getElementById('extend');
+  const st = extendState(live.session);
+  const can = canExtend(live.session, i);
+  const undo = canRetract(live.session, i);
+  const show = can || undo;
+  if (box) {
+    box.hidden = !show || touchLocked; // bloqué : le bouton passe sur le calque (appui long)
+    if (show) {
+      const done = st.extra ? `<b>+${st.extra} ajoutée${st.extra > 1 ? 's' : ''}</b> · ` : '';
+      const info = can
+        ? `${done}Tu te sens bien ? Ta récup devient la ${repLabel(st)}.${st.left < MAX_EXTRA ? ` Encore ${st.left} possible${st.left > 1 ? 's' : ''}.` : ''}`
+        : `${done}Marche, puis ${minutesLabel(st.run.duration)} de course.`;
+      const key = `${can}|${undo}|${info}`;
+      if (box.dataset.key !== key) {
+        box.dataset.key = key;
+        box.innerHTML = `${can ? '<button class="extend-btn" data-extend>+1 répétition</button>' : ''}
+          <p class="extend-info">${info}${undo ? ' <button class="linkbtn" data-unextend>Annuler</button>' : ''}</p>`;
+      }
+    }
+  }
+  const lockBtn = document.querySelector('#touchlock .lock-extend');
+  if (lockBtn) {
+    lockBtn.hidden = !can;
+    if (can) lockBtn.querySelector('small').textContent = `Ta récup devient la ${repLabel(st)}${st.extra ? ` · +${st.extra} déjà` : ''}`;
+  }
+}
+
 // Affichage du lecteur : relu à chaque image depuis la position de la piste, donc sans dérive.
 function tick() {
   if (current !== 'live' || !live) return;
+  if (live.swapping) { requestAnimationFrame(tick); return; }
   const { starts, end } = live.track;
   const steps = live.session.steps;
   const t = audio.currentTime;
@@ -879,6 +970,7 @@ function tick() {
     const n = steps[i + 1];
     el('next').innerHTML = n ? `<span class="muted">Ensuite</span> ${esc(KINDS[n.kind].label)} · ${minutesLabel(n.duration)}` : 'Dernière étape';
   }
+  updateExtend(i);
   el('stepno').textContent = i < 0 ? 'Départ' : i >= steps.length ? 'Fin' : `Étape ${i + 1}/${steps.length} · ${KINDS[steps[i].kind].label}`;
   el('progress').style.width = `${Math.min(100, ((t - starts[0]) / (end - starts[0])) * 100)}%`;
   el('elapsed').textContent = mmss(Math.max(0, t - starts[0]));
@@ -1111,7 +1203,7 @@ const screens = {
 
   live() {
     const playing = !audio.paused;
-    const interrupted = !playing && live && !live.userPaused && audio.currentTime < live.track.end;
+    const interrupted = !playing && live && !live.userPaused && !live.swapping && audio.currentTime < live.track.end;
     return `
       <div class="live" id="live" data-effort="marche">
         <div class="live-top"><span id="stepno"></span><span><span class="gpsdot" id="gpsdot"></span><span id="gpsstate"></span></span></div>
@@ -1119,6 +1211,7 @@ const screens = {
         <p class="now" id="now"></p>
         <p class="count" id="count"></p>
         <p class="next" id="next"></p>
+        <div class="extend" id="extend" hidden></div>
         <div class="bar"><div id="progress"></div></div>
         <div class="live-stats">
           <div><b id="dist">0,00</b><span>km</span></div>
@@ -1146,6 +1239,7 @@ const screens = {
       <div class="card">
         <p><strong>${esc(b.sessionName)}</strong></p>
         <p class="muted">${mmss(b.elapsedSec)} de séance · ${b.completedSteps} étape(s) sur ${b.steps.length}${b.skipped.length ? ` · ${b.skipped.length} passée(s)` : ''}</p>
+        ${b.extra ? `<p class="small">${extraLine(b)}</p>` : ''}
         ${b.trace ? `<div class="map" data-map="bilan"></div>${b.gpsIncomplet ? '<p class="muted small">En pointillés : écran verrouillé, le GPS ne suivait plus.</p>' : ''}` : ''}
         ${b.distanceSource === 'gps' ? `<p class="small">GPS : ${b.distanceKm.toLocaleString('fr-FR')} km${b.allureSecKm ? ` · ${allure(b.allureSecKm)}` : ''}${b.gpsIncomplet ? ' · <strong>incomplet</strong> (écran verrouillé un moment)' : ''}</p>` : ''}
         ${b.deniveleM != null ? `<p class="small">Dénivelé : <b>+${b.deniveleM} m</b> <span class="muted">(mesuré par le téléphone${b.gpsIncomplet ? ', incomplet' : ''})</span></p>` : ''}
@@ -1517,6 +1611,7 @@ function go(screen) {
       elapsedSec,
       completedSteps: completed,
       skipped: [...live.skipped],
+      ...(extraSummary(live.session, completed) || {}),
       distanceKm: gps.distanceKm,
       distanceEstimee: false,
       distanceSource: gps.distanceKm ? 'gps' : null,
@@ -1778,6 +1873,10 @@ document.addEventListener('click', (e) => {
     }
   } else if ('skip' in ds) {
     nextStep();
+  } else if ('extend' in ds) {
+    extendLive();
+  } else if ('unextend' in ds) {
+    retractLive();
   } else if ('questionnaire' in ds) {
     openQuestionnaire();
   } else if (ds.qsport) {
