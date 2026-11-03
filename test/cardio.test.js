@@ -2,7 +2,7 @@ process.env.TZ = 'Europe/Paris';
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { bodyText, parseSamples, importMessage } from '../worker/src/cardio.js';
-import { stepTimes, summarize, summarizeMontre, montreStale, MONTRE_V, montreLine, splits, mergeDistance, recovery, recoveryAt, zoneLimits, zoneTimes, windowOf, cardioText } from '../public/js/cardio.js';
+import { stepTimes, summarize, summarizeMontre, montreStale, MONTRE_V, montreLine, splits, mergeDistance, recovery, recoveryAt, zoneLimits, zoneTimes, windowOf, cardioText, swimWindow, dayRange, applySwim } from '../public/js/cardio.js';
 import { nextRunLevel } from '../public/js/plan.js';
 import { seanceText } from '../public/js/ia.js';
 
@@ -295,4 +295,56 @@ test('valeurs en notation scientifique (« 1,2e-05 ») lues avec leur exposant',
   assert.deepEqual(r.autres.dist.map((x) => x[1]), [0.000012, 0.015]);
   assert.deepEqual(r.sources.dist.noms, ['Apple Watch de Rami']);
   assert.equal(parseSamples('kcal;2026-11-02T18:01:00+01:00;3.5E+1;Apple Watch', NOW2).autres.kcal[0][1], 35);
+});
+
+// --- Natation en piscine (Apple Watch, séance « Piscine ») ---------------------------------
+
+const lap = (i, min = 0) => `2026-11-02T18:${String(min + i).padStart(2, '0')}:00+01:00`;
+
+test('Natation : « nage » et « mouvements » lus en colonnes, jamais pris pour de la distance de course', () => {
+  const text = [
+    '#dates nage', lap(0), lap(1), lap(2),
+    '#valeurs nage', '25', '25', '0,025', // la 3e en km
+    '#sources nage', 'Apple Watch de Rami', 'Apple Watch de Rami', 'Apple Watch de Rami',
+    '#dates mouvements', lap(0), lap(1),
+    '#valeurs mouvements', '18', '21',
+    'Distance de nage;2026-11-02T18:05:00+01:00;25;Apple Watch de Rami', // ancien format avec le Type
+  ].join('\n');
+  const { autres } = parseSamples(text, NOW);
+  assert.equal(autres.dist.length, 0);
+  assert.deepEqual(autres.nage.map((x) => x[1]), [25, 25, 25, 25]);
+  assert.deepEqual(autres.mvt.map((x) => x[1]), [18, 21]);
+  assert.match(importMessage([], 0, autres, {}), /4 de nage, 2 de mouvements de nage/);
+});
+
+test('Natation : plage de la séance trouvée dans les longueurs du jour, longueurs et durée préremplies', () => {
+  const t = (iso) => Date.parse(iso);
+  // 20 longueurs, une par minute de 18:00 à 18:19, puis une nage isolée le soir (à écarter).
+  const nage = Array.from({ length: 20 }, (_, i) => [t(lap(i)), 25]);
+  nage.push([t('2026-11-02T21:00:00+01:00'), 25], [t('2026-11-02T21:01:00+01:00'), 25]);
+  const [from, to] = dayRange('2026-11-02');
+  const w = swimWindow(nage, from, to);
+  assert.deepEqual(w, [t(lap(0)), t(lap(19)) + 60_000]);
+  assert.equal(swimWindow([[t(lap(0)), 25]], from, to), null);
+
+  const mvt = nage.slice(0, 20).map(([x]) => [x, 20]);
+  const h = { sport: 'natation', source: 'manuelle', date: '2026-11-02', swim: { bassinM: 25, longueurs: 18, longueursSource: 'plan' }, fenetre: w };
+  const m = summarizeMontre(h, { nage, mvt, kcal: [[t(lap(3)), 150]] });
+  assert.equal(m.nageM, 500);
+  assert.equal(m.mvt, 400);
+  assert.equal(m.kcal, 150);
+  h.montre = m;
+  applySwim(h);
+  assert.equal(h.swim.longueurs, 20);
+  assert.equal(h.distanceKm, 0.5);
+  assert.equal(h.elapsedSec, 20 * 60);
+  // Saisie à la main : la montre ne l'écrase pas.
+  const h2 = { ...h, swim: { bassinM: 25, longueurs: 22, longueursSource: 'manuelle' }, dureeSource: 'manuelle', elapsedSec: 3000 };
+  applySwim(h2);
+  assert.equal(h2.swim.longueurs, 22);
+  assert.equal(h2.elapsedSec, 3000);
+  // Le cardio se rattache à la plage trouvée.
+  assert.deepEqual(windowOf(h), w);
+  const fc = Array.from({ length: 30 }, (_, i) => [w[0] + i * 30_000, 130 + (i % 5)]);
+  assert.equal(summarize(h, fc).n, 30);
 });

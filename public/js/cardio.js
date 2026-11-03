@@ -31,6 +31,7 @@ export function stepTimes(anchors, starts, end, reached) {
 
 // Plage horaire de la séance (ms), ou null si on ne connaît pas l'heure (séance saisie à la main).
 export function windowOf(h) {
+  if (h?.fenetre?.length === 2) return h.fenetre; // natation : plage trouvée dans les longueurs de la montre
   if (h?.stepMs?.length >= 2) return [h.stepMs[0], h.stepMs.at(-1)];
   if (h?.source !== 'guidee' || !/T\d{2}:\d{2}/.test(String(h.date))) return null;
   const start = new Date(h.date).getTime();
@@ -144,6 +145,11 @@ export function summarizeMontre(h, autres) {
   if (kcal >= 1) m.kcal = Math.round(kcal);
   const puiss = inside('puiss').filter((v) => v > 0);
   if (puiss.length >= 3) m.puissance = Math.round(sum(puiss) / puiss.length);
+  // Natation en piscine : distance à la nage (m) et mouvements de bras.
+  const nage = sum(inside('nage'));
+  if (nage >= 10) m.nageM = Math.round(nage);
+  const mvt = sum(inside('mvt'));
+  if (mvt >= 10) m.mvt = Math.round(mvt);
   const pas = sum(inside('pas'));
   const minutes = (w[1] - w[0]) / 60000;
   if (pas >= 50 && minutes >= 1) m.cadence = Math.round(pas / minutes);
@@ -177,6 +183,51 @@ export function splits(dist) {
   return { km, ...(rest >= 0.1 ? { fin: { km: rest, sec: Math.round((end - lastCut) / 1000) } } : {}) };
 }
 
+// Natation : la séance saisie à la main n'a pas d'heure. La montre enregistre une mesure de
+// « distance à la nage » par longueur : leur plage horaire ce jour-là donne celle de la séance
+// (pauses au bord comprises). Deux nages à plus de 30 min d'écart sont deux séances : on garde
+// la plus longue. [début, fin] en ms, ou null.
+const SWIM_GAP = 30 * 60_000;
+export function swimWindow(nage, from, to) {
+  const pts = (nage || []).filter(([t, v]) => t >= from && t < to && v > 0).sort((a, b) => a[0] - b[0]);
+  if (pts.length < 2) return null;
+  const groups = [[pts[0]]];
+  for (let i = 1; i < pts.length; i++) {
+    if (pts[i][0] - pts[i - 1][0] > SWIM_GAP) groups.push([]);
+    groups.at(-1).push(pts[i]);
+  }
+  const best = groups.reduce((a, g) => (g.reduce((x, p) => x + p[1], 0) > a.reduce((x, p) => x + p[1], 0) ? g : a));
+  if (best.length < 2) return null;
+  // Fin : début de la dernière longueur + durée d'une longueur (écart médian, 2 min au plus).
+  const gaps = best.slice(1).map((p, i) => p[0] - best[i][0]).sort((a, b) => a - b);
+  const lap = Math.min(gaps[Math.floor(gaps.length / 2)], 120_000);
+  return [best[0][0], best.at(-1)[0] + lap];
+}
+
+// Journée (heure du téléphone) d'une séance datée « AAAA-MM-JJ » : [début, fin] en ms.
+export function dayRange(date) {
+  const d = String(date || '').slice(0, 10);
+  const start = new Date(`${d}T00:00:00`).getTime();
+  return Number.isFinite(start) ? [start, start + 86400_000] : null;
+}
+
+// Longueurs et durée lues par la montre, reportées dans la saisie de natation sauf si la
+// personne les a tapées elle-même (la montre peut rater une longueur : la saisie prime).
+export function applySwim(h) {
+  const m = h.montre;
+  if (!h.swim || !m?.nageM) return;
+  const bassin = h.swim.bassinM || 25;
+  if (h.swim.longueursSource !== 'manuelle') {
+    h.swim.longueurs = Math.round(m.nageM / bassin);
+    h.swim.longueursSource = 'montre';
+    h.distanceKm = (h.swim.longueurs * bassin) / 1000;
+  }
+  if (h.dureeSource !== 'manuelle' && h.fenetre) {
+    h.elapsedSec = Math.max(1, Math.round((h.fenetre[1] - h.fenetre[0]) / 60000)) * 60;
+    h.dureeSource = 'montre';
+  }
+}
+
 export function montreLine(m) {
   if (!m) return '';
   return [
@@ -184,6 +235,8 @@ export function montreLine(m) {
     m.kcal && `${m.kcal} kcal`,
     m.puissance && `${m.puissance} W`,
     m.cadence && `${m.cadence} pas/min`,
+    m.nageM && `${m.nageM} m nagés`,
+    m.mvt && `${m.mvt} mouvements`,
   ].filter(Boolean).join(' · ');
 }
 
