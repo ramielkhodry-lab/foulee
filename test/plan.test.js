@@ -181,3 +181,53 @@ test('afterBilan d’une autre activité : où passe la séance', () => {
   assert.match(r.titre, /Course décalée au lundi 2 novembre/);
   assert.ok(r.conseils.length);
 });
+
+// --- Décaler / avancer une séance (settings.decalages) ---------------------------
+import { moveOptions } from '../public/js/plan.js';
+const Q_FRERE = { sports: ['course', 'muscu'], joursCourse: [1, 4], joursMuscu: [2, 6], objectifCourse: '5km' };
+
+test('décaler une muscu du mardi au mercredi : retirée du mardi, posée le mercredi', () => {
+  const from = '2026-11-03'; // mardi
+  const base = upcoming([], {}, from, 14, Q_FRERE);
+  const muscu = base.find((p) => p.date === from);
+  assert.equal(muscu.sport, 'muscu');
+  const opts = moveOptions([], {}, from, Q_FRERE, muscu);
+  const mer = opts.find((o) => o.date === '2026-11-04');
+  assert.ok(mer, 'mercredi libre proposé');
+  assert.ok(!opts.some((o) => o.date === '2026-11-05'), 'jeudi = course : pas proposé');
+  const plan = upcoming([], { decalages: mer.decalages }, from, 14, Q_FRERE);
+  assert.equal(plan.find((p) => p.date === from).sport, 'repos');
+  const moved = plan.find((p) => p.date === '2026-11-04');
+  assert.equal(moved.sport, 'muscu');
+  assert.deepEqual(moved.moved, { from });
+  assert.match(moved.reason, /Décalée du mardi 3 novembre/);
+  assert.equal(plan.filter((p) => p.sport === 'muscu').length, base.filter((p) => p.sport === 'muscu').length);
+});
+
+test('avancer une course à aujourd’hui ; jamais deux courses sans repos entre', () => {
+  const from = '2026-11-03'; // mardi, course jeudi 5
+  const q = { ...Q_FRERE, joursMuscu: [6] };
+  const base = upcoming([], {}, from, 14, q);
+  const jeudi = base.find((p) => p.date === '2026-11-05');
+  const opts = moveOptions([], {}, from, q, jeudi);
+  assert.ok(opts.some((o) => o.date === from), 'avancer à aujourd’hui');
+  assert.ok(!opts.some((o) => o.date === '2026-11-09' || o.date === '2026-11-08' || o.date === '2026-11-10'), 'pas collé à la course du lundi 9');
+  // Couru hier : pas de course aujourd'hui.
+  const hier = [run('2026-11-02', 2)];
+  const j2 = upcoming(hier, {}, from, 14, q).find((p) => p.date === '2026-11-05');
+  assert.ok(!moveOptions(hier, {}, from, q, j2).some((o) => o.date === from));
+});
+
+test('décalage annulé par retour au jour d’origine, et oublié une fois la séance faite', () => {
+  const from = '2026-11-03';
+  const muscu = upcoming([], {}, from, 14, Q_FRERE).find((p) => p.date === from);
+  const mer = moveOptions([], {}, from, Q_FRERE, muscu).find((o) => o.date === '2026-11-04');
+  const settings = { decalages: mer.decalages };
+  const moved = upcoming([], settings, from, 14, Q_FRERE).find((p) => p.date === '2026-11-04');
+  const back = moveOptions([], settings, from, Q_FRERE, moved).find((o) => o.back);
+  assert.equal(back.date, from);
+  assert.deepEqual(back.decalages, []);
+  // Faite le mardi malgré tout : le décalage ne sert plus.
+  const plan = upcoming([{ sport: 'muscu', date: from, exercices: [] }], settings, from, 14, Q_FRERE);
+  assert.notEqual(plan.find((p) => p.date === '2026-11-04')?.sport, 'muscu');
+});

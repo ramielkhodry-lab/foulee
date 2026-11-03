@@ -10,7 +10,7 @@ import { iaInput, pendingIA, failedIA, failureMessage } from './ia.js';
 import { tipsOf, tipsSource, hasIA } from './conseils.js';
 import { GOALS_MUSCU, LIEUX, NIVEAUX_MUSCU, MUSCLES, alternatives, byId, muscuPlan, nextSeance, nextLoad, tonnage } from './muscu.js';
 import { createGuided, currentExercise, suggestedReps, setDone, skipExercise, restLeft, adjustRest, endRest, finish, elapsedSec as guidedElapsed, setsDone, setsTotal, restTrack } from './muscu-live.js';
-import { upcoming, planOptions, nextRunLevel, runLevel, afterBilan, HORIZON, GOALS_RUN, START_RUN, GOALS_SWIM, START_SWIM, LEVELS } from './plan.js';
+import { upcoming, moveOptions, planOptions, nextRunLevel, runLevel, afterBilan, HORIZON, GOALS_RUN, START_RUN, GOALS_SWIM, START_SWIM, LEVELS } from './plan.js';
 
 const app = document.getElementById('app');
 const audio = document.getElementById('player');
@@ -61,6 +61,9 @@ const ACTIVITES = ['Padel', 'Vélo', 'Foot', 'Tennis', 'Randonnée', 'Marche'];
 const muscuCta = () => `<button class="cta muscu" data-muscugo><span>${savedGuided() ? 'Reprendre la séance' : 'Démarrer la séance'}</span><i>›</i></button>
   <button class="day-link" data-logplan="muscu">Déjà faite ? La noter sans guidage ›</button>`;
 const autreLink = (p) => `<button class="day-link" data-autre="${p.sport}">J'ai fait autre chose à la place ›</button>`;
+// Avancer ou décaler une séance prévue, aujourd'hui ou plus tard, quel que soit le sport.
+const moveLink = (p) => `<button class="day-link" data-move="${esc(p.date)}|${p.sport}">${p.moved ? 'Changer de jour ou remettre au ' + esc(shortDayName(p.moved.from)) : 'Avancer ou décaler cette séance'} ›</button>`;
+const shortDayName = (iso) => new Date(`${iso}T12:00`).toLocaleDateString('fr-FR', { weekday: 'long', day: 'numeric' });
 const kgLabel = (kg) => `${String(kg).replace('.', ',')} kg`;
 // « 3 × 8-12 · 40 kg » : la dose d'un exercice prévu.
 const dose = (x) => `${x.series} × ${x.min}–${x.max}${x.unite === 's' ? ' s' : ''}${x.poids ? ` · ${kgLabel(x.poids)}` : x.materiel === 'corps' ? '' : ' · charge à trouver'}`;
@@ -87,6 +90,7 @@ function todayHero(p) {
         <ol class="hero-steps">${p.plan.map((l) => `<li>${esc(l)}</li>`).join('')}</ol>
         ${whyTips(p)}
         ${isToday ? '<button class="btn-swim" data-logplan="natation">Noter ma séance</button>' : ''}
+        ${moveLink(p)}
       </section>`;
   }
   if (p.sport === 'muscu') {
@@ -98,6 +102,7 @@ function todayHero(p) {
         ${exoList(p)}
         ${whyTips(p)}
         ${isToday ? `${muscuCta()}${autreLink(p)}` : ''}
+        ${moveLink(p)}
       </section>`;
   }
   const mins = Math.round(total(p.steps) / 60);
@@ -112,6 +117,7 @@ function todayHero(p) {
       ${whyTips(p)}
       ${isToday ? `<button class="btn-primary" data-startplan="${esc(p.date)}">Démarrer la séance</button>
       <button class="btn-ghost" data-logplan="course" style="width:100%;margin-top:6px">Faite sans l'app : la noter</button>` : `<button data-startplan="${esc(p.date)}" style="width:100%">La faire maintenant</button>`}
+      ${moveLink(p)}
     </section>`;
 }
 
@@ -132,7 +138,7 @@ function planRow(p, showNow = false) {
       : `<p class="small">${esc(stepsSummary(p.steps))}</p>`;
   return `
     <details class="hist plan-row"><summary class="li">${icon(p.sport)}<div class="li-main">${main}</div><span class="li-side ${p.sport}">${side}</span></summary>
-      <div class="li-more">${more}<p class="muted small">${esc(p.reason)}</p></div></details>
+      <div class="li-more">${more}<p class="muted small">${esc(p.reason)}</p>${moveLink(p)}</div></details>
     ${showNow ? `<button class="btn-ghost small-btn" data-startplan="${esc(p.date)}">La faire maintenant ›</button>` : ''}`;
 }
 
@@ -232,6 +238,54 @@ function cardioDetail(h) {
       </div>
     </div>`;
 }
+// Avancer ou décaler : les jours possibles, d'un toucher.
+function moveSheet(p, opts) {
+  const t = today();
+  const label = (d) => (d === t ? "Aujourd'hui" : d === addDays(t, 1) ? 'Demain' : dateLabel(d));
+  const what = { course: 'Course', natation: 'Natation', muscu: 'Muscu' }[p.sport];
+  return `
+    <div class="hr-sheet move-sheet ${p.sport}" role="dialog" aria-label="Avancer ou décaler">
+      <div class="hr-sheet-in">
+        <div class="hr-sheet-top"><h2>${what} · ${esc(label(p.date))}</h2><button class="hr-close" data-moveclose aria-label="Fermer">✕</button></div>
+        <p class="muted">Choisis le nouveau jour. La suite du programme se recalcule, rien n'est sauté ni fait en double.</p>
+        ${opts.length ? `<div class="move-days">${opts.map((o, i) => `<button class="option${o.back ? ' back' : ''}" data-moveto="${i}"><span><span>${esc(label(o.date))}</span>${o.back ? '<span class="muted">Son jour prévu au départ</span>' : ''}</span><span class="go">›</span></button>`).join('')}</div>`
+          : '<p>Aucun jour libre dans les 7 jours qui suivent.</p>'}
+        <p class="muted small">Ne sont proposés que les jours sans autre séance${p.sport === 'course' ? ', avec un jour de repos avant et après chaque course' : ''}.</p>
+      </div>
+    </div>`;
+}
+let moveCtx = null;
+function openMoveSheet(key) {
+  const [date, sport] = key.split('|');
+  const d = load();
+  const p = planFor(d).find((x) => x.date === date && x.sport === sport);
+  if (!p) return;
+  const opts = moveOptions(d.history, d.settings, today(), d.profile.questionnaire, p);
+  moveCtx = { opts };
+  closeMoveSheet();
+  document.body.insertAdjacentHTML('beforeend', moveSheet(p, opts));
+  document.body.classList.add('sheet-open');
+}
+function closeMoveSheet() {
+  document.querySelector('.move-sheet')?.remove();
+  document.body.classList.remove('sheet-open');
+}
+document.addEventListener('click', (e) => {
+  const mv = e.target.closest('[data-move]');
+  if (mv) { e.stopPropagation(); return openMoveSheet(mv.dataset.move); }
+  if (e.target.closest('[data-moveclose]') || e.target.classList?.contains('move-sheet')) return closeMoveSheet();
+  const to = e.target.closest('[data-moveto]');
+  if (to && moveCtx) {
+    const o = moveCtx.opts[Number(to.dataset.moveto)];
+    const old = addDays(today(), -14);
+    update((d) => { d.settings.decalages = o.decalages.filter((m) => m.to >= old); });
+    moveCtx = null;
+    closeMoveSheet();
+    selDay = o.date;
+    weekScroll = null;
+    render();
+  }
+}, true);
 function openCardioDetail(id) {
   const h = id === 'bilan' ? bilan : load().history.find((x) => x.id === id);
   if (!h?.cardio) return;
@@ -480,6 +534,7 @@ function sessionCard(p) {
         </ul>
         ${whyTips(p)}
         ${isToday ? `<button class="cta swim" data-logplan="natation"><span>Noter ma séance</span><i>›</i></button>${autreLink(p)}` : ''}
+        ${moveLink(p)}
         <details class="day-detail natation"><summary>Le détail longueur par longueur <i>›</i></summary>
           <ol class="hero-steps">${p.plan.map((l) => `<li>${esc(l)}</li>`).join('')}</ol></details>
       </section>`;
@@ -498,7 +553,8 @@ function sessionCard(p) {
           ${fact('temps', `${p.repos} s de repos entre les séries`)}
         </ul>
         ${whyTips(p)}
-        ${isToday ? muscuCta() : ''}
+        ${isToday ? `${muscuCta()}${autreLink(p)}` : ''}
+        ${moveLink(p)}
         <details class="day-detail muscu"><summary>Exercices, charges et répétitions <i>›</i></summary>${exoList(p)}</details>
       </section>`;
   }
@@ -522,6 +578,7 @@ function sessionCard(p) {
            <button class="day-link" data-logplan="course">Faite sans l'app : la noter ›</button>
            ${autreLink(p)}`
         : `<button class="cta ghost" data-startplan="${esc(p.date)}"><span>La faire maintenant</span><i>›</i></button>`}
+      ${moveLink(p)}
     </section>`;
 }
 
