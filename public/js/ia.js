@@ -25,6 +25,7 @@ export function seanceText(h) {
     if (h.structure && h.sessionName) parts.push(h.structure);
     if (h.distanceKm) parts.push(`${h.distanceKm} km`);
     if (h.steps && h.completedSteps !== undefined) parts.push(`${h.completedSteps} étapes faites sur ${h.steps.length}`);
+    if (h.extraFaites) parts.push(`${h.extraFaites} répétition${h.extraFaites > 1 ? 's' : ''} ajoutée${h.extraFaites > 1 ? 's' : ''} en cours de séance (${h.repsPrevues + h.extraFaites} au lieu de ${h.repsPrevues})`);
   }
   if (h.cardio) parts.push(cardioText(h.cardio));
   if (h.montre?.puissance) parts.push(`puissance moyenne ${h.montre.puissance} W`);

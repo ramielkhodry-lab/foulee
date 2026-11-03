@@ -5,6 +5,7 @@
 import { muscuPlan, nextSeance, followingSeance } from './muscu.js';
 import { tipsOf, tipsSource, breathingIssue, conseils } from './conseils.js';
 import { runBpm } from './cardio.js';
+import { unfinished } from './extend.js';
 
 // Le programme se calcule à la volée sur cet horizon (12 semaines) : il n'a pas de fin,
 // la fenêtre avance avec les jours.
@@ -139,7 +140,7 @@ export function nextRunLevel(history, opts = {}) {
     return { level: 1, reason: 'Premier palier : alterner 2 min de course et 2 min de marche.' };
   }
   const last = runs.at(-1);
-  const incomplete = last.steps && last.completedSteps !== undefined && last.completedSteps < last.steps.length;
+  const incomplete = unfinished(last);
   if (hasPain(last) || last.difficulte === 5) {
     return { level: Math.min(max, Math.max(1, last.level - 1)), reason: `Ta dernière course était ${hasPain(last) ? 'douloureuse' : 'très dure'} : on redescend d'un palier.` };
   }
@@ -158,6 +159,11 @@ export function nextRunLevel(history, opts = {}) {
   if (last.difficulte && last.difficulte <= 2) {
     if (last.level >= max) return { level: max, reason: 'Objectif atteint : on garde ce palier.' };
     return { level: Math.min(max, last.level + 1), reason: `Dernière course facile : on passe au palier suivant.${cardioBonus(hr)}` };
+  }
+  // Répétition ajoutée et finie, séance notée moyenne (3) sans fatigue forte : elle vaut la
+  // deuxième séance de validation. Un seul palier de plus, jamais davantage.
+  if (last.extraFaites > 0 && last.difficulte === 3 && !(last.fatigue >= 4) && !(last.essoufflement >= 4) && last.level < max) {
+    return { level: last.level + 1, reason: `Tu as ajouté ${last.extraFaites} répétition${last.extraFaites > 1 ? 's' : ''} et noté la séance correcte : on passe au palier suivant.${cardioBonus(hr)}` };
   }
   const sameLevel = [];
   for (let i = runs.length - 1; i >= 0 && runs[i].level === last.level; i--) sameLevel.push(runs[i]);
