@@ -9,6 +9,7 @@ import { stepTimes, summarize, summarizeMontre, montreStale, MONTRE_V, mergeDist
 import { iaInput, pendingIA, failedIA, failureMessage } from './ia.js';
 import { tipsOf, tipsSource, hasIA } from './conseils.js';
 import { GOALS_MUSCU, LIEUX, NIVEAUX_MUSCU, MUSCLES, alternatives, byId, muscuPlan, nextSeance, nextLoad, tonnage } from './muscu.js';
+import { createGuided, currentExercise, suggestedReps, setDone, skipExercise, restLeft, adjustRest, endRest, finish, elapsedSec as guidedElapsed, setsDone, setsTotal, restTrack } from './muscu-live.js';
 import { upcoming, planOptions, nextRunLevel, runLevel, afterBilan, HORIZON, GOALS_RUN, START_RUN, GOALS_SWIM, START_SWIM, LEVELS } from './plan.js';
 
 const app = document.getElementById('app');
@@ -56,6 +57,9 @@ const SPORT_LABEL = { course: 'Course', natation: 'Natation', muscu: 'Musculatio
 // Activités courantes hors programme, proposées d'un toucher.
 const ACTIVITES = ['Padel', 'Vélo', 'Foot', 'Tennis', 'Randonnée', 'Marche'];
 // « J'ai fait autre chose » : sur la séance du jour, elle est décalée au lieu d'être sautée.
+// Muscu du jour : séance guidée (minuteur de récup) ; la saisie libre reste possible.
+const muscuCta = () => `<button class="cta muscu" data-muscugo><span>${savedGuided() ? 'Reprendre la séance' : 'Démarrer la séance'}</span><i>›</i></button>
+  <button class="day-link" data-logplan="muscu">Déjà faite ? La noter sans guidage ›</button>`;
 const autreLink = (p) => `<button class="day-link" data-autre="${p.sport}">J'ai fait autre chose à la place ›</button>`;
 const kgLabel = (kg) => `${String(kg).replace('.', ',')} kg`;
 // « 3 × 8-12 · 40 kg » : la dose d'un exercice prévu.
@@ -93,7 +97,7 @@ function todayHero(p) {
         <p class="hero-sub">${esc(p.title)} · ${p.repos} s de repos entre les séries</p>
         ${exoList(p)}
         ${whyTips(p)}
-        ${isToday ? `<button class="cta muscu" data-logplan="muscu"><span>Noter ma séance</span><i>›</i></button>${autreLink(p)}` : ''}
+        ${isToday ? `${muscuCta()}${autreLink(p)}` : ''}
       </section>`;
   }
   const mins = Math.round(total(p.steps) / 60);
@@ -488,7 +492,7 @@ function sessionCard(p) {
           ${fact('temps', `${p.repos} s de repos entre les séries`)}
         </ul>
         ${whyTips(p)}
-        ${isToday ? '<button class="cta muscu" data-logplan="muscu"><span>Noter ma séance</span><i>›</i></button>' : ''}
+        ${isToday ? muscuCta() : ''}
         <details class="day-detail muscu"><summary>Exercices, charges et répétitions <i>›</i></summary>${exoList(p)}</details>
       </section>`;
   }
@@ -1156,7 +1160,8 @@ const screens = {
       ${todayItem?.sport === 'natation' ? `<h3 style="margin-top:0">Prévu aujourd'hui</h3>
         <button class="option natation" data-logplan="natation"><span><span>Natation · ${todayItem.longueurs} longueurs</span><span class="muted">Pas de téléphone dans l'eau : note-la en sortant.</span></span><span class="go">+</span></button>` : ''}
       ${todayItem?.sport === 'muscu' ? `<h3 style="margin-top:0">Prévu aujourd'hui</h3>
-        <button class="option muscu" data-logplan="muscu"><span><span>${esc(todayItem.title)} · ${todayItem.exercices.length} exercices</span><span class="muted">Note charges et répétitions au fil des séries.</span></span><span class="go">+</span></button>` : ''}
+        <button class="option muscu" data-muscugo><span><span>${savedGuided() ? 'Reprendre · ' : ''}${esc(todayItem.title)} · ${todayItem.exercices.length} exercices</span><span class="muted">Guidée : minuteur de récup entre les séries, durée mesurée.</span></span><span class="go">▶</span></button>
+        <button class="option muscu" data-logplan="muscu"><span><span>La noter sans guidage</span><span class="muted">Séance déjà faite : charges et répétitions à la main.</span></span><span class="go">+</span></button>` : ''}
       <h3>Course guidée</h3>
       ${d.sessions.map((x) => `<button class="option" data-start="${esc(x.id)}"><span><span>${esc(x.name)}</span><span class="muted">${minutesLabel(total(x.steps))} · ${x.steps.length} étapes</span></span><span class="go">▶</span></button>`).join('')}
       <h3>Noter une séance faite</h3>
@@ -1227,6 +1232,60 @@ const screens = {
         <div class="live-extra">
           <button class="lockbtn" data-touchlock>🔒 Bloquer l'écran</button>
           <button data-finish>Terminer</button>
+        </div>
+      </div>`;
+  },
+
+  muscu() {
+    const s = guided;
+    if (!s) return '';
+    const n = s.exercices.length;
+    const x = currentExercise(s);
+    const unit = (e) => (e.unite === 's' ? 's' : 'répétitions');
+    const pct = Math.round((setsDone(s) / setsTotal(s)) * 100);
+    const head = `
+        <div class="live-top"><span>${esc(s.sessionName)}</span><span>⏱ <b id="mtime">${mmss(guidedElapsed(s))}</b></span></div>
+        <div class="bar"><div style="width:${pct}%"></div></div>`;
+    const end = '<button data-mfinish>Terminer la séance</button>';
+    if (s.phase === 'rest') {
+      return `
+      <div class="live mlive" id="mlive" data-phase="rest">${head}
+        <p class="now">Récup</p>
+        <p class="count" id="mrest">${mmss(Math.ceil(restLeft(s)))}</p>
+        <p class="next">Ensuite : <b>${esc(x.nom)}</b></p>
+        <p class="muted" style="margin:4px 0 0">Série ${s.set + 1}/${x.reps.length} · ${x.min} à ${x.max} ${unit(x)}${x.poids ? ` · ${kgLabel(x.poids)}` : ''}</p>
+        ${load().settings.son !== 'exclusif' ? '<p class="muted small" style="margin:10px 0 0">Signal à la fin de la récup : iPhone hors silencieux.</p>' : ''}
+        <div class="live-controls">
+          <button data-mrest="-15">−15 s</button>
+          <button data-mrest="15">+15 s</button>
+        </div>
+        <div class="live-extra">
+          <button class="mgo" data-mrestskip>Reprendre maintenant</button>
+          ${end}
+        </div>
+      </div>`;
+    }
+    const key = `${s.ex}:${s.set}`;
+    if (mDraft.key !== key) mDraft = { key, reps: suggestedReps(s) };
+    return `
+      <div class="live mlive" id="mlive" data-phase="work">${head}
+        <p class="mstep">Exercice ${s.ex + 1}/${n} · série ${s.set + 1}/${x.reps.length}</p>
+        <p class="mname">${esc(x.nom)}</p>
+        <p class="next">Objectif : ${x.min} à ${x.max} ${unit(x)}</p>
+        <p class="muted small" style="margin:4px 0 0">${esc(x.reason || '')}</p>
+        ${x.materiel === 'corps' ? '' : `<div class="kg mkg"><input id="mkg" type="number" inputmode="decimal" step="0.5" min="0" placeholder="?" value="${x.poids ?? ''}"><span>kg${x.materiel === 'halteres' ? ' par haltère' : ''}</span></div>`}
+        <div class="mstepper">
+          <button data-mreps="-1" aria-label="Une de moins">−</button>
+          <b id="mreps">${mDraft.reps}</b>
+          <button data-mreps="1" aria-label="Une de plus">+</button>
+        </div>
+        <p class="muted small" style="text-align:center;margin:0">${x.unite === 's' ? 'secondes tenues' : 'répétitions faites'}</p>
+        <div class="live-controls one">
+          <button class="mgo" data-msetdone>Série faite${s.set + 1 < x.reps.length || s.ex + 1 < n ? ` · récup ${s.repos} s` : ''}</button>
+        </div>
+        <div class="live-extra">
+          <button data-mskip>Passer l'exercice</button>
+          ${end}
         </div>
       </div>`;
   },
@@ -1344,7 +1403,7 @@ const screens = {
     const autre = b.sport === 'autre';
     return `
       <h1>${autre ? 'Autre activité' : b.sport === 'muscu' ? esc(b.sessionName) : swim ? 'Séance de natation' : b.fromPlan ? 'Course du programme' : 'Course libre'}</h1>
-      ${b.fromPlan ? '<p class="muted">Prérempli avec le programme du jour. Corrige ce qui a changé, puis note ton ressenti.</p>' : ''}
+      ${b.horaires ? `<p class="muted">Séance guidée · ${esc(b.horaires)}, durée mesurée. Séries notées pendant la séance : corrige si besoin, puis note ton ressenti.</p>` : b.fromPlan ? '<p class="muted">Prérempli avec le programme du jour. Corrige ce qui a changé, puis note ton ressenti.</p>' : ''}
       ${autre && b.remplace ? `<p class="muted">À la place de ta ${SPORT_LABEL[b.remplace].toLowerCase()} du jour. Elle sera décalée, pas sautée, et ce que tu notes ici ne fait pas monter ton programme.</p>` : ''}
       <div class="card">
         ${autre ? `<label for="activite" style="margin-top:0">Activité</label>
@@ -1574,15 +1633,16 @@ function placeWeek() {
 }
 
 // Onglet allumé pour chaque écran.
-const TAB_OF = { questionnaire: 'profil', edit: 'programme', live: 'demarrer', bilan: 'progression', saisie: 'progression', suite: 'programme', compte: 'profil' };
+const TAB_OF = { questionnaire: 'profil', edit: 'programme', live: 'demarrer', muscu: 'demarrer', bilan: 'progression', saisie: 'progression', suite: 'programme', compte: 'profil' };
 
 function render() {
   app.innerHTML = screens[current]();
   for (const b of document.querySelectorAll('#tabs button')) b.classList.toggle('on', b.dataset.tab === (TAB_OF[current] || current));
-  document.body.classList.toggle('is-live', current === 'live');
+  document.body.classList.toggle('is-live', current === 'live' || current === 'muscu');
   mountMaps();
   placeWeek();
   if (current === 'live') requestAnimationFrame(tick);
+  guidedLoop();
 }
 
 function go(screen) {
@@ -1823,6 +1883,7 @@ document.addEventListener('click', (e) => {
   } else if (ds.tab) {
     if (ds.tab === 'accueil') { selDay = today(); weekScroll = null; }
     if (current === 'live' && !audio.paused && !confirm('La séance continue en arrière-plan. Quitter l\'écran ?')) return;
+    if (current === 'saisie' && bilan?.source === 'guidee' && !confirm('Ta séance guidée ne sera pas enregistrée. Quitter quand même ?')) return;
     go(ds.tab === 'demarrer' && live && !live.done ? 'live' : ds.tab);
   } else if (ds.start) {
     startSession(findSession(ds.start));
@@ -2040,6 +2101,179 @@ document.addEventListener('change', (e) => {
   } else if (current === 'edit') {
     readEditor();
     render();
+  }
+});
+
+// --- Musculation guidée -------------------------------------------------------
+// « Démarrer » note l'heure de début, « Série faite » lance la récup, un signal (et un flash)
+// marque sa fin, « Terminer » note l'heure de fin et ouvre le bilan prérempli.
+
+const MUSCU_KEY = 'foulee.muscu';
+let guided = null;
+let mDraft = { key: null, reps: 0 };
+const restAudio = new Audio();
+restAudio.setAttribute('playsinline', '');
+let restUrl = null;
+let guidedTimer = null;
+
+function saveGuided() {
+  try {
+    if (guided && guided.phase !== 'done') localStorage.setItem(MUSCU_KEY, JSON.stringify(guided));
+    else localStorage.removeItem(MUSCU_KEY);
+  } catch {}
+}
+function savedGuided() {
+  if (guided && guided.phase !== 'done') return guided;
+  try {
+    const s = JSON.parse(localStorage.getItem(MUSCU_KEY));
+    return s && s.phase !== 'done' && Date.now() - s.startedAt < 4 * 3600 * 1000 ? s : null;
+  } catch {
+    return null;
+  }
+}
+
+function stopRestAudio() {
+  restAudio.pause();
+  if (restUrl) URL.revokeObjectURL(restUrl);
+  restUrl = null;
+}
+// Lancée dans le geste (« Série faite », ±15 s) : iOS refuse un son lancé plus tard par une minuterie.
+function playRest() {
+  stopRestAudio();
+  if (!audioAssets || !guided || guided.phase !== 'rest') return;
+  try {
+    const bytes = restTrack(restLeft(guided), audioAssets.index, audioAssets.pack);
+    restUrl = URL.createObjectURL(new Blob([bytes], { type: 'audio/mpeg' }));
+    applyAudioMode();
+    restAudio.src = restUrl;
+    restAudio.currentTime = 0;
+    restAudio.play().catch(() => {});
+  } catch {}
+}
+
+function flashMuscu() {
+  document.body.classList.remove('flash-muscu');
+  void document.body.offsetWidth;
+  document.body.classList.add('flash-muscu');
+  setTimeout(() => document.body.classList.remove('flash-muscu'), 1500);
+}
+
+function guidedLoop() {
+  clearInterval(guidedTimer);
+  guidedTimer = null;
+  if (current !== 'muscu' || !guided) return;
+  guidedTimer = setInterval(() => {
+    if (current !== 'muscu' || !guided) return guidedLoop();
+    const t = document.getElementById('mtime');
+    if (t) t.textContent = mmss(guidedElapsed(guided));
+    if (guided.phase !== 'rest') return;
+    const left = restLeft(guided);
+    if (left <= 0) {
+      endRest(guided);
+      saveGuided();
+      flashMuscu();
+      render();
+      return;
+    }
+    const r = document.getElementById('mrest');
+    if (r) r.textContent = mmss(Math.ceil(left));
+  }, 250);
+}
+
+function startGuided() {
+  if (!audioAssets) loadAudio().catch(() => {});
+  const resume = savedGuided();
+  if (resume) {
+    guided = resume;
+  } else {
+    const d = load();
+    const q = d.profile.questionnaire || {};
+    const p = planFor(d, 1).find((x) => x.sport === 'muscu' && x.date === today())
+      || muscuPlan(nextSeance(d.history, (q.joursMuscu || []).length), d.history, q, d.settings.muscuChoix || {});
+    const log = muscuLog(p);
+    guided = createGuided({ ...log, exercices: log.exercices.map((x, i) => ({ ...x, reason: p.exercices[i].reason })), repos: p.repos });
+  }
+  mDraft = { key: null, reps: 0 };
+  saveGuided();
+  keepAwake();
+  go('muscu');
+  if (guided.phase === 'rest') playRest();
+}
+
+function finishGuided() {
+  finish(guided);
+  stopRestAudio();
+  stopLiveExtras();
+  const g = guided;
+  const b = newManual('muscu');
+  const hm = (ms) => new Date(ms).toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' });
+  Object.assign(b, {
+    source: 'guidee',
+    fromPlan: true,
+    date: new Date(g.startedAt).toLocaleDateString('sv-SE'),
+    seance: g.seance,
+    sessionName: g.sessionName,
+    exercices: g.exercices.map(({ reason, ...x }) => ({ ...x, reps: [...x.reps] })),
+    elapsedSec: Math.max(60, Math.round(guidedElapsed(g) / 60) * 60),
+    horaires: `${hm(g.startedAt)} → ${hm(g.endedAt)}`,
+  });
+  guided = null;
+  saveGuided();
+  bilan = b;
+  go('saisie');
+}
+
+document.addEventListener('visibilitychange', () => {
+  if (current === 'muscu' && guided && document.visibilityState === 'visible') { keepAwake(); render(); }
+});
+
+document.addEventListener('click', (e) => {
+  const t = e.target.closest('button');
+  if (!t) return;
+  const ds = t.dataset;
+  if ('muscugo' in ds) return startGuided();
+  if (current !== 'muscu' || !guided) return;
+  if (ds.mreps) {
+    const x = currentExercise(guided);
+    const step = x.unite === 's' ? 5 : 1;
+    mDraft.reps = Math.max(1, Math.min(300, mDraft.reps + Number(ds.mreps) * step));
+    document.getElementById('mreps').textContent = mDraft.reps;
+  } else if ('msetdone' in ds) {
+    const x = currentExercise(guided);
+    const kg = parseFloat(String(document.getElementById('mkg')?.value ?? '').replace(',', '.'));
+    if (Number.isFinite(kg) && kg > 0) x.poids = Math.round(kg * 10) / 10;
+    setDone(guided, mDraft.reps);
+    if (guided.phase === 'done') return finishGuided();
+    saveGuided();
+    render();
+    playRest();
+  } else if (ds.mrest) {
+    adjustRest(guided, Number(ds.mrest));
+    saveGuided();
+    render();
+    playRest();
+  } else if ('mrestskip' in ds) {
+    endRest(guided);
+    stopRestAudio();
+    saveGuided();
+    render();
+  } else if ('mskip' in ds) {
+    if (!confirm('Passer les séries restantes de cet exercice ?')) return;
+    skipExercise(guided);
+    if (guided.phase === 'done') return finishGuided();
+    saveGuided();
+    render();
+  } else if ('mfinish' in ds) {
+    if (!setsDone(guided)) {
+      if (!confirm('Aucune série faite. Abandonner la séance ?')) return;
+      stopRestAudio();
+      stopLiveExtras();
+      guided = null;
+      saveGuided();
+      return go('accueil');
+    }
+    if (!confirm('Terminer la séance maintenant ?')) return;
+    finishGuided();
   }
 });
 
