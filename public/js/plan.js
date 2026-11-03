@@ -269,7 +269,18 @@ export function upcoming(history, settings, from, days = 14, q = null) {
   const done = new Set(history.map((h) => `${dateOnly(h.date)}|${h.sport === 'autre' ? h.remplace : h.sport || 'course'}`));
   const moved = reports(history, opts, from);
   const extra = Object.fromEntries(moved.filter((r) => r.date).map((r) => [r.date, r.sport]));
-  const isDay = (sport, jours, date, wd) => (jours.includes(wd) || extra[date] === sport) && !done.has(`${date}|${sport}`);
+  // Séances décalées à la main (settings.decalages) : retirées de leur jour, posées sur le nouveau.
+  const moves = activeMoves(settings.decalages, history, from);
+  const movedOut = new Set(moves.map((m) => `${m.from}|${m.sport}`));
+  const movedIn = Object.fromEntries(moves.map((m) => [m.to, m]));
+  const isDay = (sport, jours, date, wd) => (movedIn[date]
+    ? movedIn[date].sport === sport
+    : (jours.includes(wd) && !movedOut.has(`${date}|${sport}`)) || extra[date] === sport) && !done.has(`${date}|${sport}`);
+  const moveNote = (date, sport, reason) => {
+    const m = movedIn[date];
+    return m?.sport === sport ? `Décalée du ${shortDay(m.from)} à ta demande. ${reason || ''}`.trim() : reason;
+  };
+  const movedTag = (date, sport) => (movedIn[date]?.sport === sport ? { moved: { from: movedIn[date].from } } : {});
   // Note de report sur la première séance du sport remplacé.
   const notes = Object.fromEntries(moved.map((r) => [r.sport, reportNote(r)]));
   const takeNote = (sport, reason) => { const n = notes[sport]; delete notes[sport]; return n ? `${n} ${reason || ''}`.trim() : reason; };
@@ -296,7 +307,7 @@ export function upcoming(history, settings, from, days = 14, q = null) {
         out.push({ date, sport: 'repos', reason: 'Course prévue décalée : il faut un jour de repos entre deux courses.' });
       } else {
         const lvl = LEVELS[level - 1];
-        out.push({ date, sport: 'course', level, max: opts.maxLevel, title: lvl.label, steps: levelSteps(level), reason: takeNote('course', reason), ...takeTips('course') });
+        out.push({ date, sport: 'course', level, max: opts.maxLevel, title: lvl.label, steps: levelSteps(level), reason: moveNote(date, 'course', takeNote('course', reason)), ...takeTips('course'), ...movedTag(date, 'course') });
         runPlaced = date;
         // Hypothèse pour les séances suivantes : la séance se passe bien (difficulté 3).
         reason = 'Prévu si la séance précédente se passe bien. Recalculé après ton bilan.';
@@ -305,15 +316,62 @@ export function upcoming(history, settings, from, days = 14, q = null) {
         history = sim;
       }
     } else if (isDay('natation', joursNatation, date, wd)) {
-      out.push({ date, sport: 'natation', longueurs: swimLongueurs, bassin: swim.bassin, distance: swimLongueurs * swim.bassin, plan: swimPlan(swimLongueurs, swimFocus), focus: swimFocus, reason: takeNote('natation', swimReason), ...takeTips('natation') });
+      out.push({ date, sport: 'natation', longueurs: swimLongueurs, bassin: swim.bassin, distance: swimLongueurs * swim.bassin, plan: swimPlan(swimLongueurs, swimFocus), focus: swimFocus, reason: moveNote(date, 'natation', takeNote('natation', swimReason)), ...takeTips('natation'), ...movedTag(date, 'natation') });
       swimLongueurs = Math.min(opts.maxLongueurs, swimLongueurs + 2);
       swimReason = 'Prévu si la séance précédente se passe bien. Recalculé après ton bilan.';
     } else if (isDay('muscu', joursMuscu, date, wd)) {
       const m = muscuPlan(seance, history, q || {}, settings.muscuChoix || {});
-      out.push({ date, sport: 'muscu', ...m, reason: takeNote('muscu', firstMuscu.reason ?? m.reason), ...takeTips('muscu') });
+      out.push({ date, sport: 'muscu', ...m, reason: moveNote(date, 'muscu', takeNote('muscu', firstMuscu.reason ?? m.reason)), ...takeTips('muscu'), ...movedTag(date, 'muscu') });
       firstMuscu.reason = 'Charges recalculées après chaque séance notée.';
       seance = followingSeance(seance, joursMuscu.length);
+    } else {
+      const m = moves.find((x) => x.from === date && !done.has(`${date}|${x.sport}`));
+      if (m) out.push({ date, sport: 'repos', reason: `${SPORT_NOUN[m.sport]} décalée au ${shortDay(m.to)}.` });
     }
+  }
+  return out;
+}
+
+// Décalages encore utiles : pas annulés par une séance faite, nouveau jour pas encore passé.
+// Un seul par sport et par jour d'origine (le dernier choisi).
+export function activeMoves(list = [], history = [], from) {
+  const done = new Set(history.map((h) => `${dateOnly(h.date)}|${h.sport === 'autre' ? h.remplace : h.sport || 'course'}`));
+  const byKey = new Map();
+  for (const m of list || []) {
+    if (!m?.sport || !m.from || !m.to || m.from === m.to) continue;
+    byKey.set(`${m.from}|${m.sport}`, m);
+  }
+  const seen = new Set();
+  return [...byKey.values()].filter((m) => {
+    if (m.to < from || done.has(`${m.from}|${m.sport}`) || seen.has(m.to)) return false;
+    seen.add(m.to);
+    return true;
+  });
+}
+
+// Jours où une séance prévue peut aller (avancer ou décaler), de `from` à 7 jours après elle :
+// un jour sans autre séance ni séance déjà faite, et qui ne fait sauter aucune séance du même
+// sport (pour la course : un jour de repos avant et après). Rend [{ date, decalages }].
+export function moveOptions(history, settings, from, q, p) {
+  const list = settings.decalages || [];
+  const orig = p.moved?.from || p.date;
+  const others = list.filter((m) => !(m.from === orig && m.sport === p.sport));
+  const base = { ...settings, decalages: others };
+  const count = (plan) => plan.filter((x) => x.sport === p.sport).length;
+  const basePlan = upcoming(history, base, from, HORIZON, q);
+  const ref = count(basePlan);
+  const busy = new Set(history.map((h) => dateOnly(h.date)));
+  const out = [];
+  const last = addDays(p.date > orig ? p.date : orig, 7);
+  for (let d = from; d <= last; d = addDays(d, 1)) {
+    if (d === p.date || busy.has(d)) continue;
+    const decalages = d === orig ? others : [...others, { sport: p.sport, from: orig, to: d, at: Date.now() }];
+    const sim = upcoming(history, { ...settings, decalages }, from, HORIZON, q);
+    const here = sim.find((x) => x.date === d && x.sport !== 'repos');
+    if (!here || here.sport !== p.sport) continue;
+    if (d !== orig && basePlan.some((x) => x.date === d && x.sport !== 'repos')) continue;
+    if (count(sim) < ref) continue;
+    out.push({ date: d, back: d === orig, decalages });
   }
   return out;
 }

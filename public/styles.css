@@ -551,3 +551,11 @@ body.sheet-open { overflow: hidden; }
 .live-controls .mgo, .live-extra .mgo { background: var(--muscu); border-color: var(--muscu); color: var(--on-accent); }
 body.flash-muscu { animation: flash-muscu 1.5s ease-out; }
 @keyframes flash-muscu { 0%, 40% { background: var(--muscu); } 100% { background: var(--bg); } }
+
+/* Avancer ou décaler une séance */
+.move-days { margin: 14px 0 6px; }
+.move-sheet .option { background: rgba(255,255,255,.06); font-weight: 700; }
+.move-sheet .option.back .go { background: transparent; color: var(--ink); border: 1px solid rgba(255,255,255,.25); }
+.hero .day-link, .li-more .day-link { display: block; margin: 4px auto 0; }
+.move-sheet.muscu .option:not(.back) .go { background: var(--muscu); }
+.move-sheet.natation .option:not(.back) .go { background: var(--swim); color: #fff; }
