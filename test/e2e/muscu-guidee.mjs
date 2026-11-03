@@ -82,6 +82,23 @@ for (const [name, dev] of Object.entries(devices)) {
   const h = await page.evaluate(() => JSON.parse(localStorage.getItem('foulee.v1')).history.at(-1));
   if (h?.source !== 'guidee' || h.exercices.length !== 1 || h.exercices[0].reps.join() !== '13,13') errors.push(`${name} : historique ${JSON.stringify(h?.exercices)}`);
   if (await page.evaluate(() => localStorage.getItem('foulee.muscu'))) errors.push(`${name} : séance guidée pas effacée`);
+  if (!h.date.startsWith('2026-11-03T12:30:') || !h.endedAt.startsWith('2026-11-03T13:01:')) errors.push(`${name} : horaires ${h.date} → ${h.endedAt}`);
+  await page.click('[data-tab="progression"]');
+  await page.waitForSelector('.prog.muscu');
+  const prog = await page.textContent('.prog.muscu .hero-num');
+  if (prog !== '26rép.') errors.push(`${name} : progression ${prog}`);
+  if (!/13rép\.Squat/.test(await page.textContent('.records'))) errors.push(`${name} : records ${await page.textContent('.records')}`);
+  await page.screenshot({ path: `${out}/${name}-6-progression.png` });
+  // Séance guidée enregistrée sans heure (version du 3/11 midi) : l'heure est retrouvée.
+  await page.evaluate(() => {
+    const d = JSON.parse(localStorage.getItem('foulee.v1'));
+    d.history.push({ id: 'old', sport: 'muscu', source: 'guidee', date: '2026-11-02', horaires: '13:12 → 13:31', exercices: [] });
+    localStorage.setItem('foulee.v1', JSON.stringify(d));
+  });
+  await page.reload();
+  await page.waitForTimeout(500);
+  const old = await page.evaluate(() => JSON.parse(localStorage.getItem('foulee.v1')).history.find((x) => x.id === 'old'));
+  if (old.date !== '2026-11-02T13:12:00' || old.endedAt !== '2026-11-02T13:31:00') errors.push(`${name} : migration ${old.date} ${old.endedAt}`);
   await page.close();
 }
 await browser.close();

@@ -328,7 +328,7 @@ function historyRow(h, open = false) {
     h.douleur && `douleur : ${esc(h.douleur)}`,
   ].filter(Boolean);
   const side = sport === 'muscu'
-    ? (tonnage(h) ? `${Math.round(tonnage(h)).toLocaleString('fr-FR')}<small>kg</small>` : '')
+    ? (tonnage(h) ? `${Math.round(tonnage(h)).toLocaleString('fr-FR')}<small>kg</small>` : repsOf(h) ? `${repsOf(h)}<small>rép.</small>` : '')
     : sport === 'natation'
     ? (swimMeters(h) ? `${swimMeters(h)}<small>m</small>` : '')
     : h.distanceKm ? `${h.distanceKm.toLocaleString('fr-FR')}<small>km</small>` : h.elapsedSec ? `${Math.round(h.elapsedSec / 60)}<small>min</small>` : '';
@@ -361,6 +361,11 @@ const addDays = (iso, n) => {
 const mondayOf = (iso) => addDays(iso, -((new Date(`${iso}T12:00:00`).getDay() + 6) % 7));
 const sportOf = (h) => h.sport || 'course';
 const swimMeters = (h) => (h.swim?.longueurs ? h.swim.longueurs * (h.swim.bassinM || 25) : Math.round((h.distanceKm || 0) * 1000));
+// Répétitions faites (gainage en secondes non compté) : la mesure réelle d'une muscu au poids du corps.
+const repsOf = (h) => (h.exercices || []).filter((x) => x.unite !== 's').reduce((a, x) => a + (x.reps || []).reduce((s, r) => s + (Number(r) || 0), 0), 0);
+// Musculation : en kg dès qu'une charge a été notée, sinon en répétitions (0 kg au poids du corps ne dit rien).
+const muscuKey = (history) => (history.some((h) => sportOf(h) === 'muscu' && tonnage(h) > 0) ? 'kg' : 'reps');
+const UNIT_LABEL = { km: 'km', m: 'm', kg: 'kg', reps: 'rép.' };
 const fmtKm = (km) => (Math.round(km * 10) / 10).toLocaleString('fr-FR');
 
 // Totaux d'une semaine (lundi → dimanche) : km de course, mètres nagés, nombre de séances.
@@ -371,6 +376,7 @@ function weekTotals(history, monday) {
     km: inWeek.filter((h) => sportOf(h) === 'course').reduce((a, h) => a + (h.distanceKm || 0), 0),
     m: inWeek.filter((h) => sportOf(h) === 'natation').reduce((a, h) => a + swimMeters(h), 0),
     kg: inWeek.filter((h) => sportOf(h) === 'muscu').reduce((a, h) => a + tonnage(h), 0),
+    reps: inWeek.filter((h) => sportOf(h) === 'muscu').reduce((a, h) => a + repsOf(h), 0),
     n: inWeek.length,
   };
 }
@@ -561,10 +567,10 @@ function indicators(history) {
 }
 
 // Courbe des 8 dernières semaines (km de course ou mètres nagés).
-function weekCurve(history, kind) {
+function weekCurve(history, kind, unitKey) {
   const monday = mondayOf(today());
   const weeks = Array.from({ length: 8 }, (_, i) => addDays(monday, (i - 7) * 7));
-  const unit = { course: 'km', natation: 'm', muscu: 'kg' }[kind];
+  const unit = unitKey || { course: 'km', natation: 'm', muscu: 'kg' }[kind];
   const vals = weeks.map((w) => weekTotals(history, w)[unit]);
   const max = Math.max(...vals) || 1;
   const W = 320;
@@ -587,7 +593,7 @@ function weekCurve(history, kind) {
       ${pts.map(([x, y], i) => (vals[i] ? `<circle cx="${x}" cy="${y}" r="3.5" fill="${color}"/>` : '')).join('')}
       <circle cx="${lx}" cy="${ly}" r="9" fill="${color}" opacity="0.25"/>
     </svg>
-    <div class="curve-x">${weeks.map((w, i) => `<span>${vals[i] ? `<b>${kind === 'course' ? fmtKm(vals[i]) : kind === 'muscu' && vals[i] >= 1000 ? `${fmtKm(vals[i] / 1000)}t` : Math.round(vals[i])}</b>` : '<b>·</b>'}${Number(w.slice(8))}/${Number(w.slice(5, 7))}</span>`).join('')}</div>`;
+    <div class="curve-x">${weeks.map((w, i) => `<span>${vals[i] ? `<b>${kind === 'course' ? fmtKm(vals[i]) : unit === 'kg' && vals[i] >= 1000 ? `${fmtKm(vals[i] / 1000)}t` : Math.round(vals[i])}</b>` : '<b>·</b>'}${Number(w.slice(8))}/${Number(w.slice(5, 7))}</span>`).join('')}</div>`;
 }
 
 // --- Sons -------------------------------------------------------------------
@@ -1360,7 +1366,7 @@ const screens = {
     const bestSwim = Math.max(0, ...swims.map(swimMeters));
     const progSports = ['course', 'natation', 'muscu'].filter((x) => practiced(d, x) || d.history.some((h) => sportOf(h) === x));
     const sp = progSports.includes(progSport) ? progSport : progSports[0] || 'course';
-    const key = { course: 'km', natation: 'm', muscu: 'kg' }[sp];
+    const key = sp === 'muscu' ? muscuKey(d.history) : { course: 'km', natation: 'm' }[sp];
     const wk = weekTotals(d.history, mondayOf(today()))[key];
     const prev = weekTotals(d.history, addDays(mondayOf(today()), -7))[key];
     const diff = wk - prev;
@@ -1369,19 +1375,28 @@ const screens = {
     const best = {};
     for (const h of d.history.filter((x) => sportOf(x) === 'muscu')) for (const x of h.exercices || []) if (x.poids > (best[x.id]?.poids || 0)) best[x.id] = x;
     const topLifts = Object.values(best).sort((a, b) => b.poids - a.poids).slice(0, 3);
+    // Poids du corps : meilleure série (répétitions) par exercice.
+    const bestSet = {};
+    for (const h of d.history.filter((x) => sportOf(x) === 'muscu')) {
+      for (const x of h.exercices || []) {
+        const r = Math.max(0, ...(x.reps || []).map(Number).filter(Number.isFinite));
+        if (x.unite !== 's' && r > (bestSet[x.id]?.r || 0)) bestSet[x.id] = { nom: x.nom, r };
+      }
+    }
+    const topSets = Object.values(bestSet).sort((a, b) => b.r - a.r).slice(0, 3);
     return `
       <h1>Progression</h1>
       ${d.history.length ? `
         ${progSports.length > 1 ? `<div class="seg">${progSports.map((x) => `<button data-progsport="${x}" class="${sp === x ? `on ${x}` : ''}">${SPORT_LABEL[x]}</button>`).join('')}</div>` : ''}
         <section class="prog ${sp}">
           <p class="eyebrow" style="margin:0">Cette semaine</p>
-          <p class="hero-num">${fmt(wk)}<small>${key}</small></p>
-          <p class="delta ${diff > 0 ? 'up' : diff < 0 ? 'down' : ''}">${diff > 0 ? '▲' : diff < 0 ? '▼' : '='} ${fmt(Math.abs(diff))} ${key} par rapport à la semaine dernière</p>
-          ${weekCurve(d.history, sp)}
+          <p class="hero-num">${fmt(wk)}<small>${UNIT_LABEL[key]}</small></p>
+          <p class="delta ${diff > 0 ? 'up' : diff < 0 ? 'down' : ''}">${diff > 0 ? '▲' : diff < 0 ? '▼' : '='} ${fmt(Math.abs(diff))} ${UNIT_LABEL[key]} par rapport à la semaine dernière</p>
+          ${weekCurve(d.history, sp, key)}
         </section>
-        ${sp === 'muscu' ? '<p class="muted small" style="margin-top:4px">Total soulevé = charge × répétitions de la semaine, hors poids du corps.</p>' : ''}
+        ${sp === 'muscu' ? `<p class="muted small" style="margin-top:4px">${key === 'kg' ? 'Total soulevé = charge × répétitions de la semaine, hors poids du corps.' : 'Répétitions faites dans la semaine, toutes séries comprises (gainage non compté). Passe en kg dès que tu notes une charge.'}</p>` : ''}
         <h3>Records</h3>
-        ${sp === 'muscu' ? `<div class="records">${topLifts.length ? topLifts.map((x) => `<div class="muscu"><b>${String(x.poids).replace('.', ',')}<small>kg</small></b><span>${esc(x.nom.split(' (')[0])}</span></div>`).join('') : '<div class="muscu"><b>–</b><span>aucune charge notée</span></div>'}</div>` : `<div class="records">
+        ${sp === 'muscu' && key === 'reps' ? `<div class="records">${topSets.length ? topSets.map((x) => `<div class="muscu"><b>${x.r}<small>rép.</small></b><span>${esc(x.nom.split(" (")[0])} · en une série</span></div>`).join('') : '<div class="muscu"><b>–</b><span>aucune série notée</span></div>'}</div>` : sp === 'muscu' ? `<div class="records">${topLifts.length ? topLifts.map((x) => `<div class="muscu"><b>${String(x.poids).replace('.', ',')}<small>kg</small></b><span>${esc(x.nom.split(' (')[0])}</span></div>`).join('') : '<div class="muscu"><b>–</b><span>aucune charge notée</span></div>'}</div>` : `<div class="records">
           ${practiced(d, 'course') || runs.length ? `<div class="course"><b>${longest ? fmtKm(longest) : '–'}<small>km</small></b><span>plus longue course</span></div>
           <div class="course"><b>${paces.length ? allure(Math.min(...paces)).replace('/km', '') : '–'}</b><span>meilleure allure</span></div>` : ''}
           ${practiced(d, 'natation') || swims.length ? `<div class="natation"><b>${bestSwim || '–'}<small>m</small></b><span>plus longue nage</span></div>` : ''}
@@ -1410,7 +1425,7 @@ const screens = {
         <input id="activite" placeholder="Ex. : padel" maxlength="40" value="${esc(b.activite)}">
         <div class="chips">${ACTIVITES.map((a) => `<button data-act="${a}" class="${b.activite === a ? 'on' : ''}">${a}</button>`).join('')}</div>` : ''}
         ${autre && b.remplace ? '' : `<label for="date">Date</label>
-        <input id="date" type="date" value="${esc(b.date)}">`}
+        <input id="date" type="date" value="${esc(String(b.date).slice(0, 10))}">`}
         <label for="duree">Durée (minutes)</label>
         <input id="duree" type="number" inputmode="numeric" min="1" max="600" value="${b.elapsedSec ? Math.round(b.elapsedSec / 60) : ''}">
         ${b.sport === 'muscu' || autre ? '' : swim ? `
@@ -1792,7 +1807,11 @@ function newManual(sport) {
 function readSaisie() {
   const v = (id) => document.getElementById(id);
   if (!v('duree')) return;
-  if (v('date')) bilan.date = v('date').value || today();
+  if (v('date')) {
+    // Date inchangée : on garde l'heure (séance guidée), sinon on la perd avec la plage du cardio.
+    const day = v('date').value || today();
+    if (String(bilan.date).slice(0, 10) !== day) { bilan.date = day; delete bilan.endedAt; }
+  }
   const min = parseInt(v('duree').value, 10);
   bilan.elapsedSec = Number.isFinite(min) && min > 0 ? min * 60 : null;
   bilan.douleur = v('douleur').value.trim();
@@ -2210,7 +2229,9 @@ function finishGuided() {
   Object.assign(b, {
     source: 'guidee',
     fromPlan: true,
-    date: new Date(g.startedAt).toLocaleDateString('sv-SE'),
+    // Heure de début et de fin : la plage où le cardio de la montre est rattaché.
+    date: new Date(g.startedAt).toLocaleString('sv-SE').replace(' ', 'T'),
+    endedAt: new Date(g.endedAt).toLocaleString('sv-SE').replace(' ', 'T'),
     seance: g.seance,
     sessionName: g.sessionName,
     exercices: g.exercices.map(({ reason, ...x }) => ({ ...x, reps: [...x.reps] })),
@@ -2643,7 +2664,22 @@ if (inviteParam && account.serverEnabled()) {
     .finally(() => render());
 }
 refreshAccount();
-syncNow().then(retryIA).then(() => fetchCardio());
+// Muscu guidées notées avant le 3/11 après-midi : seule la date était gardée, sans heure, donc
+// sans plage pour le cardio de la montre. Les horaires affichés au bilan la redonnent.
+function fixGuidedTimes() {
+  const re = /^(\d{2}):(\d{2}) → (\d{2}):(\d{2})$/;
+  const todo = (h) => h.sport === 'muscu' && h.source === 'guidee' && String(h.date).length === 10 && re.test(h.horaires || '');
+  if (!load().history.some(todo)) return;
+  update((d) => {
+    for (const h of d.history.filter(todo)) {
+      const [, h1, m1, h2, m2] = h.horaires.match(re);
+      h.endedAt = `${h.date}T${h2}:${m2}:00`;
+      h.date = `${h.date}T${h1}:${m1}:00`;
+    }
+  });
+}
+fixGuidedTimes();
+syncNow().then(() => fixGuidedTimes()).then(retryIA).then(() => fetchCardio());
 // Retour dans l'app (après le Raccourci, par exemple) : cardio et conseils en attente.
 document.addEventListener('visibilitychange', () => {
   if (document.visibilityState !== 'visible' || current === 'live') return;
