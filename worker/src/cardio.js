@@ -28,18 +28,25 @@ export function bodyText(raw) {
 }
 
 // Autres mesures de la montre lues dans Santé, une ligne « type;date;valeur;source » :
-// distance (km, ou m si > 5), énergie active (kcal), puissance de course (W), pas.
+// distance (km, ou m si > 5), énergie active (kcal), puissance de course (W), pas, natation.
 export const KINDS = {
   dist: { re: /^(dist|distance)/, min: 0, max: 5000 },
   kcal: { re: /^(kcal|energie|énergie|cal)/, min: 0, max: 500 },
   puiss: { re: /^(puiss|power|watt)/, min: 0, max: 1500 },
   pas: { re: /^(pas|steps?)/, min: 0, max: 10000 },
+  // Natation en piscine : distance à la nage (m, ou km si < 2 : une mesure par longueur) et
+  // mouvements de nage (bras), mesurés seulement par la montre.
+  nage: { min: 0, max: 5000 },
+  mvt: { min: 0, max: 2000 },
 };
 // Préfixe de la ligne : vide = cardio, ou le type écrit par le Raccourci (« Type » de
 // l'échantillon, en français ou en anglais : « Distance de marche et de course », « Steps »…).
 const kindOf = (prefix) => {
   const p = prefix.toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '').replace(/[;|,]/g, ' ').trim();
   if (!p || /frequence|cardio|heart|^fc\b|bpm/.test(p)) return 'fc';
+  // Avant « distance » : « Distance de nage » est une distance de natation, pas de course.
+  if (/mouvement|stroke|^mvt\b/.test(p)) return 'mvt';
+  if (/\bnage\b|natation|swim/.test(p)) return 'nage';
   if (/distance|^dist\b/.test(p)) return 'dist';
   if (/energie|energy|kcal|calor/.test(p)) return 'kcal';
   if (/puissance|power|^puiss\b/.test(p)) return 'puiss';
@@ -139,7 +146,8 @@ export function parseSamples(text, now = Date.now()) {
       const k = KINDS[kind];
       if (!(v >= k.min && v <= k.max)) { badValue++; continue; }
       // Distance : en km ; une valeur au-delà de 5 par mesure ne peut être qu'en mètres.
-      const val = kind === 'dist' && v > 5 ? v / 1000 : v;
+      // Nage : en mètres ; moins de 2 par mesure (une longueur) ne peut être qu'en km.
+      const val = kind === 'dist' && v > 5 ? v / 1000 : kind === 'nage' && v > 0 && v < 2 ? v * 1000 : v;
       cand[kind].push({ t, v: Math.round(val * 1e6) / 1e6, source });
     }
   }
@@ -176,7 +184,7 @@ const hm = (t) => new Date(t).toLocaleTimeString('fr-FR', { timeZone: 'Europe/Pa
 const day = (t) => new Date(t).toLocaleDateString('fr-FR', { timeZone: 'Europe/Paris', weekday: 'long', day: 'numeric', month: 'long' });
 
 // Message affiché par le Raccourci à la fin.
-const NOMS = { dist: 'de distance', kcal: 'd’énergie', puiss: 'de puissance', pas: 'de pas' };
+const NOMS = { dist: 'de distance', kcal: 'd’énergie', puiss: 'de puissance', pas: 'de pas', nage: 'de nage', mvt: 'de mouvements de nage' };
 export function importMessage(samples, added, autres = {}, diag = {}) {
   const all = [...samples, ...Object.values(autres).flat()].map((x) => x[0]).sort((a, b) => a - b);
   if (!all.length) return 'Foulée : aucune mesure reçue.';

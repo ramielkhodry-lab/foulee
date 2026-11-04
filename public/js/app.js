@@ -5,7 +5,7 @@ import { load, update, uid, PRESETS, onSave, replace, empty } from './store.js';
 import * as account from './account.js';
 import { createTrack, addPoint, addAltitude, markGap, summary, encodeTrace, decodeTrace } from './gps.js';
 import { drawTrace } from './map.js';
-import { stepTimes, summarize, summarizeMontre, montreStale, MONTRE_V, mergeDistance, recovery, recoveryAt, zoneLimits, zoneOf, zoneTimes, cardioLine, curveSvg, windowOf } from './cardio.js';
+import { stepTimes, summarize, summarizeMontre, montreStale, MONTRE_V, mergeDistance, recovery, recoveryAt, zoneLimits, zoneOf, zoneTimes, cardioLine, curveSvg, windowOf, swimWindow, dayRange, applySwim } from './cardio.js';
 import { iaInput, pendingIA, failedIA, failureMessage } from './ia.js';
 import { tipsOf, tipsSource, hasIA } from './conseils.js';
 import { GOALS_MUSCU, LIEUX, NIVEAUX_MUSCU, MUSCLES, alternatives, byId, muscuPlan, nextSeance, nextLoad, tonnage } from './muscu.js';
@@ -177,6 +177,33 @@ const cardioBlock = (c, id) => (c ? `
     <p class="muted small" style="margin:4px 0 0">Mesuré par ta montre (${c.n} mesures)${c.bandes?.length ? ', phases de course en fond' : ''}. <span class="hr-more">Détail ›</span></p>
   </div>` : '');
 
+// Saisie de natation : longueurs, durée et cardio lus par la montre (séance « Natation en piscine »).
+// Ils préremplissent la saisie ; ce qui est tapé à la main reste prioritaire.
+function swimWatch(b) {
+  if (!cardioOn()) return '';
+  const m = b.montre;
+  if (m?.nageM) {
+    const bassin = b.swim.bassinM || 25;
+    const lg = Math.round(m.nageM / bassin);
+    const differ = b.swim.longueursSource === 'manuelle' && b.swim.longueurs !== lg;
+    return `<div class="montre-box">
+      <div class="montre-cells">
+        <span><b>${lg}</b><small>longueurs</small></span>
+        ${b.fenetre ? `<span><b>${Math.round((b.fenetre[1] - b.fenetre[0]) / 60000)}</b><small>min</small></span>` : ''}
+        ${m.mvt ? `<span><b>${Math.round(m.mvt / Math.max(1, lg))}</b><small>mouvements / longueur</small></span>` : ''}
+        ${m.kcal ? `<span><b>${m.kcal}</b><small>kcal actives</small></span>` : ''}
+      </div>
+      <p class="muted small" style="margin:4px 0 0">Mesuré par ta montre : ${m.nageM} m${b.fenetre ? `, de ${hhmm(b.fenetre[0])} à ${hhmm(b.fenetre[1])}` : ''}. ${differ ? `<b>Tu as noté ${b.swim.longueurs} longueurs</b> : c'est ta saisie qui compte.` : 'Longueurs et durée reportées, corrige si la montre s’est trompée.'}</p>
+    </div>
+    ${b.cardio ? cardioBlock(b.cardio, 'bilan') : ''}`;
+  }
+  return `<div class="hr-wait">
+    <p class="small" style="margin:0"><b>Ta montre :</b> si tu as nagé avec une séance « Natation en piscine » sur ta montre, les longueurs, la durée et le cardio se remplissent tout seuls après le Raccourci.</p>
+    ${cardioUi.message ? `<p class="muted small" style="margin:6px 0 0">${esc(cardioUi.message)}</p>` : ''}
+    <button class="btn-ghost" data-cardiofetch style="width:100%;margin-top:8px">${cardioUi.busy ? 'Recherche…' : 'Chercher les mesures de ma montre'}</button>
+  </div>`;
+}
+
 // Détail du cardio, comme l'app Forme : moyenne, courbe en couleurs de zone, temps par zone,
 // cardio après l'effort. Les zones sont celles que l'utilisateur a recopiées (Profil).
 const ZONE_COLORS = ['#3D9BFF', '#3DE0D0', '#C8FF2E', '#FF8A1A', '#FF2E8A'];
@@ -324,6 +351,8 @@ function montreBlock(h) {
     m.kcal && [m.kcal, 'kcal actives'],
     m.puissance && [m.puissance, 'W de puissance'],
     m.cadence && [m.cadence, 'pas/min'],
+    m.nageM && [m.nageM, 'm nagés'],
+    m.mvt && h.swim?.longueurs && [Math.round(m.mvt / h.swim.longueurs), 'mouvements / longueur'],
   ].filter(Boolean);
   const fr = (km) => `${km.toLocaleString('fr-FR')} km`;
   const gps = !h.distanceGpsKm ? ''
@@ -1491,6 +1520,7 @@ const screens = {
           <label for="longueurs">Nombre de longueurs</label>
           <input id="longueurs" type="number" inputmode="numeric" min="0" max="400" value="${b.swim.longueurs ?? ''}">
           <p class="muted small" id="swimdist">${b.swim.longueurs ? `Distance : ${b.swim.longueurs * b.swim.bassinM} m` : ''}</p>
+          ${swimWatch(b)}
           <label>Nages</label>
           ${nages.map((n) => `<label style="font-weight:400;margin:4px 0"><input type="checkbox" data-nage="${n}" style="width:auto" ${b.swim.nages.includes(n) ? 'checked' : ''}> ${n}</label>`).join('')}
           <label for="detail">Détail (nages, éducatifs, pauses)</label>
@@ -1870,7 +1900,10 @@ function readSaisie() {
     if (String(bilan.date).slice(0, 10) !== day) { bilan.date = day; delete bilan.endedAt; }
   }
   const min = parseInt(v('duree').value, 10);
-  bilan.elapsedSec = Number.isFinite(min) && min > 0 ? min * 60 : null;
+  const sec = Number.isFinite(min) && min > 0 ? min * 60 : null;
+  // Tapé à la main : la montre ne le remplace plus.
+  if (sec !== (bilan.elapsedSec ? Math.round(bilan.elapsedSec / 60) * 60 : null)) bilan.dureeSource = 'manuelle';
+  bilan.elapsedSec = sec;
   bilan.douleur = v('douleur').value.trim();
   bilan.commentaire = v('comm').value.trim();
   if (bilan.sport === 'autre') {
@@ -1887,7 +1920,9 @@ function readSaisie() {
   } else if (bilan.sport === 'natation') {
     bilan.swim.bassinM = Number(v('bassin').value);
     const n = parseInt(v('longueurs').value, 10);
-    bilan.swim.longueurs = Number.isFinite(n) && n >= 0 ? n : null;
+    const lg = Number.isFinite(n) && n >= 0 ? n : null;
+    if (lg !== bilan.swim.longueurs) bilan.swim.longueursSource = 'manuelle';
+    bilan.swim.longueurs = lg;
     bilan.swim.nages = [...document.querySelectorAll('[data-nage]')].filter((c) => c.checked).map((c) => c.dataset.nage);
     bilan.swim.detail = v('detail').value.trim();
     bilan.distanceKm = bilan.swim.longueurs ? (bilan.swim.longueurs * bilan.swim.bassinM) / 1000 : null;
@@ -2067,6 +2102,7 @@ document.addEventListener('click', (e) => {
     bilan = newManual(ds.manual);
     if (ds.mdate) bilan.date = ds.mdate;
     go('saisie');
+    if (bilan.sport === 'natation') { cardioUi.message = null; fetchCardio({ force: true }); }
   } else if (ds.logplan) {
     // Saisie préremplie avec la séance prévue aujourd'hui ; tout reste modifiable.
     const p = planFor(load(), 1).find((x) => x.sport === ds.logplan);
@@ -2076,6 +2112,7 @@ document.addEventListener('click', (e) => {
       bilan.sessionName = 'Natation (programme)';
       bilan.swim.bassinM = p.bassin;
       bilan.swim.longueurs = p.longueurs;
+      bilan.swim.longueursSource = 'plan';
       bilan.swim.nages = ['crawl', 'brasse', 'dos'].filter((n) => p.plan.some((l) => l.includes(n)));
     } else if (p?.sport === 'muscu') {
       Object.assign(bilan, muscuLog(p));
@@ -2085,6 +2122,7 @@ document.addEventListener('click', (e) => {
       bilan.elapsedSec = Math.round(total(p.steps) / 60) * 60;
     }
     go('saisie');
+    if (bilan.sport === 'natation') { cardioUi.message = null; fetchCardio({ force: true }); }
   } else if (ds.mfill !== undefined || ds.mset !== undefined) {
     readSaisie();
     const x = bilan.exercices[Number(ds.mfill ?? ds.mset)];
@@ -2171,6 +2209,17 @@ document.addEventListener('change', (e) => {
     render();
   } else if (current === 'saisie') {
     readSaisie();
+    // Autre bassin : les longueurs lues par la montre sont recomptées (même distance).
+    if (e.target.id === 'bassin' && bilan.swim?.longueursSource === 'montre') applySwim(bilan);
+    if (e.target.id === 'date' && bilan.sport === 'natation') {
+      // Autre jour : ce que la montre avait rempli ne vaut plus.
+      delete bilan.fenetre; delete bilan.montre; delete bilan.cardio;
+      if (bilan.swim.longueursSource === 'montre') { bilan.swim.longueurs = null; bilan.swim.longueursSource = null; bilan.distanceKm = null; }
+      if (bilan.dureeSource === 'montre') { bilan.elapsedSec = null; bilan.dureeSource = null; }
+      cardioUi.message = null;
+      fetchCardio({ force: true });
+      render();
+    }
     if (e.target.id === 'longueurs' || e.target.id === 'bassin') render();
   } else if (e.target.id === 'prenom') {
     update((d) => { d.profile.prenom = e.target.value.trim(); });
@@ -2496,6 +2545,8 @@ const AUTRES_MESURES = [
   ['Énergie active', 'kcal'],
   ['Puissance de course', 'puiss'],
   ['Pas', 'pas'],
+  ['Distance de nage', 'nage'],
+  ['Mouvements de nage', 'mouvements'],
 ];
 const raccourciSteps = () => `
   <ol class="steps-guide">
@@ -2536,6 +2587,7 @@ const raccourciUsage = `
     <li>À la fin : arrête la séance sur la montre, attends une minute (le temps qu'elle passe le cardio à l'iPhone).</li>
     <li>Lance <b>Foulée cardio</b>, puis reviens dans Foulée : le cardio et les autres mesures s'ajoutent tout seuls à la séance.</li>
   </ol>
+  <p class="small"><b>À la piscine :</b> lance une séance <b>Natation en piscine</b> sur ta montre (longueur du bassin réglée, 25 m). En sortant, arrête-la, laisse le Raccourci tourner, puis « Noter ma séance » dans Foulée : longueurs, durée et cardio sont déjà remplis.</p>
   <p class="muted small">Oublié ? Lance-le plus tard dans la journée, ça marche aussi. Le relancer ne crée pas de doublon.</p>`;
 
 // Zones de l'app Forme recopiées à la main : Foulée ne les invente pas (elles dépendent de la
@@ -2586,19 +2638,28 @@ async function fetchCardio({ force = false } = {}) {
   if (!cardioOn() || cardioUi.busy) return;
   if (!force && Date.now() - cardioUi.lastTry < 20_000) return;
   const limit = Date.now() - 3 * 86400_000;
-  const saved = load().history.filter((h) => missing(h) && windowOf(h) && windowOf(h)[1] > limit);
-  const pending = current === 'bilan' && bilan && missing(bilan) && windowOf(bilan) ? [bilan] : [];
+  // Natation saisie à la main : pas d'heure. On cherche les longueurs de la montre sur la
+  // journée, elles donnent la plage de la séance (swimWindow).
+  const swimTodo = (h) => sportOf(h) === 'natation' && !h.fenetre && Boolean(dayRange(h.date)) && dayRange(h.date)[0] < Date.now();
+  // Une nage déjà rattachée à une séance ne l'est pas une 2e fois (deux saisies le même jour).
+  const taken = load().history.filter((h) => h.fenetre).map((h) => h.fenetre);
+  const swimOf = (h) => swimWindow((autres.nage || []).filter(([t]) => !taken.some(([a, b]) => t >= a && t <= b)), ...dayRange(h.date));
+  const rangeOf = (h) => windowOf(h) || (swimTodo(h) ? dayRange(h.date) : null);
+  const saved = load().history.filter((h) => missing(h) && rangeOf(h) && rangeOf(h)[1] > limit);
+  const editing = bilan && (current === 'bilan' || (current === 'saisie' && bilan.sport === 'natation'));
+  const pending = editing && missing(bilan) && rangeOf(bilan) && rangeOf(bilan)[1] > limit ? [bilan] : [];
   const all = [...saved, ...pending];
   if (!all.length) return;
-  const from = Math.max(limit, Math.min(...all.map((h) => windowOf(h)[0])));
+  const from = Math.max(limit, Math.min(...all.map((h) => rangeOf(h)[0])));
   // Jusqu'à 4 min après la fin : le cardio après l'effort.
-  const to = Math.min(from + 4 * 86400_000 - 1, Math.max(...all.map((h) => windowOf(h)[1])) + 4 * 60_000);
-  // La saisie en cours du bilan est lue AVANT de rattacher la distance de la montre : la lire
-  // après la prendrait pour une distance tapée à la main.
-  if (current === 'bilan') readBilan();
+  const to = Math.min(from + 4 * 86400_000 - 1, Math.max(...all.map((h) => rangeOf(h)[1])) + 4 * 60_000);
+  // La saisie en cours est lue AVANT de rattacher les mesures de la montre : la lire après
+  // prendrait la distance (ou les longueurs) de la montre pour une valeur tapée à la main.
+  const readForm = () => { if (current === 'bilan') readBilan(); else if (current === 'saisie') readSaisie(); };
+  readForm();
   cardioUi.busy = true;
   cardioUi.lastTry = Date.now();
-  if (current === 'bilan') render();
+  if (editing) render();
   let samples = [];
   let autres = {};
   try {
@@ -2608,9 +2669,13 @@ async function fetchCardio({ force = false } = {}) {
     cardioUi.message = `Cardio non récupéré : ${e.message}`;
   }
   cardioUi.busy = false;
-  if (current === 'bilan') readBilan(); // ce qui a été tapé pendant la recherche
+  readForm(); // ce qui a été tapé pendant la recherche
   const found = [];
-  for (const h of saved) {
+  for (const h0 of saved) {
+    const fen = swimTodo(h0) ? swimOf(h0) : null;
+    if (fen) taken.push(fen);
+    if (!windowOf(h0) && !fen) continue;
+    const h = fen ? { ...h0, fenetre: fen } : h0;
     const c = h.cardio ? null : summarize(h, samples);
     // Mesures de la montre résumées par un ancien calcul : recalculées avec les données du serveur.
     const stale = montreStale(h.montre);
@@ -2618,17 +2683,19 @@ async function fetchCardio({ force = false } = {}) {
     // marqué à jour pour ne pas le redemander sans fin.
     const m = h.montre && !stale ? null : stale && cardioUi.message ? null : summarizeMontre(h, autres) || (stale ? { ...h.montre, v: MONTRE_V } : null);
     const ap = h.cardio && !h.cardio.apres ? recovery(windowOf(h)[1], samples) : null;
-    if (c || m || ap) found.push([h.id, c, m, ap]);
+    if (c || m || ap || fen) found.push([h.id, c, m, ap, fen]);
   }
   if (found.length) {
     const fresh = found.some(([, c, m]) => c || m);
     update((d) => {
-      for (const [id, c, m, ap] of found) {
+      for (const [id, c, m, ap, fen] of found) {
         const h = d.history.find((x) => x.id === id);
         if (!h) continue;
+        if (fen) h.fenetre = fen;
         if (ap && h.cardio && !c && !m) { h.cardio.apres = ap; continue; } // rien de neuf pour les conseils
         if (c) h.cardio = c;
         if (m) attachMontre(h, m);
+        if (m && sportOf(h) === 'natation') applySwim(h);
         // Les conseils de l'IA du dernier bilan ont été écrits sans ces mesures : ils sont redemandés.
         const latest = d.history.every((x) => sportOf(x) !== sportOf(h) || String(x.date) <= String(h.date));
         if (latest) { delete h.conseilsIA; delete h.iaEchec; }
@@ -2645,11 +2712,20 @@ async function fetchCardio({ force = false } = {}) {
     if (fresh) retryIA();
   }
   if (pending.length) {
-    const c = bilan.cardio || summarize(bilan, samples);
-    const m = bilan.montre || summarizeMontre(bilan, autres);
+    const swim = sportOf(bilan) === 'natation';
+    if (swimTodo(bilan)) {
+      const fen = swimOf(bilan);
+      if (fen) bilan.fenetre = fen;
+    }
+    const c = windowOf(bilan) ? bilan.cardio || summarize(bilan, samples) : null;
+    const m = windowOf(bilan) ? bilan.montre || summarizeMontre(bilan, autres) : null;
     if (c) bilan.cardio = c;
-    if (m && !bilan.montre) attachMontre(bilan, m);
-    if (!c && !cardioUi.message) cardioUi.message = samples.length ? 'Des mesures sont arrivées, mais aucune pendant cette séance. La montre a-t-elle bien suivi la séance ?' : 'Pas encore de mesures de la montre pour cette séance. Relance le Raccourci dans une minute.';
+    if (m && !bilan.montre) {
+      attachMontre(bilan, m);
+      if (swim) applySwim(bilan);
+    }
+    if (swim && !bilan.fenetre && !cardioUi.message) cardioUi.message = 'Pas encore de longueurs de ta montre ce jour-là. Arrête la séance « Natation en piscine » sur la montre, attends une minute que l’iPhone la reçoive, lance ton Raccourci puis touche le bouton ci-dessous.';
+    else if (!c && !swim && !cardioUi.message) cardioUi.message = samples.length ? 'Des mesures sont arrivées, mais aucune pendant cette séance. La montre a-t-elle bien suivi la séance ?' : 'Pas encore de mesures de la montre pour cette séance. Relance le Raccourci dans une minute.';
   }
   if (current !== 'live') render();
 }

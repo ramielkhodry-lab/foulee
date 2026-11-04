@@ -30,6 +30,8 @@ export function seanceText(h) {
   if (h.cardio) parts.push(cardioText(h.cardio));
   if (h.montre?.puissance) parts.push(`puissance moyenne ${h.montre.puissance} W`);
   if (h.montre?.cadence) parts.push(`cadence ${h.montre.cadence} pas/min`);
+  if (h.montre?.nageM) parts.push(`distance nagée mesurée par la montre ${h.montre.nageM} m`);
+  if (h.montre?.mvt && h.swim?.longueurs) parts.push(`${Math.round(h.montre.mvt / h.swim.longueurs)} mouvements de bras par longueur en moyenne (mesuré par la montre)`);
   if (h.deniveleM) parts.push(`dénivelé positif ${h.deniveleM} m`);
   return parts.join(', ');
 }
