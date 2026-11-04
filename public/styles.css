@@ -241,6 +241,7 @@ body.flash-marche { animation: flash-marche 1.5s ease-out; }
 .li-main b { display: block; font-size: 16px; font-weight: 700; }
 .li-main b em { font-style: normal; font-weight: 600; color: var(--muted); font-size: 13px; margin-left: 4px; }
 .li-main span { display: block; font-size: 14px; color: var(--muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+details.hist[open] .li-main span { white-space: normal; overflow: visible; }
 .li-side { flex: none; font-size: 22px; font-weight: 850; letter-spacing: -0.02em; }
 .li-side.course { color: var(--run); }
 .li-side.natation { color: var(--swim); }
