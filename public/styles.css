@@ -535,3 +535,27 @@ body.sheet-open { overflow: hidden; }
 #touchlock .lock-extend span { font-size: 20px; font-weight: 800; }
 #touchlock .lock-extend small { font-size: 13px; color: var(--ink); font-weight: 600; }
 #touchlock .lock-extend em { font-style: normal; font-size: 12px; color: var(--muted); font-weight: 700; text-transform: uppercase; letter-spacing: 0.06em; }
+
+/* Musculation guidée */
+.mlive .bar > div, .mlive[data-phase] .bar > div { background: var(--muscu); }
+.mlive .live-top b { color: var(--ink); font-variant-numeric: tabular-nums; }
+.mlive .now, .mlive .count { color: var(--muscu); }
+.mlive .count { font-variant-numeric: tabular-nums; }
+.mlive .mstep { margin: 22px 0 0; font-size: 14px; font-weight: 800; letter-spacing: 0.1em; text-transform: uppercase; color: var(--muted); }
+.mlive .mname { margin: 6px 0 8px; font-family: var(--display); font-style: italic; font-weight: 800; font-size: clamp(34px, 10vw, 48px); line-height: 1; text-transform: uppercase; color: var(--muscu); }
+.mlive .mkg { margin-top: 12px; }
+.mstepper { display: grid; grid-template-columns: 84px 1fr 84px; align-items: center; gap: 10px; margin: 18px 0 4px; }
+.mstepper button { min-height: 84px; font-size: 40px; font-weight: 800; border-radius: 22px; }
+.mstepper b { text-align: center; font-size: clamp(80px, 26vw, 120px); font-weight: 900; line-height: 1; letter-spacing: -0.04em; font-variant-numeric: tabular-nums; }
+.live-controls.one { grid-template-columns: 1fr; }
+.live-controls .mgo, .live-extra .mgo { background: var(--muscu); border-color: var(--muscu); color: var(--on-accent); }
+body.flash-muscu { animation: flash-muscu 1.5s ease-out; }
+@keyframes flash-muscu { 0%, 40% { background: var(--muscu); } 100% { background: var(--bg); } }
+
+/* Avancer ou décaler une séance */
+.move-days { margin: 14px 0 6px; }
+.move-sheet .option { background: rgba(255,255,255,.06); font-weight: 700; }
+.move-sheet .option.back .go { background: transparent; color: var(--ink); border: 1px solid rgba(255,255,255,.25); }
+.hero .day-link, .li-more .day-link { display: block; margin: 4px auto 0; }
+.move-sheet.muscu .option:not(.back) .go { background: var(--muscu); }
+.move-sheet.natation .option:not(.back) .go { background: var(--swim); color: #fff; }

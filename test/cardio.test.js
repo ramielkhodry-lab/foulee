@@ -348,3 +348,14 @@ test('Natation : plage de la séance trouvée dans les longueurs du jour, longue
   const fc = Array.from({ length: 30 }, (_, i) => [w[0] + i * 30_000, 130 + (i % 5)]);
   assert.equal(summarize(h, fc).n, 30);
 });
+
+test('muscu guidée : plage = heure de début → heure de fin, cardio rattaché', async () => {
+  const { windowOf, summarize } = await import('../public/js/cardio.js');
+  const h = { sport: 'muscu', source: 'guidee', date: '2026-11-03T13:12:00', endedAt: '2026-11-03T13:31:00', elapsedSec: 1140 };
+  const w = windowOf(h);
+  assert.equal((w[1] - w[0]) / 60000, 19);
+  const samples = Array.from({ length: 100 }, (_, i) => [w[0] + i * 10000, 110 + (i % 20)]);
+  const c = summarize(h, samples);
+  assert.ok(c && c.avg > 110 && c.max === 129);
+  assert.equal(windowOf({ ...h, date: '2026-11-03' }), null, 'sans heure : pas de plage');
+});

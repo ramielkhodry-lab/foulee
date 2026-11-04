@@ -9,7 +9,8 @@ import { stepTimes, summarize, summarizeMontre, montreStale, MONTRE_V, mergeDist
 import { iaInput, pendingIA, failedIA, failureMessage } from './ia.js';
 import { tipsOf, tipsSource, hasIA } from './conseils.js';
 import { GOALS_MUSCU, LIEUX, NIVEAUX_MUSCU, MUSCLES, alternatives, byId, muscuPlan, nextSeance, nextLoad, tonnage } from './muscu.js';
-import { upcoming, planOptions, nextRunLevel, runLevel, afterBilan, HORIZON, GOALS_RUN, START_RUN, GOALS_SWIM, START_SWIM, LEVELS } from './plan.js';
+import { createGuided, currentExercise, suggestedReps, setDone, skipExercise, restLeft, adjustRest, endRest, finish, elapsedSec as guidedElapsed, setsDone, setsTotal, restTrack } from './muscu-live.js';
+import { upcoming, moveOptions, planOptions, nextRunLevel, runLevel, afterBilan, HORIZON, GOALS_RUN, START_RUN, GOALS_SWIM, START_SWIM, LEVELS } from './plan.js';
 
 const app = document.getElementById('app');
 const audio = document.getElementById('player');
@@ -56,7 +57,13 @@ const SPORT_LABEL = { course: 'Course', natation: 'Natation', muscu: 'Musculatio
 // Activités courantes hors programme, proposées d'un toucher.
 const ACTIVITES = ['Padel', 'Vélo', 'Foot', 'Tennis', 'Randonnée', 'Marche'];
 // « J'ai fait autre chose » : sur la séance du jour, elle est décalée au lieu d'être sautée.
+// Muscu du jour : séance guidée (minuteur de récup) ; la saisie libre reste possible.
+const muscuCta = () => `<button class="cta muscu" data-muscugo><span>${savedGuided() ? 'Reprendre la séance' : 'Démarrer la séance'}</span><i>›</i></button>
+  <button class="day-link" data-logplan="muscu">Déjà faite ? La noter sans guidage ›</button>`;
 const autreLink = (p) => `<button class="day-link" data-autre="${p.sport}">J'ai fait autre chose à la place ›</button>`;
+// Avancer ou décaler une séance prévue, aujourd'hui ou plus tard, quel que soit le sport.
+const moveLink = (p) => `<button class="day-link" data-move="${esc(p.date)}|${p.sport}">${p.moved ? 'Changer de jour ou remettre au ' + esc(shortDayName(p.moved.from)) : 'Avancer ou décaler cette séance'} ›</button>`;
+const shortDayName = (iso) => new Date(`${iso}T12:00`).toLocaleDateString('fr-FR', { weekday: 'long', day: 'numeric' });
 const kgLabel = (kg) => `${String(kg).replace('.', ',')} kg`;
 // « 3 × 8-12 · 40 kg » : la dose d'un exercice prévu.
 const dose = (x) => `${x.series} × ${x.min}–${x.max}${x.unite === 's' ? ' s' : ''}${x.poids ? ` · ${kgLabel(x.poids)}` : x.materiel === 'corps' ? '' : ' · charge à trouver'}`;
@@ -83,6 +90,7 @@ function todayHero(p) {
         <ol class="hero-steps">${p.plan.map((l) => `<li>${esc(l)}</li>`).join('')}</ol>
         ${whyTips(p)}
         ${isToday ? '<button class="btn-swim" data-logplan="natation">Noter ma séance</button>' : ''}
+        ${moveLink(p)}
       </section>`;
   }
   if (p.sport === 'muscu') {
@@ -93,7 +101,8 @@ function todayHero(p) {
         <p class="hero-sub">${esc(p.title)} · ${p.repos} s de repos entre les séries</p>
         ${exoList(p)}
         ${whyTips(p)}
-        ${isToday ? `<button class="cta muscu" data-logplan="muscu"><span>Noter ma séance</span><i>›</i></button>${autreLink(p)}` : ''}
+        ${isToday ? `${muscuCta()}${autreLink(p)}` : ''}
+        ${moveLink(p)}
       </section>`;
   }
   const mins = Math.round(total(p.steps) / 60);
@@ -108,6 +117,7 @@ function todayHero(p) {
       ${whyTips(p)}
       ${isToday ? `<button class="btn-primary" data-startplan="${esc(p.date)}">Démarrer la séance</button>
       <button class="btn-ghost" data-logplan="course" style="width:100%;margin-top:6px">Faite sans l'app : la noter</button>` : `<button data-startplan="${esc(p.date)}" style="width:100%">La faire maintenant</button>`}
+      ${moveLink(p)}
     </section>`;
 }
 
@@ -128,7 +138,7 @@ function planRow(p, showNow = false) {
       : `<p class="small">${esc(stepsSummary(p.steps))}</p>`;
   return `
     <details class="hist plan-row"><summary class="li">${icon(p.sport)}<div class="li-main">${main}</div><span class="li-side ${p.sport}">${side}</span></summary>
-      <div class="li-more">${more}<p class="muted small">${esc(p.reason)}</p></div></details>
+      <div class="li-more">${more}<p class="muted small">${esc(p.reason)}</p>${moveLink(p)}</div></details>
     ${showNow ? `<button class="btn-ghost small-btn" data-startplan="${esc(p.date)}">La faire maintenant ›</button>` : ''}`;
 }
 
@@ -255,6 +265,54 @@ function cardioDetail(h) {
       </div>
     </div>`;
 }
+// Avancer ou décaler : les jours possibles, d'un toucher.
+function moveSheet(p, opts) {
+  const t = today();
+  const label = (d) => (d === t ? "Aujourd'hui" : d === addDays(t, 1) ? 'Demain' : dateLabel(d));
+  const what = { course: 'Course', natation: 'Natation', muscu: 'Muscu' }[p.sport];
+  return `
+    <div class="hr-sheet move-sheet ${p.sport}" role="dialog" aria-label="Avancer ou décaler">
+      <div class="hr-sheet-in">
+        <div class="hr-sheet-top"><h2>${what} · ${esc(label(p.date))}</h2><button class="hr-close" data-moveclose aria-label="Fermer">✕</button></div>
+        <p class="muted">Choisis le nouveau jour. La suite du programme se recalcule, rien n'est sauté ni fait en double.</p>
+        ${opts.length ? `<div class="move-days">${opts.map((o, i) => `<button class="option${o.back ? ' back' : ''}" data-moveto="${i}"><span><span>${esc(label(o.date))}</span>${o.back ? '<span class="muted">Son jour prévu au départ</span>' : ''}</span><span class="go">›</span></button>`).join('')}</div>`
+          : '<p>Aucun jour libre dans les 7 jours qui suivent.</p>'}
+        <p class="muted small">Ne sont proposés que les jours sans autre séance${p.sport === 'course' ? ', avec un jour de repos avant et après chaque course' : ''}.</p>
+      </div>
+    </div>`;
+}
+let moveCtx = null;
+function openMoveSheet(key) {
+  const [date, sport] = key.split('|');
+  const d = load();
+  const p = planFor(d).find((x) => x.date === date && x.sport === sport);
+  if (!p) return;
+  const opts = moveOptions(d.history, d.settings, today(), d.profile.questionnaire, p);
+  moveCtx = { opts };
+  closeMoveSheet();
+  document.body.insertAdjacentHTML('beforeend', moveSheet(p, opts));
+  document.body.classList.add('sheet-open');
+}
+function closeMoveSheet() {
+  document.querySelector('.move-sheet')?.remove();
+  document.body.classList.remove('sheet-open');
+}
+document.addEventListener('click', (e) => {
+  const mv = e.target.closest('[data-move]');
+  if (mv) { e.stopPropagation(); return openMoveSheet(mv.dataset.move); }
+  if (e.target.closest('[data-moveclose]') || e.target.classList?.contains('move-sheet')) return closeMoveSheet();
+  const to = e.target.closest('[data-moveto]');
+  if (to && moveCtx) {
+    const o = moveCtx.opts[Number(to.dataset.moveto)];
+    const old = addDays(today(), -14);
+    update((d) => { d.settings.decalages = o.decalages.filter((m) => m.to >= old); });
+    moveCtx = null;
+    closeMoveSheet();
+    selDay = o.date;
+    weekScroll = null;
+    render();
+  }
+}, true);
 function openCardioDetail(id) {
   const h = id === 'bilan' ? bilan : load().history.find((x) => x.id === id);
   if (!h?.cardio) return;
@@ -353,7 +411,7 @@ function historyRow(h, open = false) {
     h.douleur && `douleur : ${esc(h.douleur)}`,
   ].filter(Boolean);
   const side = sport === 'muscu'
-    ? (tonnage(h) ? `${Math.round(tonnage(h)).toLocaleString('fr-FR')}<small>kg</small>` : '')
+    ? (tonnage(h) ? `${Math.round(tonnage(h)).toLocaleString('fr-FR')}<small>kg</small>` : repsOf(h) ? `${repsOf(h)}<small>rép.</small>` : '')
     : sport === 'natation'
     ? (swimMeters(h) ? `${swimMeters(h)}<small>m</small>` : '')
     : h.distanceKm ? `${h.distanceKm.toLocaleString('fr-FR')}<small>km</small>` : h.elapsedSec ? `${Math.round(h.elapsedSec / 60)}<small>min</small>` : '';
@@ -386,6 +444,11 @@ const addDays = (iso, n) => {
 const mondayOf = (iso) => addDays(iso, -((new Date(`${iso}T12:00:00`).getDay() + 6) % 7));
 const sportOf = (h) => h.sport || 'course';
 const swimMeters = (h) => (h.swim?.longueurs ? h.swim.longueurs * (h.swim.bassinM || 25) : Math.round((h.distanceKm || 0) * 1000));
+// Répétitions faites (gainage en secondes non compté) : la mesure réelle d'une muscu au poids du corps.
+const repsOf = (h) => (h.exercices || []).filter((x) => x.unite !== 's').reduce((a, x) => a + (x.reps || []).reduce((s, r) => s + (Number(r) || 0), 0), 0);
+// Musculation : en kg dès qu'une charge a été notée, sinon en répétitions (0 kg au poids du corps ne dit rien).
+const muscuKey = (history) => (history.some((h) => sportOf(h) === 'muscu' && tonnage(h) > 0) ? 'kg' : 'reps');
+const UNIT_LABEL = { km: 'km', m: 'm', kg: 'kg', reps: 'rép.' };
 const fmtKm = (km) => (Math.round(km * 10) / 10).toLocaleString('fr-FR');
 
 // Totaux d'une semaine (lundi → dimanche) : km de course, mètres nagés, nombre de séances.
@@ -396,6 +459,7 @@ function weekTotals(history, monday) {
     km: inWeek.filter((h) => sportOf(h) === 'course').reduce((a, h) => a + (h.distanceKm || 0), 0),
     m: inWeek.filter((h) => sportOf(h) === 'natation').reduce((a, h) => a + swimMeters(h), 0),
     kg: inWeek.filter((h) => sportOf(h) === 'muscu').reduce((a, h) => a + tonnage(h), 0),
+    reps: inWeek.filter((h) => sportOf(h) === 'muscu').reduce((a, h) => a + repsOf(h), 0),
     n: inWeek.length,
   };
 }
@@ -499,6 +563,7 @@ function sessionCard(p) {
         </ul>
         ${whyTips(p)}
         ${isToday ? `<button class="cta swim" data-logplan="natation"><span>Noter ma séance</span><i>›</i></button>${autreLink(p)}` : ''}
+        ${moveLink(p)}
         <details class="day-detail natation"><summary>Le détail longueur par longueur <i>›</i></summary>
           <ol class="hero-steps">${p.plan.map((l) => `<li>${esc(l)}</li>`).join('')}</ol></details>
       </section>`;
@@ -517,7 +582,8 @@ function sessionCard(p) {
           ${fact('temps', `${p.repos} s de repos entre les séries`)}
         </ul>
         ${whyTips(p)}
-        ${isToday ? '<button class="cta muscu" data-logplan="muscu"><span>Noter ma séance</span><i>›</i></button>' : ''}
+        ${isToday ? `${muscuCta()}${autreLink(p)}` : ''}
+        ${moveLink(p)}
         <details class="day-detail muscu"><summary>Exercices, charges et répétitions <i>›</i></summary>${exoList(p)}</details>
       </section>`;
   }
@@ -541,6 +607,7 @@ function sessionCard(p) {
            <button class="day-link" data-logplan="course">Faite sans l'app : la noter ›</button>
            ${autreLink(p)}`
         : `<button class="cta ghost" data-startplan="${esc(p.date)}"><span>La faire maintenant</span><i>›</i></button>`}
+      ${moveLink(p)}
     </section>`;
 }
 
@@ -586,10 +653,10 @@ function indicators(history) {
 }
 
 // Courbe des 8 dernières semaines (km de course ou mètres nagés).
-function weekCurve(history, kind) {
+function weekCurve(history, kind, unitKey) {
   const monday = mondayOf(today());
   const weeks = Array.from({ length: 8 }, (_, i) => addDays(monday, (i - 7) * 7));
-  const unit = { course: 'km', natation: 'm', muscu: 'kg' }[kind];
+  const unit = unitKey || { course: 'km', natation: 'm', muscu: 'kg' }[kind];
   const vals = weeks.map((w) => weekTotals(history, w)[unit]);
   const max = Math.max(...vals) || 1;
   const W = 320;
@@ -612,7 +679,7 @@ function weekCurve(history, kind) {
       ${pts.map(([x, y], i) => (vals[i] ? `<circle cx="${x}" cy="${y}" r="3.5" fill="${color}"/>` : '')).join('')}
       <circle cx="${lx}" cy="${ly}" r="9" fill="${color}" opacity="0.25"/>
     </svg>
-    <div class="curve-x">${weeks.map((w, i) => `<span>${vals[i] ? `<b>${kind === 'course' ? fmtKm(vals[i]) : kind === 'muscu' && vals[i] >= 1000 ? `${fmtKm(vals[i] / 1000)}t` : Math.round(vals[i])}</b>` : '<b>·</b>'}${Number(w.slice(8))}/${Number(w.slice(5, 7))}</span>`).join('')}</div>`;
+    <div class="curve-x">${weeks.map((w, i) => `<span>${vals[i] ? `<b>${kind === 'course' ? fmtKm(vals[i]) : unit === 'kg' && vals[i] >= 1000 ? `${fmtKm(vals[i] / 1000)}t` : Math.round(vals[i])}</b>` : '<b>·</b>'}${Number(w.slice(8))}/${Number(w.slice(5, 7))}</span>`).join('')}</div>`;
 }
 
 // --- Sons -------------------------------------------------------------------
@@ -1185,7 +1252,8 @@ const screens = {
       ${todayItem?.sport === 'natation' ? `<h3 style="margin-top:0">Prévu aujourd'hui</h3>
         <button class="option natation" data-logplan="natation"><span><span>Natation · ${todayItem.longueurs} longueurs</span><span class="muted">Pas de téléphone dans l'eau : note-la en sortant.</span></span><span class="go">+</span></button>` : ''}
       ${todayItem?.sport === 'muscu' ? `<h3 style="margin-top:0">Prévu aujourd'hui</h3>
-        <button class="option muscu" data-logplan="muscu"><span><span>${esc(todayItem.title)} · ${todayItem.exercices.length} exercices</span><span class="muted">Note charges et répétitions au fil des séries.</span></span><span class="go">+</span></button>` : ''}
+        <button class="option muscu" data-muscugo><span><span>${savedGuided() ? 'Reprendre · ' : ''}${esc(todayItem.title)} · ${todayItem.exercices.length} exercices</span><span class="muted">Guidée : minuteur de récup entre les séries, durée mesurée.</span></span><span class="go">▶</span></button>
+        <button class="option muscu" data-logplan="muscu"><span><span>La noter sans guidage</span><span class="muted">Séance déjà faite : charges et répétitions à la main.</span></span><span class="go">+</span></button>` : ''}
       <h3>Course guidée</h3>
       ${d.sessions.map((x) => `<button class="option" data-start="${esc(x.id)}"><span><span>${esc(x.name)}</span><span class="muted">${minutesLabel(total(x.steps))} · ${x.steps.length} étapes</span></span><span class="go">▶</span></button>`).join('')}
       <h3>Noter une séance faite</h3>
@@ -1260,6 +1328,60 @@ const screens = {
       </div>`;
   },
 
+  muscu() {
+    const s = guided;
+    if (!s) return '';
+    const n = s.exercices.length;
+    const x = currentExercise(s);
+    const unit = (e) => (e.unite === 's' ? 's' : 'répétitions');
+    const pct = Math.round((setsDone(s) / setsTotal(s)) * 100);
+    const head = `
+        <div class="live-top"><span>${esc(s.sessionName)}</span><span>⏱ <b id="mtime">${mmss(guidedElapsed(s))}</b></span></div>
+        <div class="bar"><div style="width:${pct}%"></div></div>`;
+    const end = '<button data-mfinish>Terminer la séance</button>';
+    if (s.phase === 'rest') {
+      return `
+      <div class="live mlive" id="mlive" data-phase="rest">${head}
+        <p class="now">Récup</p>
+        <p class="count" id="mrest">${mmss(Math.ceil(restLeft(s)))}</p>
+        <p class="next">Ensuite : <b>${esc(x.nom)}</b></p>
+        <p class="muted" style="margin:4px 0 0">Série ${s.set + 1}/${x.reps.length} · ${x.min} à ${x.max} ${unit(x)}${x.poids ? ` · ${kgLabel(x.poids)}` : ''}</p>
+        ${load().settings.son !== 'exclusif' ? '<p class="muted small" style="margin:10px 0 0">Signal à la fin de la récup : iPhone hors silencieux.</p>' : ''}
+        <div class="live-controls">
+          <button data-mrest="-15">−15 s</button>
+          <button data-mrest="15">+15 s</button>
+        </div>
+        <div class="live-extra">
+          <button class="mgo" data-mrestskip>Reprendre maintenant</button>
+          ${end}
+        </div>
+      </div>`;
+    }
+    const key = `${s.ex}:${s.set}`;
+    if (mDraft.key !== key) mDraft = { key, reps: suggestedReps(s) };
+    return `
+      <div class="live mlive" id="mlive" data-phase="work">${head}
+        <p class="mstep">Exercice ${s.ex + 1}/${n} · série ${s.set + 1}/${x.reps.length}</p>
+        <p class="mname">${esc(x.nom)}</p>
+        <p class="next">Objectif : ${x.min} à ${x.max} ${unit(x)}</p>
+        <p class="muted small" style="margin:4px 0 0">${esc(x.reason || '')}</p>
+        ${x.materiel === 'corps' ? '' : `<div class="kg mkg"><input id="mkg" type="number" inputmode="decimal" step="0.5" min="0" placeholder="?" value="${x.poids ?? ''}"><span>kg${x.materiel === 'halteres' ? ' par haltère' : ''}</span></div>`}
+        <div class="mstepper">
+          <button data-mreps="-1" aria-label="Une de moins">−</button>
+          <b id="mreps">${mDraft.reps}</b>
+          <button data-mreps="1" aria-label="Une de plus">+</button>
+        </div>
+        <p class="muted small" style="text-align:center;margin:0">${x.unite === 's' ? 'secondes tenues' : 'répétitions faites'}</p>
+        <div class="live-controls one">
+          <button class="mgo" data-msetdone>Série faite${s.set + 1 < x.reps.length || s.ex + 1 < n ? ` · récup ${s.repos} s` : ''}</button>
+        </div>
+        <div class="live-extra">
+          <button data-mskip>Passer l'exercice</button>
+          ${end}
+        </div>
+      </div>`;
+  },
+
   bilan() {
     const b = bilan;
     const scale = (field, labels) => `<div class="scale">${[1, 2, 3, 4, 5].map((n) => `<button data-scale="${field}" data-v="${n}" class="${b[field] === n ? 'on' : ''}">${n}</button>`).join('')}</div><p class="muted small">${labels}</p>`;
@@ -1330,7 +1452,7 @@ const screens = {
     const bestSwim = Math.max(0, ...swims.map(swimMeters));
     const progSports = ['course', 'natation', 'muscu'].filter((x) => practiced(d, x) || d.history.some((h) => sportOf(h) === x));
     const sp = progSports.includes(progSport) ? progSport : progSports[0] || 'course';
-    const key = { course: 'km', natation: 'm', muscu: 'kg' }[sp];
+    const key = sp === 'muscu' ? muscuKey(d.history) : { course: 'km', natation: 'm' }[sp];
     const wk = weekTotals(d.history, mondayOf(today()))[key];
     const prev = weekTotals(d.history, addDays(mondayOf(today()), -7))[key];
     const diff = wk - prev;
@@ -1339,19 +1461,28 @@ const screens = {
     const best = {};
     for (const h of d.history.filter((x) => sportOf(x) === 'muscu')) for (const x of h.exercices || []) if (x.poids > (best[x.id]?.poids || 0)) best[x.id] = x;
     const topLifts = Object.values(best).sort((a, b) => b.poids - a.poids).slice(0, 3);
+    // Poids du corps : meilleure série (répétitions) par exercice.
+    const bestSet = {};
+    for (const h of d.history.filter((x) => sportOf(x) === 'muscu')) {
+      for (const x of h.exercices || []) {
+        const r = Math.max(0, ...(x.reps || []).map(Number).filter(Number.isFinite));
+        if (x.unite !== 's' && r > (bestSet[x.id]?.r || 0)) bestSet[x.id] = { nom: x.nom, r };
+      }
+    }
+    const topSets = Object.values(bestSet).sort((a, b) => b.r - a.r).slice(0, 3);
     return `
       <h1>Progression</h1>
       ${d.history.length ? `
         ${progSports.length > 1 ? `<div class="seg">${progSports.map((x) => `<button data-progsport="${x}" class="${sp === x ? `on ${x}` : ''}">${SPORT_LABEL[x]}</button>`).join('')}</div>` : ''}
         <section class="prog ${sp}">
           <p class="eyebrow" style="margin:0">Cette semaine</p>
-          <p class="hero-num">${fmt(wk)}<small>${key}</small></p>
-          <p class="delta ${diff > 0 ? 'up' : diff < 0 ? 'down' : ''}">${diff > 0 ? '▲' : diff < 0 ? '▼' : '='} ${fmt(Math.abs(diff))} ${key} par rapport à la semaine dernière</p>
-          ${weekCurve(d.history, sp)}
+          <p class="hero-num">${fmt(wk)}<small>${UNIT_LABEL[key]}</small></p>
+          <p class="delta ${diff > 0 ? 'up' : diff < 0 ? 'down' : ''}">${diff > 0 ? '▲' : diff < 0 ? '▼' : '='} ${fmt(Math.abs(diff))} ${UNIT_LABEL[key]} par rapport à la semaine dernière</p>
+          ${weekCurve(d.history, sp, key)}
         </section>
-        ${sp === 'muscu' ? '<p class="muted small" style="margin-top:4px">Total soulevé = charge × répétitions de la semaine, hors poids du corps.</p>' : ''}
+        ${sp === 'muscu' ? `<p class="muted small" style="margin-top:4px">${key === 'kg' ? 'Total soulevé = charge × répétitions de la semaine, hors poids du corps.' : 'Répétitions faites dans la semaine, toutes séries comprises (gainage non compté). Passe en kg dès que tu notes une charge.'}</p>` : ''}
         <h3>Records</h3>
-        ${sp === 'muscu' ? `<div class="records">${topLifts.length ? topLifts.map((x) => `<div class="muscu"><b>${String(x.poids).replace('.', ',')}<small>kg</small></b><span>${esc(x.nom.split(' (')[0])}</span></div>`).join('') : '<div class="muscu"><b>–</b><span>aucune charge notée</span></div>'}</div>` : `<div class="records">
+        ${sp === 'muscu' && key === 'reps' ? `<div class="records">${topSets.length ? topSets.map((x) => `<div class="muscu"><b>${x.r}<small>rép.</small></b><span>${esc(x.nom.split(" (")[0])} · en une série</span></div>`).join('') : '<div class="muscu"><b>–</b><span>aucune série notée</span></div>'}</div>` : sp === 'muscu' ? `<div class="records">${topLifts.length ? topLifts.map((x) => `<div class="muscu"><b>${String(x.poids).replace('.', ',')}<small>kg</small></b><span>${esc(x.nom.split(' (')[0])}</span></div>`).join('') : '<div class="muscu"><b>–</b><span>aucune charge notée</span></div>'}</div>` : `<div class="records">
           ${practiced(d, 'course') || runs.length ? `<div class="course"><b>${longest ? fmtKm(longest) : '–'}<small>km</small></b><span>plus longue course</span></div>
           <div class="course"><b>${paces.length ? allure(Math.min(...paces)).replace('/km', '') : '–'}</b><span>meilleure allure</span></div>` : ''}
           ${practiced(d, 'natation') || swims.length ? `<div class="natation"><b>${bestSwim || '–'}<small>m</small></b><span>plus longue nage</span></div>` : ''}
@@ -1373,14 +1504,14 @@ const screens = {
     const autre = b.sport === 'autre';
     return `
       <h1>${autre ? 'Autre activité' : b.sport === 'muscu' ? esc(b.sessionName) : swim ? 'Séance de natation' : b.fromPlan ? 'Course du programme' : 'Course libre'}</h1>
-      ${b.fromPlan ? '<p class="muted">Prérempli avec le programme du jour. Corrige ce qui a changé, puis note ton ressenti.</p>' : ''}
+      ${b.horaires ? `<p class="muted">Séance guidée · ${esc(b.horaires)}, durée mesurée. Séries notées pendant la séance : corrige si besoin, puis note ton ressenti.</p>` : b.fromPlan ? '<p class="muted">Prérempli avec le programme du jour. Corrige ce qui a changé, puis note ton ressenti.</p>' : ''}
       ${autre && b.remplace ? `<p class="muted">À la place de ta ${SPORT_LABEL[b.remplace].toLowerCase()} du jour. Elle sera décalée, pas sautée, et ce que tu notes ici ne fait pas monter ton programme.</p>` : ''}
       <div class="card">
         ${autre ? `<label for="activite" style="margin-top:0">Activité</label>
         <input id="activite" placeholder="Ex. : padel" maxlength="40" value="${esc(b.activite)}">
         <div class="chips">${ACTIVITES.map((a) => `<button data-act="${a}" class="${b.activite === a ? 'on' : ''}">${a}</button>`).join('')}</div>` : ''}
         ${autre && b.remplace ? '' : `<label for="date">Date</label>
-        <input id="date" type="date" value="${esc(b.date)}">`}
+        <input id="date" type="date" value="${esc(String(b.date).slice(0, 10))}">`}
         <label for="duree">Durée (minutes)</label>
         <input id="duree" type="number" inputmode="numeric" min="1" max="600" value="${b.elapsedSec ? Math.round(b.elapsedSec / 60) : ''}">
         ${b.sport === 'muscu' || autre ? '' : swim ? `
@@ -1604,15 +1735,16 @@ function placeWeek() {
 }
 
 // Onglet allumé pour chaque écran.
-const TAB_OF = { questionnaire: 'profil', edit: 'programme', live: 'demarrer', bilan: 'progression', saisie: 'progression', suite: 'programme', compte: 'profil' };
+const TAB_OF = { questionnaire: 'profil', edit: 'programme', live: 'demarrer', muscu: 'demarrer', bilan: 'progression', saisie: 'progression', suite: 'programme', compte: 'profil' };
 
 function render() {
   app.innerHTML = screens[current]();
   for (const b of document.querySelectorAll('#tabs button')) b.classList.toggle('on', b.dataset.tab === (TAB_OF[current] || current));
-  document.body.classList.toggle('is-live', current === 'live');
+  document.body.classList.toggle('is-live', current === 'live' || current === 'muscu');
   mountMaps();
   placeWeek();
   if (current === 'live') requestAnimationFrame(tick);
+  guidedLoop();
 }
 
 function go(screen) {
@@ -1762,7 +1894,11 @@ function newManual(sport) {
 function readSaisie() {
   const v = (id) => document.getElementById(id);
   if (!v('duree')) return;
-  if (v('date')) bilan.date = v('date').value || today();
+  if (v('date')) {
+    // Date inchangée : on garde l'heure (séance guidée), sinon on la perd avec la plage du cardio.
+    const day = v('date').value || today();
+    if (String(bilan.date).slice(0, 10) !== day) { bilan.date = day; delete bilan.endedAt; }
+  }
   const min = parseInt(v('duree').value, 10);
   const sec = Number.isFinite(min) && min > 0 ? min * 60 : null;
   // Tapé à la main : la montre ne le remplace plus.
@@ -1858,6 +1994,7 @@ document.addEventListener('click', (e) => {
   } else if (ds.tab) {
     if (ds.tab === 'accueil') { selDay = today(); weekScroll = null; }
     if (current === 'live' && !audio.paused && !confirm('La séance continue en arrière-plan. Quitter l\'écran ?')) return;
+    if (current === 'saisie' && bilan?.source === 'guidee' && !confirm('Ta séance guidée ne sera pas enregistrée. Quitter quand même ?')) return;
     go(ds.tab === 'demarrer' && live && !live.done ? 'live' : ds.tab);
   } else if (ds.start) {
     startSession(findSession(ds.start));
@@ -2089,6 +2226,181 @@ document.addEventListener('change', (e) => {
   } else if (current === 'edit') {
     readEditor();
     render();
+  }
+});
+
+// --- Musculation guidée -------------------------------------------------------
+// « Démarrer » note l'heure de début, « Série faite » lance la récup, un signal (et un flash)
+// marque sa fin, « Terminer » note l'heure de fin et ouvre le bilan prérempli.
+
+const MUSCU_KEY = 'foulee.muscu';
+let guided = null;
+let mDraft = { key: null, reps: 0 };
+const restAudio = new Audio();
+restAudio.setAttribute('playsinline', '');
+let restUrl = null;
+let guidedTimer = null;
+
+function saveGuided() {
+  try {
+    if (guided && guided.phase !== 'done') localStorage.setItem(MUSCU_KEY, JSON.stringify(guided));
+    else localStorage.removeItem(MUSCU_KEY);
+  } catch {}
+}
+function savedGuided() {
+  if (guided && guided.phase !== 'done') return guided;
+  try {
+    const s = JSON.parse(localStorage.getItem(MUSCU_KEY));
+    return s && s.phase !== 'done' && Date.now() - s.startedAt < 4 * 3600 * 1000 ? s : null;
+  } catch {
+    return null;
+  }
+}
+
+function stopRestAudio() {
+  restAudio.pause();
+  if (restUrl) URL.revokeObjectURL(restUrl);
+  restUrl = null;
+}
+// Lancée dans le geste (« Série faite », ±15 s) : iOS refuse un son lancé plus tard par une minuterie.
+function playRest() {
+  stopRestAudio();
+  if (!audioAssets || !guided || guided.phase !== 'rest') return;
+  try {
+    const bytes = restTrack(restLeft(guided), audioAssets.index, audioAssets.pack);
+    restUrl = URL.createObjectURL(new Blob([bytes], { type: 'audio/mpeg' }));
+    applyAudioMode();
+    restAudio.src = restUrl;
+    restAudio.currentTime = 0;
+    restAudio.play().catch(() => {});
+  } catch {}
+}
+
+function flashMuscu() {
+  document.body.classList.remove('flash-muscu');
+  void document.body.offsetWidth;
+  document.body.classList.add('flash-muscu');
+  setTimeout(() => document.body.classList.remove('flash-muscu'), 1500);
+}
+
+function guidedLoop() {
+  clearInterval(guidedTimer);
+  guidedTimer = null;
+  if (current !== 'muscu' || !guided) return;
+  guidedTimer = setInterval(() => {
+    if (current !== 'muscu' || !guided) return guidedLoop();
+    const t = document.getElementById('mtime');
+    if (t) t.textContent = mmss(guidedElapsed(guided));
+    if (guided.phase !== 'rest') return;
+    const left = restLeft(guided);
+    if (left <= 0) {
+      endRest(guided);
+      saveGuided();
+      flashMuscu();
+      render();
+      return;
+    }
+    const r = document.getElementById('mrest');
+    if (r) r.textContent = mmss(Math.ceil(left));
+  }, 250);
+}
+
+function startGuided() {
+  if (!audioAssets) loadAudio().catch(() => {});
+  const resume = savedGuided();
+  if (resume) {
+    guided = resume;
+  } else {
+    const d = load();
+    const q = d.profile.questionnaire || {};
+    const p = planFor(d, 1).find((x) => x.sport === 'muscu' && x.date === today())
+      || muscuPlan(nextSeance(d.history, (q.joursMuscu || []).length), d.history, q, d.settings.muscuChoix || {});
+    const log = muscuLog(p);
+    guided = createGuided({ ...log, exercices: log.exercices.map((x, i) => ({ ...x, reason: p.exercices[i].reason })), repos: p.repos });
+  }
+  mDraft = { key: null, reps: 0 };
+  saveGuided();
+  keepAwake();
+  go('muscu');
+  if (guided.phase === 'rest') playRest();
+}
+
+function finishGuided() {
+  finish(guided);
+  stopRestAudio();
+  stopLiveExtras();
+  const g = guided;
+  const b = newManual('muscu');
+  const hm = (ms) => new Date(ms).toLocaleTimeString('fr-FR', { hour: '2-digit', minute: '2-digit' });
+  Object.assign(b, {
+    source: 'guidee',
+    fromPlan: true,
+    // Heure de début et de fin : la plage où le cardio de la montre est rattaché.
+    date: new Date(g.startedAt).toLocaleString('sv-SE').replace(' ', 'T'),
+    endedAt: new Date(g.endedAt).toLocaleString('sv-SE').replace(' ', 'T'),
+    seance: g.seance,
+    sessionName: g.sessionName,
+    exercices: g.exercices.map(({ reason, ...x }) => ({ ...x, reps: [...x.reps] })),
+    elapsedSec: Math.max(60, Math.round(guidedElapsed(g) / 60) * 60),
+    horaires: `${hm(g.startedAt)} → ${hm(g.endedAt)}`,
+  });
+  guided = null;
+  saveGuided();
+  bilan = b;
+  go('saisie');
+}
+
+document.addEventListener('visibilitychange', () => {
+  if (current === 'muscu' && guided && document.visibilityState === 'visible') { keepAwake(); render(); }
+});
+
+document.addEventListener('click', (e) => {
+  const t = e.target.closest('button');
+  if (!t) return;
+  const ds = t.dataset;
+  if ('muscugo' in ds) return startGuided();
+  if (current !== 'muscu' || !guided) return;
+  if (ds.mreps) {
+    const x = currentExercise(guided);
+    const step = x.unite === 's' ? 5 : 1;
+    mDraft.reps = Math.max(1, Math.min(300, mDraft.reps + Number(ds.mreps) * step));
+    document.getElementById('mreps').textContent = mDraft.reps;
+  } else if ('msetdone' in ds) {
+    const x = currentExercise(guided);
+    const kg = parseFloat(String(document.getElementById('mkg')?.value ?? '').replace(',', '.'));
+    if (Number.isFinite(kg) && kg > 0) x.poids = Math.round(kg * 10) / 10;
+    setDone(guided, mDraft.reps);
+    if (guided.phase === 'done') return finishGuided();
+    saveGuided();
+    render();
+    playRest();
+  } else if (ds.mrest) {
+    adjustRest(guided, Number(ds.mrest));
+    saveGuided();
+    render();
+    playRest();
+  } else if ('mrestskip' in ds) {
+    endRest(guided);
+    stopRestAudio();
+    saveGuided();
+    render();
+  } else if ('mskip' in ds) {
+    if (!confirm('Passer les séries restantes de cet exercice ?')) return;
+    skipExercise(guided);
+    if (guided.phase === 'done') return finishGuided();
+    saveGuided();
+    render();
+  } else if ('mfinish' in ds) {
+    if (!setsDone(guided)) {
+      if (!confirm('Aucune série faite. Abandonner la séance ?')) return;
+      stopRestAudio();
+      stopLiveExtras();
+      guided = null;
+      saveGuided();
+      return go('accueil');
+    }
+    if (!confirm('Terminer la séance maintenant ?')) return;
+    finishGuided();
   }
 });
 
@@ -2485,7 +2797,22 @@ if (inviteParam && account.serverEnabled()) {
     .finally(() => render());
 }
 refreshAccount();
-syncNow().then(retryIA).then(() => fetchCardio());
+// Muscu guidées notées avant le 3/11 après-midi : seule la date était gardée, sans heure, donc
+// sans plage pour le cardio de la montre. Les horaires affichés au bilan la redonnent.
+function fixGuidedTimes() {
+  const re = /^(\d{2}):(\d{2}) → (\d{2}):(\d{2})$/;
+  const todo = (h) => h.sport === 'muscu' && h.source === 'guidee' && String(h.date).length === 10 && re.test(h.horaires || '');
+  if (!load().history.some(todo)) return;
+  update((d) => {
+    for (const h of d.history.filter(todo)) {
+      const [, h1, m1, h2, m2] = h.horaires.match(re);
+      h.endedAt = `${h.date}T${h2}:${m2}:00`;
+      h.date = `${h.date}T${h1}:${m1}:00`;
+    }
+  });
+}
+fixGuidedTimes();
+syncNow().then(() => fixGuidedTimes()).then(retryIA).then(() => fetchCardio());
 // Retour dans l'app (après le Raccourci, par exemple) : cardio et conseils en attente.
 document.addEventListener('visibilitychange', () => {
   if (document.visibilityState !== 'visible' || current === 'live') return;
