@@ -90,3 +90,28 @@ export function stepAt(starts, end, t) {
   while (i + 1 < starts.length && t >= starts[i + 1]) i++;
   return i;
 }
+
+// Échantillon des signaux, joué depuis l'écran « Avant de partir » pour vérifier le volume :
+// montée (cours), 3 bips de compte à rebours, descente (marche).
+export const SAMPLE_EVENTS = [
+  { at: 0.2, clip: 'signal_course' },
+  { at: 1.6, clip: 'bip' },
+  { at: 2.6, clip: 'bip' },
+  { at: 3.6, clip: 'bip' },
+  { at: 4.6, clip: 'signal_marche' },
+];
+export function sample(index, pack) {
+  const { frameBytes: fb, frameSeconds: fs, clips } = index;
+  const nFrames = Math.ceil(6.4 / fs);
+  const out = new Uint8Array(nFrames * fb);
+  const sil = pack.subarray(clips.silence.offset * fb, (clips.silence.offset + 1) * fb);
+  for (let f = 0; f < nFrames; f++) out.set(sil, f * fb);
+  for (const e of SAMPLE_EVENTS) {
+    const clip = clips[e.clip];
+    if (!clip) throw new Error(`Clip manquant : ${e.clip}`);
+    const at = Math.round(e.at / fs);
+    const frames = Math.min(clip.frames, nFrames - at);
+    out.set(pack.subarray(clip.offset * fb, (clip.offset + frames) * fb), at * fb);
+  }
+  return out;
+}

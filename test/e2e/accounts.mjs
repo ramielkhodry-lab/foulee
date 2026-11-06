@@ -81,7 +81,7 @@ try {
   await rami.page.fill('#acc-prenom', 'Rami');
   await rami.page.click('[data-register]');
   // Nouveau compte sans questionnaire : il s'ouvre ; « Plus tard » laisse la bannière.
-  await rami.page.waitForSelector('[data-qsave]', { timeout: 15000 });
+  await rami.page.waitForSelector('.q-steps', { timeout: 15000 });
   await rami.page.click('text=Plus tard');
   checks['bannière tant que le questionnaire n’est pas rempli'] = Boolean(await rami.page.$('.q-banner'));
   await rami.page.click('[data-tab="profil"]');
@@ -107,15 +107,23 @@ try {
   checks['invitation reconnue'] = (await text(femme.page)).includes("Rami t'invite");
   await femme.page.fill('#acc-prenom', 'Sarah');
   await femme.page.click('[data-register]');
-  await femme.page.waitForSelector('[data-qsave]', { timeout: 15000 });
-  checks['questionnaire proposé à la création du compte'] = (await text(femme.page)).includes('Ce que tu pratiques');
-  checks['le questionnaire de la femme est vierge'] = !(await femme.page.$('.q-sports button.on'));
+  await femme.page.waitForSelector('.q-steps', { timeout: 15000 });
+  checks['questionnaire proposé à la création du compte'] = (await text(femme.page)).includes('Tes sports');
+  checks['le questionnaire de la femme est vierge'] = !(await femme.page.$('.q-card.on'));
   // Course seulement, objectif 5 km, 5 min sans s'arrêter, mardi + jeudi + samedi.
+  // Parcours en étapes : « Continuer » refuse une étape incomplète et dit ce qui manque.
+  await femme.page.click('[data-qnext]');
+  checks['étape incomplète : ce qui manque est dit'] = (await text(femme.page)).includes('Choisis au moins un sport');
   await femme.page.click('[data-qsport="course"]');
+  await femme.page.click('[data-qnext]');
   await femme.page.check('input[name="q-objc"][value="5km"]');
+  await femme.page.click('[data-qnext]');
   await femme.page.check('input[name="q-nivc"][value="4"]');
+  await femme.page.click('[data-qnext]');
   for (const n of [1, 5]) await femme.page.click(`[data-qday="joursCourse"][data-v="${n}"]`);
   for (const n of [2, 4, 6]) await femme.page.click(`[data-qday="joursCourse"][data-v="${n}"]`);
+  await femme.page.click('[data-qnext]');
+  checks['récapitulatif : prochains jours'] = (await text(femme.page)).includes('Tes prochaines séances');
   await femme.page.screenshot({ path: '/tmp/foulee-questionnaire.png', fullPage: true });
   await femme.page.click('[data-qsave]');
   await femme.page.waitForSelector('.level-num');
@@ -164,8 +172,8 @@ try {
   checks['téléphone partagé : prévenu que le compte démarre vide'] = (await text(femme.page)).includes('ton compte démarre vide');
   await femme.page.fill('#acc-prenom', 'Karim');
   await femme.page.click('[data-register]');
-  await femme.page.waitForSelector('[data-qsave]', { timeout: 15000 });
-  checks['téléphone partagé : questionnaire vierge pour le frère'] = !(await femme.page.$('.q-sports button.on'));
+  await femme.page.waitForSelector('.q-steps', { timeout: 15000 });
+  checks['téléphone partagé : questionnaire vierge pour le frère'] = !(await femme.page.$('.q-card.on'));
   await femme.page.waitForTimeout(2600);
   const frereToken = await token(femme.page);
   const frereData = JSON.stringify((await (await call('/me/data', frereToken)).json()).data);

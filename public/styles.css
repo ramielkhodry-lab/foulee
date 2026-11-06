@@ -560,3 +560,61 @@ body.flash-muscu { animation: flash-muscu 1.5s ease-out; }
 .hero .day-link, .li-more .day-link { display: block; margin: 4px auto 0; }
 .move-sheet.muscu .option:not(.back) .go { background: var(--muscu); }
 .move-sheet.natation .option:not(.back) .go { background: var(--swim); color: #fff; }
+
+/* --- Refonte mobile (P0) --------------------------------------------------- */
+/* Accueil : la date sous le prénom */
+.hello .hello-date { display: block; font-style: normal; font-size: 14px; color: var(--muted); margin-top: 4px; text-transform: none; }
+.hello .hello-date::first-letter { text-transform: uppercase; }
+.notice.small { font-size: 13px; margin-top: 18px; }
+.alert.pending { color: var(--ink); background: rgba(200, 255, 46, 0.08); border-color: rgba(200, 255, 46, 0.45); }
+
+/* Onboarding en étapes */
+.q-steps { list-style: none; display: flex; align-items: center; gap: 8px; padding: 0; margin: 10px 0 6px; }
+.q-steps li { display: flex; align-items: center; gap: 8px; color: var(--muted); font-size: 14px; }
+.q-steps li span { display: inline-grid; place-items: center; width: 30px; height: 30px; border-radius: 50%; border: 2px solid var(--line); font-weight: 800; font-size: 14px; }
+.q-steps li.done span { background: var(--surface-2); border-color: var(--muted); color: var(--ink); }
+.q-steps li.now span { background: var(--run); border-color: var(--run); color: var(--on-accent); }
+.q-steps li.now b { color: var(--ink); font-weight: 700; }
+.q-cards { display: grid; gap: 10px; margin-top: 12px; }
+.q-card { display: flex; align-items: center; gap: 14px; width: 100%; min-height: 76px; padding: 14px 16px; text-align: left; border-radius: var(--radius); background: var(--surface); border: 2px solid var(--line); }
+.q-card > span { flex: 1; }
+.q-card b { display: block; font-size: 18px; }
+.q-card span span { display: block; font-size: 14px; color: var(--muted); font-weight: 400; }
+.q-card i { flex: none; display: grid; place-items: center; width: 34px; height: 34px; border-radius: 50%; border: 2px solid var(--line); font-style: normal; font-weight: 900; font-size: 18px; color: var(--muted); }
+.q-card.on.course { border-color: var(--run); } .q-card.on.course i { background: var(--run); border-color: var(--run); color: var(--on-accent); }
+.q-card.on.natation { border-color: var(--swim); } .q-card.on.natation i { background: var(--swim); border-color: var(--swim); color: #fff; }
+.q-card.on.muscu { border-color: var(--muscu); } .q-card.on.muscu i { background: var(--muscu); border-color: var(--muscu); color: var(--on-accent); }
+.q-sub { margin: 16px 0 4px; font-weight: 700; }
+.q-preview b.muscu { color: var(--muscu); }
+.q-nav { display: flex; gap: 10px; margin-top: 20px; }
+.q-nav .btn-ghost { flex: 0 0 auto; min-height: 60px; padding: 0 18px; }
+.q-nav .btn-primary { flex: 1; }
+.days button.on { box-shadow: inset 0 -4px 0 rgba(0, 0, 0, 0.35); font-weight: 900; text-decoration: underline; text-underline-offset: 3px; }
+
+/* Avant de partir */
+.prep-title { font-family: var(--display); font-style: italic; font-weight: 800; font-size: 36px; line-height: 1; text-transform: uppercase; margin: 6px 0 10px; }
+.prep-sum { background: var(--surface); border-radius: var(--radius); padding: 14px 16px; margin-bottom: 14px; }
+.prep-sum .hero-num { margin-top: 0; }
+.prep-sum .effort-bar { margin: 12px 0 0; }
+.prep-list { list-style: none; padding: 0; margin: 0 0 16px; display: grid; gap: 8px; }
+.prep-item { background: var(--surface); border-radius: 16px; padding: 12px 14px; border-left: 4px solid var(--line); }
+.prep-item b { display: block; margin-bottom: 2px; }
+.prep-item span { display: block; font-size: 14px; color: #CFCFD4; }
+.prep-item .small-btn { margin-top: 8px; padding-left: 0; }
+.prep-item.ok { border-left-color: var(--run); } .prep-item.ok b { color: var(--run); }
+.prep-item.wait { border-left-color: var(--muted); }
+.prep-item.ko { border-left-color: var(--danger); } .prep-item.ko b { color: var(--danger); }
+.cta:disabled { opacity: 0.4; box-shadow: none; }
+
+/* Séance : fin distincte de la pause, confirmation en grand */
+.btn-stop { background: transparent; border: 2px solid var(--danger); color: var(--danger); font-weight: 800; }
+.live-extra .btn-stop { min-height: 56px; }
+.live .live-done { margin-top: 12px; }
+.gpsline p { margin: 0; }
+.gpsline .small-btn { padding-left: 0; }
+.finish-sheet h2 { margin: 4px 0 8px; font-size: 26px; }
+.finish-sheet .btn-primary { margin-top: 10px; min-height: 68px; }
+.finish-sheet .btn-stop { width: 100%; min-height: 60px; margin-top: 12px; font-size: 17px; }
+.q-card .ico { flex: none; width: 46px; height: 46px; }
+/* « Je suis prêt » reste à portée du pouce, au-dessus de la barre d'onglets */
+.prep-go { position: sticky; bottom: calc(84px + env(safe-area-inset-bottom)); z-index: 5; padding: 10px 0 6px; background: linear-gradient(to bottom, rgba(0,0,0,0), #000 30%); }

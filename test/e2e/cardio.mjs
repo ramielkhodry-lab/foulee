@@ -93,6 +93,7 @@ async function guidedRun(page) {
   await page.waitForTimeout(800);
   const start = Date.now();
   await page.click('[data-start="test-4"]');
+  await page.click('[data-ready]');
   await page.waitForSelector('#count');
   await page.waitForTimeout(1500);
   await page.click('[data-skip]'); // fin du compte à rebours : étape 1
