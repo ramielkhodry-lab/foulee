@@ -32,7 +32,8 @@ export function stepTimes(anchors, starts, end, reached) {
 // Plage horaire de la séance (ms), ou null si on ne connaît pas l'heure (séance saisie à la main).
 export function windowOf(h) {
   if (h?.fenetre?.length === 2) return h.fenetre; // natation : plage trouvée dans les longueurs de la montre
-  if (h?.stepMs?.length >= 2) return [h.stepMs[0], h.stepMs.at(-1)];
+  // Jusqu'à l'appui sur « Terminer » (finMs), même après la fin du programme.
+  if (h?.stepMs?.length >= 2) return [h.stepMs[0], Math.max(h.stepMs.at(-1), h.finMs || 0)];
   if (h?.source !== 'guidee' || !/T\d{2}:\d{2}/.test(String(h.date))) return null;
   const start = new Date(h.date).getTime();
   if (!Number.isFinite(start)) return null;

@@ -112,11 +112,24 @@ textarea { min-height: 90px; }
 .live .now { font-size: clamp(34px, 11vw, 52px); font-weight: 900; text-transform: uppercase; letter-spacing: -0.01em; line-height: 1; margin: 26px 0 0; color: var(--ink); }
 .live .count { font-size: clamp(110px, 38vw, 200px); font-weight: 900; line-height: 0.95; letter-spacing: -0.05em; margin: 4px 0 8px; color: var(--ink); }
 .live[data-effort="course"] .now, .live[data-effort="course"] .count { color: var(--run); }
+.live .count.over { font-size: clamp(80px, 26vw, 150px); color: var(--muted); } /* temps après le programme : « +12:34 » doit tenir */
 .live .next { font-size: 21px; font-weight: 650; color: var(--ink); margin: 0; }
 .live .next .muted { font-weight: 500; }
-.bar { height: 8px; background: var(--surface-2); border-radius: 99px; overflow: hidden; margin: 22px 0 8px; }
-.bar > div { height: 100%; background: var(--ink); width: 0; }
-.live[data-effort="course"] .bar > div { background: var(--run); }
+/* Barre de séance : une case par étape, vert = course, blanc = marche ; futur estompé. */
+.bar { position: relative; height: 16px; margin: 22px 0 8px; }
+.bar .seg { position: absolute; top: 0; bottom: 0; overflow: hidden; border-right: 2px solid var(--bg); box-sizing: border-box; }
+.bar .seg:first-child { border-radius: 99px 0 0 99px; }
+.bar .seg:last-of-type { border-radius: 0 99px 99px 0; border-right: 0; }
+.bar .seg.course { background: rgba(200, 255, 46, 0.28); }
+.bar .seg.marche { background: rgba(245, 245, 247, 0.22); }
+.bar .seg > i { position: absolute; left: 0; top: 0; bottom: 0; width: 0; }
+.bar .seg.course > i { background: var(--run); }
+.bar .seg.marche > i { background: var(--ink); }
+.bar .cursor { position: absolute; top: -5px; bottom: -5px; width: 4px; margin-left: -2px; border-radius: 2px; background: var(--ink); box-shadow: 0 0 0 2px var(--bg); }
+.bar .halfmark { position: absolute; top: -9px; width: 0; height: 0; margin-left: -6px; border: 6px solid transparent; border-top-color: var(--muted); border-bottom: 0; }
+.halfway { margin: 6px 0 0; font-size: 20px; font-weight: 800; color: var(--run); text-transform: uppercase; letter-spacing: 0.02em; }
+body.flash-moitie { animation: flash-moitie 2.6s ease-out; }
+@keyframes flash-moitie { 0%, 15% { background: var(--run); } 30% { background: var(--bg); } 45%, 60% { background: var(--run); } 100% { background: var(--bg); } }
 .live-stats { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 8px; margin: 14px 0 0; }
 .live-stats div { border-top: 1px solid var(--line); padding-top: 10px; min-width: 0; }
 .live-stats b { display: block; font-size: clamp(26px, 8vw, 36px); font-weight: 800; letter-spacing: -0.03em; line-height: 1.05; white-space: nowrap; }

@@ -359,3 +359,10 @@ test('muscu guidée : plage = heure de début → heure de fin, cardio rattaché
   assert.ok(c && c.avg > 110 && c.max === 129);
   assert.equal(windowOf({ ...h, date: '2026-11-03' }), null, 'sans heure : pas de plage');
 });
+
+test('fenêtre de séance : jusqu\'à « Terminer » (finMs), même après la fin du programme', () => {
+  const h = { source: 'guidee', date: '2026-11-06T08:00:00', stepMs: [1000, 2000, 3000] };
+  assert.deepEqual(windowOf(h), [1000, 3000]);
+  assert.deepEqual(windowOf({ ...h, finMs: 9000 }), [1000, 9000]);
+  assert.deepEqual(windowOf({ ...h, finMs: 2500 }), [1000, 3000]);
+});
