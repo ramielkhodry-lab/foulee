@@ -420,13 +420,14 @@ function historyRow(h, open = false) {
     ? (swimMeters(h) ? `${swimMeters(h)}<small>m</small>` : '')
     : h.distanceKm ? `${h.distanceKm.toLocaleString('fr-FR')}<small>km</small>` : h.elapsedSec ? `${Math.round(h.elapsedSec / 60)}<small>min</small>` : '';
   return `
-    <details class="hist"${open ? ' open' : ''}>
+    <details class="hist"${open || h.id === fixedRun ? ' open' : ''}>
       <summary class="li">${icon(sport)}<div class="li-main"><b>${dateLabel(h.date)}</b><span>${parts.length ? parts.join(' · ') : esc(h.structure || h.sessionName || SPORT_LABEL[sport])}</span></div><span class="li-side ${sport}">${side}</span></summary>
       <div class="li-more">
         ${traceOf(h).length ? `<div class="map" data-map="${esc(h.id)}"></div>` : ''}
         ${cardioBlock(h.cardio, h.id)}
         ${montreBlock(h)}
         ${h.deniveleM != null ? `<p class="muted small">Dénivelé : +${h.deniveleM} m, mesuré par le téléphone.</p>` : ''}
+        ${h.source === 'guidee' && (h.distanceSource === 'manuelle' || h.dureeSource === 'manuelle') ? `<p class="muted small">Corrigé à la main${h.distanceSource === 'manuelle' ? ` : ${h.distanceKm.toLocaleString('fr-FR')} km` : ''}${h.dureeSource === 'manuelle' ? `${h.distanceSource === 'manuelle' ? ',' : ' :'} ${Math.round(h.elapsedSec / 60)} min` : ''}. C'est ce qui compte.</p>` : ''}
         ${sport === 'muscu' && h.exercices?.length ? `<ul class="steps">${h.exercices.map((x) => `<li><span>${esc(x.nom)}</span><span class="muted small">${x.poids ? `${kgLabel(x.poids)} · ` : ''}${(x.reps || []).filter((r) => r > 0).join(' / ')}${x.unite === 's' ? ' s' : ''}</span></li>`).join('')}</ul>${tonnage(h) ? '<p class="muted small">Total soulevé : charge × répétitions, hors poids du corps.</p>' : ''}` : ''}
         ${sport === 'natation' && h.swim?.nages?.length ? `<p class="small">${esc(h.swim.nages.join(', '))}${h.swim.detail ? ` · ${esc(h.swim.detail)}` : ''}</p>` : ''}
         ${h.structure ? `<p class="small">${esc(h.structure)}</p>` : ''}
@@ -434,8 +435,45 @@ function historyRow(h, open = false) {
         ${h.commentaire ? `<p class="small">« ${esc(h.commentaire)} »</p>` : ''}
         ${!feel.length && !h.commentaire && !h.structure ? '<p class="muted small">Pas de ressenti noté.</p>' : ''}
         ${coachTips(h)}
+        ${sport === 'course' ? `<div class="fixrun" data-fixbox="${esc(h.id)}"><button class="day-link" data-fixrun="${esc(h.id)}">Corriger avec les chiffres de ma montre</button></div>` : ''}
       </div>
     </details>`;
+}
+
+// Correction après coup d'une course (ex. séance coupée à la fin du programme alors que la
+// marche continuait) : durée et distance lues dans l'app Forme. Elles priment ensuite sur
+// le GPS et sur l'import de la montre.
+let fixedRun = null;
+function openFixRun(id) {
+  const h = load().history.find((x) => x.id === id);
+  const box = document.querySelector(`[data-fixbox="${CSS.escape(id)}"]`);
+  if (!h || !box) return;
+  box.innerHTML = `
+    <p class="small" style="margin:10px 0 6px"><b>Chiffres de ta montre</b> (app Forme, séance du jour)</p>
+    <div class="row">
+      <label class="small" style="flex:1">Durée (min)<input id="fix-min" type="number" inputmode="numeric" min="1" max="600" value="${h.elapsedSec ? Math.round(h.elapsedSec / 60) : ''}"></label>
+      <label class="small" style="flex:1">Distance (km)<input id="fix-km" type="number" inputmode="decimal" step="0.01" min="0" value="${h.distanceKm ?? ''}"></label>
+    </div>
+    <div class="row" style="margin-top:8px"><button class="btn-primary" data-fixsave="${esc(id)}">Enregistrer</button><button data-fixcancel>Annuler</button></div>`;
+}
+function saveFixRun(id) {
+  const min = parseInt(document.getElementById('fix-min')?.value, 10);
+  const km = parseFloat(String(document.getElementById('fix-km')?.value || '').replace(',', '.'));
+  if (!(km > 0) && !(min > 0)) { alert('Indique au moins la durée ou la distance.'); return; }
+  update((d) => {
+    const h = d.history.find((x) => x.id === id);
+    if (!h) return;
+    if (min > 0 && min * 60 !== h.elapsedSec) { h.elapsedSec = min * 60; h.dureeSource = 'manuelle'; }
+    if (km > 0 && km !== h.distanceKm) {
+      if (h.distanceSource === 'gps' && h.distanceKm) h.distanceGpsKm = h.distanceKm;
+      h.distanceKm = Math.round(km * 100) / 100;
+      h.distanceSource = 'manuelle';
+      h.distanceEstimee = false;
+    }
+    h.allureSecKm = h.distanceKm && h.elapsedSec ? Math.round(h.elapsedSec / h.distanceKm) : null;
+  });
+  fixedRun = id;
+  render();
 }
 
 // --- Chiffres de progression ---------------------------------------------------
@@ -2387,6 +2425,12 @@ document.addEventListener('click', (e) => {
       else d.sessions.push(s);
     });
     go('programme');
+  } else if ('fixrun' in ds) {
+    openFixRun(ds.fixrun);
+  } else if ('fixsave' in ds) {
+    saveFixRun(ds.fixsave);
+  } else if ('fixcancel' in ds) {
+    render();
   } else if ('remove' in ds) {
     if (!confirm('Supprimer cette séance ?')) return;
     update((d) => { d.sessions = d.sessions.filter((x) => x.id !== editing.id); });
