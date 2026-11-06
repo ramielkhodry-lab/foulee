@@ -686,7 +686,17 @@ function weekCurve(history, kind, unitKey) {
   }
   const color = { course: 'var(--run)', natation: 'var(--swim)', muscu: 'var(--muscu)' }[kind];
   const [lx, ly] = pts.at(-1);
+  // Bulle au toucher d'un point : le récap de la semaine, rien que du mesuré.
+  const hit = weeks.map((w, i) => {
+    const lines = vals[i] ? curveTip(history, w, kind) : null;
+    if (!lines) return '<span></span>';
+    const x = (pts[i][0] / W) * 100;
+    const y = Math.round((pts[i][1] / H) * 140); // .curve fait 140 px de haut
+    return `<button type="button" data-curvetip="${i}" style="--x:${x}%;--y:${y}px" aria-label="${esc(lines.join(', '))}"><span class="curve-tip ${kind}${i < 2 ? ' edge-l' : i > 5 ? ' edge-r' : ''}">${lines.map((l, j) => (j ? `<span>${esc(l)}</span>` : `<b>${esc(l)}</b>`)).join('')}</span></button>`;
+  }).join('');
   return `
+    <div class="curve-wrap">
+    <div class="curve-hit">${hit}</div>
     <svg class="curve" viewBox="0 0 ${W} ${H}" preserveAspectRatio="none" aria-hidden="true">
       <defs><linearGradient id="area-${kind}" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="${color}" stop-opacity="0.35"/><stop offset="1" stop-color="${color}" stop-opacity="0"/></linearGradient></defs>
       <path d="${d} L${lx},${H} L${pts[0][0]},${H} Z" fill="url(#area-${kind})"/>
@@ -694,7 +704,42 @@ function weekCurve(history, kind, unitKey) {
       ${pts.map(([x, y], i) => (vals[i] ? `<circle cx="${x}" cy="${y}" r="3.5" fill="${color}"/>` : '')).join('')}
       <circle cx="${lx}" cy="${ly}" r="9" fill="${color}" opacity="0.25"/>
     </svg>
-    <div class="curve-x">${weeks.map((w, i) => `<span>${vals[i] ? `<b>${kind === 'course' ? fmtKm(vals[i]) : unit === 'kg' && vals[i] >= 1000 ? `${fmtKm(vals[i] / 1000)}t` : Math.round(vals[i])}</b>` : '<b>·</b>'}${Number(w.slice(8))}/${Number(w.slice(5, 7))}</span>`).join('')}</div>`;
+    <div class="curve-x">${weeks.map((w, i) => `<span>${vals[i] ? `<b>${kind === 'course' ? fmtKm(vals[i]) : unit === 'kg' && vals[i] >= 1000 ? `${fmtKm(vals[i] / 1000)}t` : Math.round(vals[i])}</b>` : '<b>·</b>'}${Number(w.slice(8))}/${Number(w.slice(5, 7))}</span>`).join('')}</div>
+    </div>`;
+}
+
+// Durée lisible : « 45 min », « 1 h 05 ».
+const dureeCourte = (sec) => {
+  const m = Math.round(sec / 60);
+  return m >= 60 ? `${Math.floor(m / 60)} h ${String(m % 60).padStart(2, '0')}` : `${m} min`;
+};
+
+// Récap d'une semaine pour la bulle de la courbe. La durée n'apparaît que si chaque séance l'a.
+function curveTip(history, monday, kind) {
+  const end = addDays(monday, 7);
+  const list = history.filter((h) => { const d = String(h.date).slice(0, 10); return d >= monday && d < end && sportOf(h) === kind; });
+  if (!list.length) return null;
+  const lines = [`Semaine du ${Number(monday.slice(8))}/${Number(monday.slice(5, 7))}`];
+  if (kind === 'natation') {
+    const withLg = list.filter((h) => h.swim?.longueurs);
+    const lg = withLg.reduce((a, h) => a + h.swim.longueurs, 0);
+    const m = list.reduce((a, h) => a + swimMeters(h), 0);
+    if (lg && withLg.length === list.length) {
+      const bassins = [...new Set(withLg.map((h) => h.swim.bassinM || 25))];
+      lines.push(`${lg} longueurs${bassins.length === 1 ? ` · ${bassins[0]} m` : ''}`);
+    }
+    lines.push(`${m.toLocaleString('fr-FR')} m`);
+  } else if (kind === 'course') {
+    lines.push(`${fmtKm(list.reduce((a, h) => a + (h.distanceKm || 0), 0))} km`);
+  } else {
+    const reps = list.reduce((a, h) => a + repsOf(h), 0);
+    const kg = list.reduce((a, h) => a + tonnage(h), 0);
+    if (reps) lines.push(`${reps} répétitions`);
+    if (kg) lines.push(`${Math.round(kg).toLocaleString('fr-FR')} kg soulevés`);
+  }
+  if (list.every((h) => h.elapsedSec > 0)) lines.push(dureeCourte(list.reduce((a, h) => a + h.elapsedSec, 0)));
+  if (list.length > 1) lines.push(`${list.length} séances`);
+  return lines;
 }
 
 // --- Sons -------------------------------------------------------------------
@@ -2193,6 +2238,13 @@ function readBilan() {
   bilan.douleur = v('douleur').value.trim();
   bilan.commentaire = v('comm').value.trim();
 }
+
+// Bulle de la courbe : un toucher l'ouvre, un deuxième (ou ailleurs) la ferme. Pas de nouveau rendu.
+document.addEventListener('click', (e) => {
+  const b = e.target.closest('[data-curvetip]');
+  document.querySelectorAll('[data-curvetip].on').forEach((x) => { if (x !== b) x.classList.remove('on'); });
+  if (b) b.classList.toggle('on');
+});
 
 document.addEventListener('click', (e) => {
   const t = e.target.closest('button');
