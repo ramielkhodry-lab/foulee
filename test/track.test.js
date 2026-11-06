@@ -4,7 +4,7 @@ import { readFileSync, writeFileSync, mkdtempSync } from 'node:fs';
 import { execFileSync } from 'node:child_process';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { assemble, buildEvents, stepAt, LEAD_IN } from '../public/js/track.js';
+import { assemble, buildEvents, stepAt, LEAD_IN, sample, SAMPLE_EVENTS } from '../public/js/track.js';
 import { allPhrases, nombre } from '../public/js/phrases.js';
 
 const index = JSON.parse(readFileSync(new URL('../public/audio/index.json', import.meta.url)));
@@ -117,4 +117,17 @@ test('mode signaux : aucune voix, une montée par course, une descente par march
   assert.equal(clips.at(-1), 'signal_fin');
   assert.deepEqual(events.filter((e) => e.truncated), []);
   assert.equal(events.find((e) => e.clip === 'signal_course').at, 307);
+});
+
+test('échantillon des signaux : MP3 court, tous les clips présents', () => {
+  const bytes = sample(index, pack);
+  assert.equal(bytes.length % index.frameBytes, 0);
+  const sec = (bytes.length / index.frameBytes) * index.frameSeconds;
+  assert.ok(sec > 6 && sec < 7, `durée ${sec}`);
+  for (const e of SAMPLE_EVENTS) assert.ok(index.clips[e.clip], e.clip);
+  // Le premier signal commence bien après 0,2 s : l'octet n'est plus celui du silence.
+  const fb = index.frameBytes;
+  const at = Math.round(0.2 / index.frameSeconds) * fb;
+  const clip = index.clips.signal_course;
+  assert.deepEqual(bytes.subarray(at, at + fb), pack.subarray(clip.offset * fb, (clip.offset + 1) * fb));
 });

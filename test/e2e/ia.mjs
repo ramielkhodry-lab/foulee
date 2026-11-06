@@ -49,6 +49,8 @@ await page.addInitScript((data) => {
   localStorage.setItem('foulee.user', JSON.stringify({ id: 'rami', prenom: 'Rami' }));
   localStorage.setItem('foulee.v1', JSON.stringify({ ...data, owner: 'rami', profile: { prenom: 'Rami' } }));
 }, fixture);
+// Jour figé (jeudi, sans séance prévue) : le test ne dépend pas de la date réelle.
+await page.clock.setFixedTime(new Date('2026-10-29T19:00:00'));
 await page.goto(base);
 await page.waitForTimeout(500);
 
@@ -79,7 +81,8 @@ mode = 'ok';
 await page.click('[data-retryia]');
 await page.waitForTimeout(500);
 const accueilOk = await page.textContent('#app');
-await page.click('[data-pickday="2026-11-04"]');
+const nextWed = '2026-11-04';
+await page.click(`[data-pickday="${nextWed}"]`);
 const carte = await page.textContent('#app');
 await page.locator('.day-card').screenshot({ path: '/tmp/foulee-ia-carte.png' });
 const stored = await page.evaluate(() => JSON.parse(localStorage.getItem('foulee.v1')).history.find((h) => h.commentaire?.includes('avale')));
@@ -95,12 +98,12 @@ await page.screenshot({ path: '/tmp/foulee-ia-suite.png', fullPage: true });
 
 // Jour du bilan : conseils du coach derrière un bouton.
 await page.click('[data-tab="accueil"]');
-await page.click(`[data-pickday="${new Date().toLocaleDateString('sv-SE')}"]`);
+await page.click('[data-pickday="2026-10-29"]');
 await page.click('details.hist[open] .coach summary');
 const jourBilan = await page.textContent('#app');
 await page.locator('details.hist[open]').first().screenshot({ path: '/tmp/foulee-coach-jour.png' });
 // Carte d'une séance future : le détail se déplie sur place.
-await page.click('[data-pickday="2026-11-04"]');
+await page.click(`[data-pickday="${nextWed}"]`);
 await page.click('.day-detail summary');
 const detail = await page.textContent('.day-card');
 await page.locator('.day-card').screenshot({ path: '/tmp/foulee-detail-longueurs.png' });
@@ -111,6 +114,7 @@ const progDetail = await page.textContent('.timeline');
 // Questionnaire : une partie par sport.
 await page.click('[data-questionnaire]');
 await page.click('[data-qsport="muscu"]');
+await page.click('[data-qnext]');
 const parts = await page.locator('.q-part').count();
 await page.screenshot({ path: '/tmp/foulee-questionnaire-parties.png', fullPage: true });
 

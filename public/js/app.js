@@ -1,5 +1,5 @@
 import { KINDS } from './phrases.js';
-import { assemble, stepAt } from './track.js';
+import { assemble, stepAt, sample } from './track.js';
 import { MAX_EXTRA, extendState, canExtend, canRetract, extend, retract, extraSummary } from './extend.js';
 import { load, update, uid, PRESETS, onSave, replace, empty } from './store.js';
 import * as account from './account.js';
@@ -29,6 +29,10 @@ const dateLabel = (d) => new Date(String(d).length === 10 ? `${d}T12:00` : d).to
 // recalculé à chaque affichage sur les 12 semaines qui viennent.
 const planFor = (d, days = HORIZON) => upcoming(d.history, d.settings, today(), days, d.profile.questionnaire);
 const practiced = (d, sport) => planOptions(d.profile.questionnaire).sports.includes(sport);
+// Appareil : les consignes (Safari, silencieux, réglages) ne s'affichent que là où elles s'appliquent.
+const IOS = /iPad|iPhone|iPod/.test(navigator.userAgent) || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
+const ANDROID = /Android/i.test(navigator.userAgent);
+const standalone = () => navigator.standalone === true || matchMedia('(display-mode: standalone)').matches;
 const allure = (secKm) => `${Math.floor(secKm / 60)}'${String(Math.round(secKm % 60)).padStart(2, '0')}/km`;
 
 // Résumé court d'une séance : « 5 min marche · 6 × (3 min course + 2 min marche) · 5 min marche ».
@@ -506,8 +510,16 @@ const qPartHead = (sport) => `<div class="q-part-head">${icon(sport)}<h2>${SPORT
 // Invitation à répondre au questionnaire, tant que ce profil ne l'a pas fait.
 const questionnaireBanner = () => `
   <button class="q-banner" data-questionnaire>
-    <span><b>Personnalise ton programme</b><span>Pour l'instant, c'est le programme par défaut. Tes sports, ton objectif, ton niveau, tes jours : 1 minute.</span></span><i>›</i>
+    <span><b>Crée ton programme</b><span>Ce que tu vois est un <strong>programme d'exemple</strong>, pas encore adapté à toi. Tes sports, ton objectif, ton niveau, tes jours : 5 étapes, 1 minute.</span></span><i>›</i>
   </button>`;
+
+// Installer l'app : consigne propre à l'appareil, jamais au-dessus de la séance.
+function installNotice() {
+  if (standalone()) return '';
+  if (IOS) return '<div class="notice small"><strong>Installe Foulée :</strong> dans Safari, touche Partager puis « Sur l\'écran d\'accueil », et ouvre l\'app depuis son icône.</div>';
+  if (ANDROID) return '<div class="notice small"><strong>Installe Foulée :</strong> dans Chrome, menu ⋮ puis « Ajouter à l\'écran d\'accueil » (ou « Installer l\'application »).</div>';
+  return '';
+}
 
 // « + Natation » / « + Course » : seulement les sports de ce profil.
 function manualButtons(d, cls, date = null, style = '', courseSuffix = '') {
@@ -548,7 +560,10 @@ const fact = (k, text) => `<li><svg viewBox="0 0 24 24">${FACT_ICONS[k]}</svg>${
 // Séance du jour choisi, façon affiche : titre géant, trois repères, un seul bouton.
 function sessionCard(p) {
   const isToday = p.date === today();
-  const kicker = isToday ? 'Ta séance du jour' : `Prévue ${dateLabel(p.date)}`;
+  // Statut écrit en toutes lettres (pas seulement une couleur) : exemple, décalée.
+  const exemple = load().profile.questionnaire ? '' : "Programme d'exemple · ";
+  const moved = p.moved ? ` · décalée du ${shortDayName(p.moved.from)}` : '';
+  const kicker = `${exemple}${isToday ? 'Ta séance du jour' : `Prévue ${dateLabel(p.date)}`}${moved}`;
   if (p.sport === 'natation') {
     return `
       <section class="day-card natation">
@@ -709,6 +724,143 @@ function applyAudioMode() {
   try {
     navigator.audioSession.type = load().settings.son === 'exclusif' ? 'playback' : 'ambient';
   } catch {}
+}
+
+// --- Avant de partir ------------------------------------------------------------
+// Choisir une séance n'est pas la démarrer : on vérifie d'abord GPS, son et écran,
+// puis « Je suis prêt » lance la piste (dans le geste, comme iOS l'exige).
+
+let prep = null; // { session, from, gps, acc, watch, audio, testing }
+const testAudio = new Audio();
+testAudio.setAttribute('playsinline', '');
+
+function openPrepare(session) {
+  if (!session) return;
+  stopPrepGps();
+  prep = { session, from: current === 'prepare' ? prep?.from : current, gps: 'attente', acc: null, watch: null, audio: audioAssets ? 'ok' : 'chargement', testing: false };
+  startPrepGps();
+  if (!audioAssets) {
+    loadAudio().then(() => { if (prep) prep.audio = 'ok'; }).catch(() => { if (prep) prep.audio = 'erreur'; })
+      .finally(() => { if (current === 'prepare') render(); });
+  }
+  go('prepare');
+}
+
+function startPrepGps() {
+  if (!prep) return;
+  if (!('geolocation' in navigator)) { prep.gps = 'indispo'; return; }
+  prep.gps = 'attente';
+  prep.watch = navigator.geolocation.watchPosition(
+    (pos) => {
+      if (!prep) return;
+      prep.acc = Math.round(pos.coords.accuracy);
+      prep.gps = pos.coords.accuracy <= 30 ? 'ok' : 'faible';
+      updatePrepGps();
+    },
+    (err) => {
+      if (!prep) return;
+      prep.gps = err.code === 1 ? 'refuse' : 'attente';
+      updatePrepGps();
+    },
+    { enableHighAccuracy: true, maximumAge: 0, timeout: 20000 },
+  );
+}
+function stopPrepGps() {
+  if (prep?.watch != null) navigator.geolocation.clearWatch(prep.watch);
+  if (prep) prep.watch = null;
+}
+function updatePrepGps() {
+  const el = document.getElementById('prepgps');
+  if (el && current === 'prepare') el.outerHTML = prepGpsBlock();
+}
+
+// Où réautoriser la localisation : seulement la consigne de l'appareil utilisé.
+const gpsSettingsHelp = () => (IOS
+  ? (standalone()
+    ? 'Pour la réactiver : Réglages > Confidentialité et sécurité > Service de localisation > Sites web Safari > « Lorsque l\'app est active », puis rouvre Foulée.'
+    : 'Pour la réactiver : touche « aA » dans la barre d\'adresse de Safari > Réglages du site web > Position > Autoriser. Vérifie aussi Réglages > Confidentialité > Service de localisation > Sites web Safari.')
+  : ANDROID
+    ? 'Pour la réactiver : touche le cadenas (ou ⓘ) à gauche de l\'adresse dans Chrome > Autorisations > Position > Autoriser. Vérifie que la localisation du téléphone est allumée.'
+    : 'Pour la réactiver : autorise la position pour ce site dans les réglages du navigateur.');
+
+function prepGpsBlock() {
+  const g = prep?.gps;
+  const row = (cls, title, text, extra = '') => `<li id="prepgps" class="prep-item ${cls}"><b>${title}</b><span>${text}</span>${extra}</li>`;
+  if (g === 'ok') return row('ok', '✓ GPS prêt', `Précision ±${prep.acc} m : la distance et le tracé seront mesurés.`);
+  if (g === 'faible') return row('wait', '… GPS faible', `Précision ±${prep.acc} m. Mets-toi à découvert et attends quelques secondes ; tu peux partir quand même, la distance sera moins juste.`);
+  if (g === 'refuse') return row('ko', '✕ GPS refusé', `Pas de distance, d'allure ni de tracé pour cette séance. Le chrono et les signaux marchent normalement. ${gpsSettingsHelp()}`, '<button class="btn-ghost small-btn" data-gpsretry>Réessayer</button>');
+  if (g === 'indispo') return row('ko', '✕ GPS indisponible', 'Ce navigateur ne donne pas la position : séance sans distance ni tracé.');
+  return row('wait', '… Recherche du GPS', 'Autorise la position si le téléphone la demande. La séance peut démarrer sans attendre.');
+}
+
+function prepSoundBlock() {
+  const musique = load().settings.son !== 'exclusif';
+  const a = prep?.audio;
+  if (a === 'erreur') return '<li class="prep-item ko"><b>✕ Sons non chargés</b><span>Vérifie ta connexion puis réessaie : sans les sons, pas de signaux.</span><button class="btn-ghost small-btn" data-soundretry>Réessayer</button></li>';
+  if (a !== 'ok') return '<li class="prep-item wait"><b>… Chargement des sons</b><span>Quelques secondes.</span></li>';
+  const how = IOS
+    ? (musique ? 'Mode « Avec ma musique » : iPhone <strong>hors mode silencieux</strong>, sinon aucun signal. Ta musique continue.' : 'Mode « Sans musique » : ta musique sera mise en pause pendant la séance.')
+    : 'Monte le volume média du téléphone avant de partir.';
+  return `<li class="prep-item ok"><b>✓ Signaux prêts</b><span>Notes qui montent = cours, qui descendent = marche, 3 bips avant chaque changement. ${how}</span>
+    <button class="btn-ghost small-btn" data-testsignal>${prep.testing ? 'Écoute…' : 'Tester les signaux (6 s)'}</button></li>`;
+}
+
+// Ce qui marche vraiment écran verrouillé, selon l'appareil et le mode.
+function prepScreenBlock() {
+  const musique = load().settings.son !== 'exclusif';
+  let text;
+  if (IOS) {
+    text = musique
+      ? 'Garde l\'écran allumé : téléphone verrouillé, les signaux <strong>et</strong> le GPS s\'arrêtent. Foulée empêche la mise en veille ; pour la poche, utilise « Bloquer l\'écran ».'
+      : 'Téléphone verrouillé : les signaux continuent, mais le GPS s\'arrête (distance incomplète). Pour mesurer la distance, garde l\'écran allumé avec « Bloquer l\'écran ».';
+  } else if (ANDROID) {
+    text = 'Garde l\'écran allumé : écran éteint, le GPS s\'arrête. Les signaux peuvent continuer selon le téléphone, ce n\'est pas encore vérifié sur Android. Pour la poche, utilise « Bloquer l\'écran ».';
+  } else {
+    text = 'Garde l\'écran allumé pendant toute la séance : sinon le GPS et parfois les signaux s\'arrêtent.';
+  }
+  return `<li class="prep-item info"><b>Écran allumé</b><span>${text}</span></li>`;
+}
+
+// Bilan pas encore enregistré (onglet quitté) : gardé à part, sur le téléphone, jusqu'à décision.
+const PARK_KEY = 'foulee.bilan';
+let parkedBilan = null;
+try { parkedBilan = JSON.parse(localStorage.getItem(PARK_KEY)); } catch {}
+const pendingBilan = () => parkedBilan;
+function parkBilan(b) {
+  parkedBilan = b;
+  try { if (b) localStorage.setItem(PARK_KEY, JSON.stringify(b)); else localStorage.removeItem(PARK_KEY); } catch {}
+}
+function pendingBilanAlert() {
+  const b = pendingBilan();
+  if (!b) return '';
+  return `<div class="alert pending">Bilan à faire : « ${esc(b.sessionName)} » (${mmss(b.elapsedSec)}) n'est pas encore enregistrée.
+    <div class="row" style="margin-top:10px"><button class="btn-dark" data-backbilan>Faire le bilan</button><button data-dropbilan>Ne pas l'enregistrer</button></div></div>`;
+}
+
+// Fin de séance avant la dernière étape : confirmation en grand, pour ne rien arrêter par erreur.
+function openFinishSheet() {
+  if (!live) return;
+  const { starts, end } = live.track;
+  const steps = live.session.steps;
+  const i = stepAt(starts, end, audio.currentTime);
+  if (i >= steps.length) { go('bilan'); return; }
+  const left = Math.max(0, Math.round(end - Math.max(audio.currentTime, starts[0])));
+  const stepsLeft = steps.length - Math.max(0, i);
+  closeFinishSheet();
+  document.body.insertAdjacentHTML('beforeend', `
+    <div class="hr-sheet finish-sheet" role="dialog" aria-label="Terminer la séance">
+      <div class="hr-sheet-in">
+        <h2>Terminer maintenant ?</h2>
+        <p>Il reste <b>${mmss(left)}</b> et ${stepsLeft} étape${stepsLeft > 1 ? 's' : ''}. Ce que tu as déjà fait est gardé pour le bilan.</p>
+        <button class="btn-primary" data-finishno>Continuer la séance</button>
+        <button class="btn-stop" data-finishok>Terminer et faire le bilan</button>
+      </div>
+    </div>`);
+  document.body.classList.add('sheet-open');
+}
+function closeFinishSheet() {
+  document.querySelector('.finish-sheet')?.remove();
+  if (!document.querySelector('.hr-sheet')) document.body.classList.remove('sheet-open');
 }
 
 // --- Séance en cours ----------------------------------------------------------
@@ -1075,9 +1227,13 @@ function tick() {
   el('pace').textContent = g.allureSecKm ? allure(g.allureSecKm).replace('/km', '') : '–';
   el('gpsdot').classList.toggle('ok', !live.gpsError && Boolean(g.distanceKm));
   el('gpsstate').textContent = live.gpsError || (g.distanceKm ? 'GPS' : 'GPS…');
-  el('gps').textContent = live.gpsError
-    ? `${live.gpsError} : la distance ne sera pas mesurée.`
-    : g.gpsIncomplet ? 'GPS coupé un moment : distance incomplète.' : '';
+  // Message GPS : réécrit seulement s'il change (le bouton « Réessayer » doit rester cliquable).
+  const gpsHtml = live.gpsError === 'GPS refusé'
+    ? '<p><b>GPS refusé :</b> pas de distance ni de tracé. Le chrono et les signaux continuent.</p><button class="btn-ghost small-btn" data-gpsretry>Réessayer le GPS</button>'
+    : live.gpsError ? `<p>${esc(live.gpsError)} : distance pas encore mesurée.</p>`
+      : g.gpsIncomplet ? '<p>GPS coupé un moment : distance incomplète.</p>' : '';
+  if (live.gpsHtml !== gpsHtml) { el('gps').innerHTML = gpsHtml; live.gpsHtml = gpsHtml; }
+  el('livedone').hidden = i < steps.length;
   requestAnimationFrame(tick);
 }
 
@@ -1107,6 +1263,7 @@ function openQuestionnaire() {
     niveauMuscu: q?.niveauMuscu ?? null,
     joursMuscu: [...(q?.joursMuscu ?? [])],
     error: null,
+    step: 0,
   };
   go('questionnaire');
 }
@@ -1115,28 +1272,42 @@ function openQuestionnaire() {
 const hasRuns = (d) => d.history.some((h) => sportOf(h) === 'course' && runLevel(h));
 const hasSwims = (d) => d.history.some((h) => sportOf(h) === 'natation' && h.swim?.longueurs);
 
-function questionnaireErrors(q, d) {
-  if (!q.sports.length) return 'Choisis au moins un sport.';
+// Parcours en étapes : chaque contrôle appartient à une étape, qui le vérifie avant « Continuer ».
+const Q_STEPS = [
+  ['sports', 'Tes sports'],
+  ['objectifs', 'Tes objectifs'],
+  ['niveau', 'Ton niveau'],
+  ['jours', 'Tes jours'],
+  ['recap', 'Récapitulatif'],
+];
+function qChecks(q, d) {
+  const out = [];
+  const need = (step, ok, msg) => { if (!ok) out.push([step, msg]); };
+  need('sports', q.sports.length, 'Choisis au moins un sport.');
   if (q.sports.includes('course')) {
-    if (!q.objectifCourse) return 'Choisis ton objectif de course.';
-    if (!hasRuns(d) && !q.niveauCourse) return 'Dis combien de temps tu cours sans t’arrêter aujourd’hui.';
-    if (!q.joursCourse.length) return 'Choisis au moins un jour de course.';
+    need('objectifs', q.objectifCourse, 'Choisis ton objectif de course.');
+    need('niveau', hasRuns(d) || q.niveauCourse, 'Dis combien de temps tu cours sans t’arrêter aujourd’hui.');
+    need('jours', q.joursCourse.length, 'Choisis au moins un jour de course.');
   }
   if (q.sports.includes('natation')) {
-    if (!q.objectifNatation) return 'Choisis ton objectif de natation.';
-    if (!hasSwims(d) && !q.niveauNatation) return 'Dis combien de longueurs tu nages aujourd’hui.';
-    if (!q.joursNatation.length) return 'Choisis au moins un jour de natation.';
+    need('objectifs', q.objectifNatation, 'Choisis ton objectif de natation.');
+    need('niveau', hasSwims(d) || q.niveauNatation, 'Dis combien de longueurs tu nages aujourd’hui.');
+    need('jours', q.joursNatation.length, 'Choisis au moins un jour de natation.');
   }
   if (q.sports.includes('muscu')) {
-    if (!q.objectifMuscu) return 'Choisis ton objectif en musculation.';
-    if (!q.lieu) return 'Dis où tu fais ta musculation.';
-    if (!q.niveauMuscu) return 'Dis où tu en es en musculation.';
-    if (!q.joursMuscu.length) return 'Choisis au moins un jour de musculation.';
+    need('objectifs', q.objectifMuscu, 'Choisis ton objectif en musculation.');
+    need('objectifs', q.lieu, 'Dis où tu fais ta musculation.');
+    need('niveau', q.niveauMuscu, 'Dis où tu en es en musculation.');
+    need('jours', q.joursMuscu.length, 'Choisis au moins un jour de musculation.');
   }
   const jours = q.sports.flatMap((x) => q[DAYS_KEY[x]]);
-  if (new Set(jours).size !== jours.length) return 'Un seul sport par jour : un jour est coché pour deux sports.';
-  return null;
+  need('jours', new Set(jours).size === jours.length, 'Un seul sport par jour : un jour est coché pour deux sports.');
+  return out;
 }
+function questionnaireErrors(q, d) {
+  return qChecks(q, d)[0]?.[1] ?? null;
+}
+const stepError = (q, d, step) => qChecks(q, d).find(([st]) => st === step)?.[1] ?? null;
 
 // Les réponses gardées : celles des sports choisis seulement.
 function cleanAnswers(q, d) {
@@ -1189,28 +1360,30 @@ const screens = {
   accueil() {
     const d = load();
     const last = [...d.history].sort((a, b) => String(b.date).localeCompare(String(a.date)))[0];
-    const installed = navigator.standalone === true || matchMedia('(display-mode: standalone)').matches;
     const plan = planFor(d);
     const todayItem = plan.find((p) => p.date === today());
-    const resumable = live ? null : savedLive();
+    const resumable = live || pendingBilan() ? null : savedLive();
     const next = plan.filter((p) => p.sport !== 'repos' && p.date !== today()).slice(0, 3);
     const prenom = d.profile.prenom || account.session()?.user?.prenom || '';
+    // Ordre : qui, quel jour ; ce qui est en suspens ; la séance du jour ; la suite ; les chiffres.
+    // Les explications techniques (installation) passent en bas, et seulement là où elles s'appliquent.
     return `
       <header class="hello">
         <button class="avatar" data-tab="profil" aria-label="Profil">${esc((prenom[0] || '?').toUpperCase())}</button>
-        <div><span>Bonjour</span><b>${esc(prenom) || 'à toi'}</b></div>
+        <div><span>Bonjour</span><b>${esc(prenom) || 'à toi'}</b><em class="hello-date">${esc(dateLabel(today()))}</em></div>
       </header>
       <p class="motto">Discipline aujourd'hui<br>Progrès demain</p>
-      ${d.profile.questionnaire ? '' : questionnaireBanner()}
-      ${iaAlert(d.history)}
-      ${installed ? '' : '<div class="notice"><strong>Installe Foulée :</strong> dans Safari, touche Partager puis « Sur l\'écran d\'accueil », et ouvre l\'app depuis son icône. Le guidage est plus fiable ainsi.</div>'}
+      ${pendingBilanAlert()}
       ${resumable ? `<div class="alert">Séance interrompue : « ${esc(resumable.session.name)} », arrêtée à ${mmss(resumable.pos)}.
         <div class="row" style="margin-top:10px"><button class="btn-dark" data-resume>Reprendre</button><button data-dropresume>Abandonner</button></div></div>` : ''}
+      ${d.profile.questionnaire ? '' : questionnaireBanner()}
       ${weekStrip(d.history, plan, selDay)}
       ${dayPanel(d.history, plan, selDay)}
-      ${indicators(d.history)}
+      ${iaAlert(d.history)}
       ${next.length ? `<h3>Ensuite</h3><div class="list">${next.map((p) => planRow(p, !todayItem?.steps && p === next.find((x) => x.sport === 'course'))).join('')}</div>` : ''}
-      ${last ? `<h3>Dernière séance</h3><div class="list">${historyRow(last)}</div>` : ''}`;
+      ${indicators(d.history)}
+      ${last ? `<h3>Dernière séance</h3><div class="list">${historyRow(last)}</div>` : ''}
+      ${installNotice()}`;
   },
 
   programme() {
@@ -1246,7 +1419,8 @@ const screens = {
     const resumable = savedLive();
     return `
       <h1>Démarrer</h1>
-      ${resumable ? `<button class="option" data-resume><span><span>Reprendre « ${esc(resumable.session.name)} »</span><span class="muted">Arrêtée à ${mmss(resumable.pos)}</span></span><span class="go">▶</span></button>` : ''}
+      ${pendingBilanAlert()}
+      ${resumable && !pendingBilan() ? `<button class="option" data-resume><span><span>Reprendre « ${esc(resumable.session.name)} »</span><span class="muted">Arrêtée à ${mmss(resumable.pos)}</span></span><span class="go">▶</span></button>` : ''}
       ${todayItem?.sport === 'course' ? `<h3 style="margin-top:0">Prévu aujourd'hui</h3>
         <button class="option" data-startplan="${esc(todayItem.date)}"><span><span>Palier ${todayItem.level} · ${Math.round(total(todayItem.steps) / 60)} min</span><span class="muted">${esc(todayItem.title)}</span></span><span class="go">▶</span></button>` : ''}
       ${todayItem?.sport === 'natation' ? `<h3 style="margin-top:0">Prévu aujourd'hui</h3>
@@ -1298,6 +1472,32 @@ const screens = {
       ${s.isNew ? '' : '<p style="margin-top:10px"><button class="btn-danger" data-remove style="width:100%">Supprimer cette séance</button></p>'}`;
   },
 
+  prepare() {
+    const p = prep;
+    if (!p) return '';
+    const s = p.session;
+    const runs = s.steps.filter((x) => KINDS[x.kind].effort === 'course');
+    return `
+      <p class="eyebrow" style="margin-top:0">Avant de partir</p>
+      <h1 class="prep-title">${esc(s.name)}</h1>
+      <section class="prep-sum">
+        <p class="hero-num">${Math.round(total(s.steps) / 60)}<small>min</small></p>
+        <p class="muted" style="margin:0">${s.steps.length} étapes · ${runs.length} en course</p>
+        <div class="effort-bar">${s.steps.map((x) => `<i class="${KINDS[x.kind].effort}" style="flex:${x.duration}"></i>`).join('')}</div>
+        <p class="small" style="margin:8px 0 0">${esc(stepsSummary(s.steps))}</p>
+      </section>
+      <ul class="prep-list">
+        ${prepGpsBlock()}
+        ${prepSoundBlock()}
+        ${prepScreenBlock()}
+      </ul>
+      <div class="prep-go">
+        <button class="cta" data-ready ${p.audio === 'ok' ? '' : 'disabled'}><span>Je suis prêt</span><i>›</i></button>
+        <p class="muted small" style="text-align:center;margin:8px 0 0">${p.audio === 'ok' ? '7 secondes d\'introduction, puis la première étape.' : 'Le bouton s\'active quand les sons sont chargés.'}</p>
+      </div>
+      <button class="day-link" data-prepback style="display:block;margin:6px auto 0">Retour</button>`;
+  },
+
   live() {
     const playing = !audio.paused;
     const interrupted = !playing && live && !live.userPaused && !live.swapping && audio.currentTime < live.track.end;
@@ -1315,15 +1515,16 @@ const screens = {
           <div><b id="pace">–</b><span>allure /km</span></div>
           <div><b id="elapsed">0:00</b><span>temps</span></div>
         </div>
-        <p class="gpsline" id="gps"></p>
-        ${load().settings.son !== 'exclusif' ? '<p class="muted small" style="margin:0">Mode musique : iPhone hors silencieux, sinon pas de signaux.</p>' : ''}
+        <div class="gpsline" id="gps"></div>
+        ${IOS && load().settings.son !== 'exclusif' ? '<p class="muted small" style="margin:0">Mode musique : iPhone hors silencieux, sinon pas de signaux.</p>' : ''}
+        <button class="btn-primary live-done" id="livedone" data-finishok hidden>Faire le bilan</button>
         <div class="live-controls">
           <button class="toggle${playing ? '' : ' paused'}" data-toggle>${playing ? 'Pause' : 'Reprendre'}</button>
           <button data-skip>Étape suivante</button>
         </div>
         <div class="live-extra">
           <button class="lockbtn" data-touchlock>🔒 Bloquer l'écran</button>
-          <button data-finish>Terminer</button>
+          <button class="btn-stop" data-finish>Terminer…</button>
         </div>
       </div>`;
   },
@@ -1610,72 +1811,79 @@ const screens = {
   questionnaire() {
     const d = load();
     const q = qDraft;
-    const runs = hasRuns(d);
-    const swims = hasSwims(d);
-    const runFromHistory = runs && nextRunLevel(d.history, sameLevelOpts);
-    const errs = questionnaireErrors(q, d);
-    const preview = errs ? [] : upcoming(d.history, d.settings, today(), 14, cleanAnswers(q, d));
-    const firstRun = preview.find((p) => p.sport === 'course');
-    const firstSwim = preview.find((p) => p.sport === 'natation');
-    const firstMuscu = preview.find((p) => p.sport === 'muscu');
     const fresh = !d.profile.questionnaire;
-    let n = 0;
-    const num = () => `<span class="q-num">${++n}</span>`;
+    const step = Math.min(q.step || 0, Q_STEPS.length - 1);
+    const [key, title] = Q_STEPS[step];
+    const sports = SPORTS_ORDER.filter((x) => q.sports.includes(x));
+    const last = step === Q_STEPS.length - 1;
+    const steps = `<ol class="q-steps" aria-label="Étape ${step + 1} sur ${Q_STEPS.length}">${Q_STEPS.map(([, t], i) => `<li class="${i < step ? 'done' : i === step ? 'now' : ''}"><span>${i < step ? '✓' : i + 1}</span>${i === step ? `<b>${esc(t)}</b>` : ''}</li>`).join('')}</ol>`;
+    let body = '';
+    if (key === 'sports') {
+      const card = (sp, label, detail) => `<button data-qsport="${sp}" class="q-card ${sp}${q.sports.includes(sp) ? ' on' : ''}" aria-pressed="${q.sports.includes(sp)}">${icon(sp)}<span><b>${label}</b><span>${detail}</span></span><i>${q.sports.includes(sp) ? '✓' : '+'}</i></button>`;
+      body = `
+        <p class="muted">Plusieurs choix possibles. Chaque sport aura ses propres jours.</p>
+        <div class="q-cards">
+          ${card('course', 'Course', 'Marche-course guidée, du premier pas au 10 km')}
+          ${card('natation', 'Natation', 'Longueurs en bassin, notées en sortant de l’eau')}
+          ${card('muscu', 'Musculation', 'Séances guidées, en salle ou au poids du corps')}
+        </div>`;
+    } else if (key === 'objectifs') {
+      body = sports.map((sp) => {
+        if (sp === 'course') return `<section class="q-part course">${qPartHead('course')}${Object.entries(GOALS_RUN).map(([k, g]) => radio('q-objc', k, q.objectifCourse, g.label, g.detail)).join('')}</section>`;
+        if (sp === 'natation') return `<section class="q-part natation">${qPartHead('natation')}
+          <p class="q-sub">Ton bassin</p>
+          <div class="seg"><button data-qbassin="25" class="${q.bassin === 25 ? 'on natation' : ''}">25 m</button><button data-qbassin="50" class="${q.bassin === 50 ? 'on natation' : ''}">50 m</button></div>
+          <p class="q-sub">Ton objectif</p>
+          ${GOALS_SWIM.map((m) => radio('q-objn', m, q.objectifNatation, `Nager ${(m / 1000).toLocaleString('fr-FR')} km par séance`, `${Math.round(m / q.bassin)} longueurs`)).join('')}</section>`;
+        return `<section class="q-part muscu">${qPartHead('muscu')}
+          <p class="q-sub">Ton objectif</p>
+          ${Object.entries(GOALS_MUSCU).map(([k, g]) => radio('q-objm', k, q.objectifMuscu, g.label, `${g.series} séries de ${g.min} à ${g.max} répétitions`)).join('')}
+          <p class="q-sub">Où tu t'entraînes</p>
+          ${Object.entries(LIEUX).map(([k, l]) => radio('q-lieu', k, q.lieu, l.label, l.detail)).join('')}</section>`;
+      }).join('');
+    } else if (key === 'niveau') {
+      const runFromHistory = hasRuns(d) && nextRunLevel(d.history, sameLevelOpts);
+      body = sports.map((sp) => {
+        if (sp === 'course') return `<section class="q-part course">${qPartHead('course')}<p class="q-sub">Aujourd'hui, tu cours sans t'arrêter…</p>
+          ${runFromHistory ? `<p class="q-known">Déjà connu grâce à tes séances : <b>palier ${runFromHistory.level}</b>, ${esc(LEVELS[runFromHistory.level - 1].label)}. Le programme continue de là.</p>`
+            : START_RUN.map((x) => radio('q-nivc', x.level, q.niveauCourse, x.label)).join('')}</section>`;
+        if (sp === 'natation') return `<section class="q-part natation">${qPartHead('natation')}<p class="q-sub">Aujourd'hui, en une séance, tu nages…</p>
+          ${hasSwims(d) ? '<p class="q-known">Déjà connu grâce à tes séances : le programme repart de ta dernière nage.</p>'
+            : START_SWIM.map((x) => radio('q-nivn', x.longueurs, q.niveauNatation, x.label)).join('')}</section>`;
+        return `<section class="q-part muscu">${qPartHead('muscu')}<p class="q-sub">Où tu en es</p>
+          ${Object.entries(NIVEAUX_MUSCU).map(([k, n]) => radio('q-nivm', k, q.niveauMuscu, n.label, k === 'regulier' ? '' : 'une série de moins les 4 premières séances')).join('')}</section>`;
+      }).join('');
+    } else if (key === 'jours') {
+      body = `<p class="muted">Un seul sport par jour : un jour déjà pris par un autre sport est grisé.</p>` + sports.map((sp) => {
+        if (sp === 'course') return `<section class="q-part course">${qPartHead('course')}${qDays('joursCourse', q.joursCourse)}<p class="muted small" style="margin-top:8px">Garde un jour entre deux courses : sinon la seconde devient un jour de repos.</p></section>`;
+        if (sp === 'natation') return `<section class="q-part natation">${qPartHead('natation')}${qDays('joursNatation', q.joursNatation, 'natation')}</section>`;
+        return `<section class="q-part muscu">${qPartHead('muscu')}${qDays('joursMuscu', q.joursMuscu, 'muscu')}<p class="muted small" style="margin-top:8px">Jusqu'à 3 jours : corps entier, séances A et B en alternance. 4 jours ou plus : haut du corps et bas du corps.</p></section>`;
+      }).join('');
+    } else {
+      const errs = questionnaireErrors(q, d);
+      const answers = errs ? null : cleanAnswers(q, d);
+      const preview = answers ? upcoming(d.history, d.settings, today(), 14, answers).filter((p) => p.sport !== 'repos').slice(0, 5) : [];
+      const what = (p) => (p.sport === 'course' ? `Course · palier ${p.level}/${p.max}, ${esc(p.title)}` : p.sport === 'natation' ? `Natation · ${p.longueurs} longueurs, ${p.distance} m` : `Musculation · ${esc(p.title)}`);
+      body = answers ? `
+        <ul class="q-summary">${answersSummary(answers).map(([sp, t]) => `<li class="${sp}">${esc(t)}</li>`).join('')}</ul>
+        <section class="q-preview">
+          <p class="eyebrow" style="margin:0">Tes prochaines séances</p>
+          ${preview.map((p) => `<p><b class="${{ course: 'run', natation: 'swim', muscu: 'muscu' }[p.sport]}">${esc(shortDate(p.date))}</b> ${what(p)}</p>`).join('')}
+          <p class="muted small" style="margin:0">Des règles fixes, pas un coach humain : ça monte quand tes bilans sont bons, ça redescend si c'est trop dur ou douloureux. Tout reste modifiable dans Profil > Mon programme.</p>
+        </section>` : `<div class="alert">${esc(errs)}</div>`;
+    }
     return `
       ${accountUi.info && fresh ? `<div class="notice">${esc(accountUi.info)}</div>` : ''}
-      <p class="eyebrow" style="margin-top:0">${fresh ? 'Avant de commencer' : 'Mon programme'}</p>
-      <h1 class="q-title">Ton programme,<br>à ta mesure</h1>
-      <p class="muted">Tes réponses ne servent qu'à calculer ton programme. Tu peux les changer quand tu veux dans Profil.</p>
-
-      <h3>${num()}Ce que tu pratiques</h3>
-      <div class="q-sports">
-        <button data-qsport="course" class="${q.sports.includes('course') ? 'on course' : ''}">Course</button>
-        <button data-qsport="natation" class="${q.sports.includes('natation') ? 'on natation' : ''}">Natation</button>
-        <button data-qsport="muscu" class="${q.sports.includes('muscu') ? 'on muscu' : ''}">Musculation</button>
+      <p class="eyebrow" style="margin-top:0">${fresh ? 'Ton programme, à ta mesure' : 'Mon programme'}</p>
+      ${steps}
+      <h1 class="q-title">${esc(title)}</h1>
+      ${body}
+      ${q.error ? `<div class="alert" role="alert">${esc(q.error)}</div>` : ''}
+      <div class="q-nav">
+        ${step > 0 ? '<button class="btn-ghost" data-qback>‹ Retour</button>' : ''}
+        ${last ? `<button class="btn-primary" data-qsave>${fresh ? 'Créer mon programme' : 'Enregistrer'}</button>` : '<button class="btn-primary" data-qnext>Continuer</button>'}
       </div>
-
-      ${q.sports.includes('course') ? `<section class="q-part course">${qPartHead('course')}
-        <h3>${num()}Ton objectif en course</h3>
-        ${Object.entries(GOALS_RUN).map(([k, g]) => radio('q-objc', k, q.objectifCourse, g.label, g.detail)).join('')}
-        <h3>${num()}Aujourd'hui, tu cours sans t'arrêter…</h3>
-        ${runs ? `<p class="q-known">Déjà connu grâce à tes séances : <b>palier ${runFromHistory.level}</b>, ${esc(LEVELS[runFromHistory.level - 1].label)}. Le programme continue de là.</p>`
-          : START_RUN.map((x) => radio('q-nivc', x.level, q.niveauCourse, x.label)).join('')}
-        <h3>${num()}Tes jours de course</h3>
-        ${qDays('joursCourse', q.joursCourse)}
-        <p class="muted small" style="margin-top:8px">Garde un jour entre deux courses : sinon la seconde devient un jour de repos.</p></section>` : ''}
-
-      ${q.sports.includes('natation') ? `<section class="q-part natation">${qPartHead('natation')}
-        <h3>${num()}Ton bassin</h3>
-        <div class="seg"><button data-qbassin="25" class="${q.bassin === 25 ? 'on natation' : ''}">25 m</button><button data-qbassin="50" class="${q.bassin === 50 ? 'on natation' : ''}">50 m</button></div>
-        <h3>${num()}Ton objectif en natation</h3>
-        ${GOALS_SWIM.map((m) => radio('q-objn', m, q.objectifNatation, `Nager ${(m / 1000).toLocaleString('fr-FR')} km par séance`, `${Math.round(m / q.bassin)} longueurs`)).join('')}
-        <h3>${num()}Aujourd'hui, en une séance, tu nages…</h3>
-        ${swims ? '<p class="q-known">Déjà connu grâce à tes séances : le programme repart de ta dernière nage.</p>'
-          : START_SWIM.map((x) => radio('q-nivn', x.longueurs, q.niveauNatation, x.label)).join('')}
-        <h3>${num()}Tes jours de natation</h3>
-        ${qDays('joursNatation', q.joursNatation, 'natation')}</section>` : ''}
-
-      ${q.sports.includes('muscu') ? `<section class="q-part muscu">${qPartHead('muscu')}
-        <h3>${num()}Ton objectif en musculation</h3>
-        ${Object.entries(GOALS_MUSCU).map(([k, g]) => radio('q-objm', k, q.objectifMuscu, g.label, `${g.series} séries de ${g.min} à ${g.max} répétitions`)).join('')}
-        <h3>${num()}Où tu t'entraînes</h3>
-        ${Object.entries(LIEUX).map(([k, l]) => radio('q-lieu', k, q.lieu, l.label, l.detail)).join('')}
-        <h3>${num()}Où tu en es</h3>
-        ${Object.entries(NIVEAUX_MUSCU).map(([k, n]) => radio('q-nivm', k, q.niveauMuscu, n.label, k === 'regulier' ? '' : 'une série de moins les 4 premières séances')).join('')}
-        <h3>${num()}Tes jours de musculation</h3>
-        ${qDays('joursMuscu', q.joursMuscu, 'muscu')}
-        <p class="muted small" style="margin-top:8px">Jusqu'à 3 jours : corps entier, séances A et B en alternance. 4 jours ou plus : haut du corps et bas du corps.</p></section>` : ''}
-
-      ${errs ? '' : `<section class="q-preview">
-        <p class="eyebrow" style="margin:0">Ce que ça donne</p>
-        ${firstRun ? `<p><b class="run">Course · ${shortDate(firstRun.date)}</b> Palier ${firstRun.level}/${firstRun.max}, ${esc(firstRun.title)}</p>` : ''}
-        ${firstSwim ? `<p><b class="swim">Natation · ${shortDate(firstSwim.date)}</b> ${firstSwim.longueurs} longueurs, ${firstSwim.distance} m</p>` : ''}
-        ${firstMuscu ? `<p><b class="muscu">Musculation · ${shortDate(firstMuscu.date)}</b> ${esc(firstMuscu.title)} : ${esc(firstMuscu.exercices.map((x) => x.nom.split(' (')[0]).join(', '))}</p>` : ''}
-        <p class="muted small" style="margin:0">Des règles fixes, pas un coach humain : ça monte quand tes bilans sont bons, ça redescend si c'est trop dur ou douloureux.</p>
-      </section>`}
-      ${q.error ? `<div class="alert">${esc(q.error)}</div>` : ''}
-      <button class="btn-primary" data-qsave style="margin-top:14px">${fresh ? 'Créer mon programme' : 'Enregistrer'}</button>
-      ${fresh ? '<button class="btn-ghost" data-tab="accueil" style="width:100%;margin-top:6px">Plus tard</button>' : '<button class="btn-ghost" data-tab="profil" style="width:100%;margin-top:6px">Annuler</button>'}`;
+      ${fresh ? '<button class="day-link" data-tab="accueil" style="display:block;margin:8px auto 0">Plus tard (garder le programme d\'exemple)</button>' : '<button class="day-link" data-tab="profil" style="display:block;margin:8px auto 0">Annuler</button>'}`;
   },
 
   profil() {
@@ -1702,7 +1910,7 @@ const screens = {
         <h2>Mon programme</h2>
         ${d.profile.questionnaire
           ? `<ul class="q-summary">${answersSummary(d.profile.questionnaire).map(([sp, t]) => `<li class="${sp}">${esc(t)}</li>`).join('')}</ul>`
-          : '<p class="muted small">Pas encore personnalisé : tu as le programme par défaut (course lundi et vendredi, natation mercredi).</p>'}
+          : '<p class="muted small">Pas encore personnalisé : tu suis le <strong>programme d\'exemple</strong> (course lundi et vendredi, natation mercredi).</p>'}
         <button data-questionnaire style="width:100%">${d.profile.questionnaire ? 'Modifier mes réponses' : 'Répondre au questionnaire'}</button>
       </div>
       <div class="card">
@@ -1735,9 +1943,10 @@ function placeWeek() {
 }
 
 // Onglet allumé pour chaque écran.
-const TAB_OF = { questionnaire: 'profil', edit: 'programme', live: 'demarrer', muscu: 'demarrer', bilan: 'progression', saisie: 'progression', suite: 'programme', compte: 'profil' };
+const TAB_OF = { prepare: 'demarrer', questionnaire: 'profil', edit: 'programme', live: 'demarrer', muscu: 'demarrer', bilan: 'progression', saisie: 'progression', suite: 'programme', compte: 'profil' };
 
 function render() {
+  if (live) live.gpsHtml = null; // l'écran est redessiné : le message GPS aussi
   app.innerHTML = screens[current]();
   for (const b of document.querySelectorAll('#tabs button')) b.classList.toggle('on', b.dataset.tab === (TAB_OF[current] || current));
   document.body.classList.toggle('is-live', current === 'live' || current === 'muscu');
@@ -1748,7 +1957,9 @@ function render() {
 }
 
 function go(screen) {
-  if (screen === 'bilan' && live) {
+  if (screen !== 'live') closeFinishSheet();
+  if (screen !== 'prepare' && prep) { stopPrepGps(); testAudio.pause(); prep = null; }
+  if (screen === 'bilan' && live && !live.done) {
     if (!audio.paused) anchor();
     audio.pause();
     const { starts, end } = live.track;
@@ -1995,9 +2206,58 @@ document.addEventListener('click', (e) => {
     if (ds.tab === 'accueil') { selDay = today(); weekScroll = null; }
     if (current === 'live' && !audio.paused && !confirm('La séance continue en arrière-plan. Quitter l\'écran ?')) return;
     if (current === 'saisie' && bilan?.source === 'guidee' && !confirm('Ta séance guidée ne sera pas enregistrée. Quitter quand même ?')) return;
+    // Bilan quitté sans enregistrer : la séance est mise de côté (et l'accueil le dit), jamais perdue en silence.
+    if (current === 'bilan' && bilan) { readBilan(); parkBilan(bilan); bilan = null; }
     go(ds.tab === 'demarrer' && live && !live.done ? 'live' : ds.tab);
   } else if (ds.start) {
-    startSession(findSession(ds.start));
+    openPrepare(findSession(ds.start));
+  } else if ('ready' in ds) {
+    if (!prep) return;
+    const s = prep.session;
+    stopPrepGps();
+    testAudio.pause();
+    prep = null;
+    startSession(s);
+  } else if ('prepback' in ds) {
+    const back = prep?.from && prep.from !== 'prepare' ? prep.from : 'accueil';
+    go(back);
+  } else if ('gpsretry' in ds) {
+    if (current === 'prepare') { stopPrepGps(); startPrepGps(); updatePrepGps(); }
+    else if (live) {
+      if (gpsWatch !== null) navigator.geolocation.clearWatch(gpsWatch);
+      gpsWatch = null;
+      live.gpsError = null;
+      startGps();
+    }
+  } else if ('soundretry' in ds) {
+    if (!prep) return;
+    prep.audio = 'chargement';
+    render();
+    loadAudio().then(() => { if (prep) prep.audio = 'ok'; }).catch(() => { if (prep) prep.audio = 'erreur'; }).finally(() => { if (current === 'prepare') render(); });
+  } else if ('testsignal' in ds) {
+    if (!audioAssets || !prep) return;
+    applyAudioMode();
+    if (testAudio.src) URL.revokeObjectURL(testAudio.src);
+    testAudio.src = URL.createObjectURL(new Blob([sample(audioAssets.index, audioAssets.pack)], { type: 'audio/mpeg' }));
+    prep.testing = true;
+    testAudio.onended = () => { if (prep) { prep.testing = false; if (current === 'prepare') render(); } };
+    testAudio.play().catch((err) => { if (prep) prep.testing = false; alert(`Lecture impossible : ${err.message}`); });
+    render();
+  } else if ('finishno' in ds) {
+    closeFinishSheet();
+  } else if ('finishok' in ds) {
+    closeFinishSheet();
+    go('bilan');
+  } else if ('backbilan' in ds) {
+    if (!pendingBilan()) return;
+    bilan = pendingBilan();
+    go('bilan');
+  } else if ('dropbilan' in ds) {
+    if (!confirm('Ne pas enregistrer cette séance ? Elle n\'apparaîtra pas dans ton historique.')) return;
+    parkBilan(null);
+    clearLive();
+    if (live?.done) { URL.revokeObjectURL(live.url); live = null; }
+    render();
   } else if ('resume' in ds) {
     const r = savedLive();
     if (r) startSession(r.session, r);
@@ -2006,7 +2266,7 @@ document.addEventListener('click', (e) => {
     render();
   } else if (ds.startplan) {
     const p = planFor(load()).find((x) => x.date === ds.startplan && x.sport === 'course');
-    if (p) startSession({ id: `plan-${p.date}`, name: `Palier ${p.level} · ${p.title}`, steps: p.steps, level: p.level });
+    if (p) openPrepare({ id: `plan-${p.date}`, name: `Palier ${p.level} · ${p.title}`, steps: p.steps, level: p.level });
   } else if (ds.edit) {
     editing = structuredClone(findSession(ds.edit));
     go('edit');
@@ -2067,10 +2327,28 @@ document.addEventListener('click', (e) => {
   } else if (ds.qbassin) {
     qDraft.bassin = Number(ds.qbassin);
     render();
+  } else if ('qnext' in ds) {
+    const d = load();
+    const [key] = Q_STEPS[qDraft.step || 0];
+    qDraft.error = stepError(qDraft, d, key);
+    if (!qDraft.error) qDraft.step = Math.min(Q_STEPS.length - 1, (qDraft.step || 0) + 1);
+    render();
+    if (!qDraft.error) window.scrollTo(0, 0);
+  } else if ('qback' in ds) {
+    qDraft.step = Math.max(0, (qDraft.step || 0) - 1);
+    qDraft.error = null;
+    render();
+    window.scrollTo(0, 0);
   } else if ('qsave' in ds) {
     const d = load();
     qDraft.error = questionnaireErrors(qDraft, d);
-    if (qDraft.error) { render(); return; }
+    if (qDraft.error) {
+      // Renvoie à l'étape où il manque quelque chose.
+      const bad = qChecks(qDraft, d)[0][0];
+      qDraft.step = Math.max(0, Q_STEPS.findIndex(([k]) => k === bad));
+      render();
+      return;
+    }
     const answers = cleanAnswers(qDraft, d);
     update((x) => { x.profile.questionnaire = answers; });
     qDraft = null;
@@ -2081,7 +2359,7 @@ document.addEventListener('click', (e) => {
     touchLocked = true;
     renderTouchLock();
   } else if ('finish' in ds) {
-    go('bilan');
+    openFinishSheet();
   } else if (ds.retryia) {
     askIA(ds.retryia, { force: true });
   } else if ('moreplan' in ds) {
@@ -2153,6 +2431,7 @@ document.addEventListener('click', (e) => {
     readBilan();
     const entry = bilan;
     update((d) => { d.history.unshift(entry); });
+    parkBilan(null);
     clearLive();
     if (live) URL.revokeObjectURL(live.url);
     live = null;

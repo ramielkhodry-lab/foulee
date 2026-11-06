@@ -23,6 +23,7 @@ const page = await context.newPage();
 // Fond de carte : tuiles servies vides en test (pas d'accès réseau garanti).
 const PNG = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNkYAAAAAYAAjCB0C8AAAAASUVORK5CYII=', 'base64');
 await page.route('**/*.basemaps.cartocdn.com/**', (r) => r.fulfill({ status: 200, contentType: 'image/png', body: PNG }));
+await page.route('**/tile.openstreetmap.org/**', (r) => r.fulfill({ status: 200, contentType: 'image/png', body: PNG }));
 const errors = [];
 page.on('pageerror', (e) => errors.push(e.message));
 page.on('console', (m) => m.type() === 'error' && errors.push(m.text()));
@@ -34,6 +35,12 @@ await page.screenshot({ path: '/tmp/foulee-accueil.png', fullPage: true });
 await page.click('[data-tab="programme"]');
 await page.waitForTimeout(800); // chargement des sons
 await page.click('[data-start="test-4"]');
+// Avant de partir : GPS, sons, écran, puis « Je suis prêt ».
+await page.waitForSelector('[data-ready]:not([disabled])');
+await page.waitForSelector('#prepgps.ok');
+const prepText = await page.textContent('#app');
+await page.screenshot({ path: '/tmp/foulee-prepare.png', fullPage: true });
+await page.click('[data-ready]');
 await page.waitForSelector('#count');
 await page.waitForTimeout(1500);
 const t1 = await page.evaluate(() => document.getElementById('player').currentTime);
@@ -74,6 +81,14 @@ const after = await page.evaluate(() => document.getElementById('player').paused
 await page.screenshot({ path: '/tmp/foulee-live.png', fullPage: true });
 const dur = await page.evaluate(() => document.getElementById('player').duration);
 await page.click('[data-finish]');
+// Confirmation : « Continuer » ne coupe rien, « Terminer » ouvre le bilan.
+await page.waitForSelector('.finish-sheet');
+const sheetText = await page.textContent('.finish-sheet');
+await page.screenshot({ path: '/tmp/foulee-fin-confirm.png' });
+await page.click('.finish-sheet [data-finishno]');
+const stillLive = (await page.locator('#count').count()) === 1 && !(await page.evaluate(() => document.getElementById('player').paused));
+await page.click('[data-finish]');
+await page.click('.finish-sheet [data-finishok]');
 const bilanText = await page.textContent('#app');
 await page.waitForSelector('.map.leaflet-container', { timeout: 5000 }).catch(() => {});
 const bilanMap = await page.locator('.map.leaflet-container path.leaflet-interactive').count();
@@ -133,11 +148,17 @@ const programme = await page.textContent('#app');
 await page.click('[data-moreplan]');
 await page.screenshot({ path: '/tmp/foulee-programme-4sem.png', fullPage: true });
 await page.click('[data-tab="accueil"]');
-await page.click('[data-pickday="2026-11-04"]');
+// Dates relatives au jour du test : prochain mercredi (natation), lundi suivant, 7 semaines plus loin.
+const iso = (d) => d.toLocaleDateString('sv-SE');
+const plusDays = (n) => { const d = new Date(); d.setHours(12); d.setDate(d.getDate() + n); return d; };
+const nextWd = (wd) => { for (let n = 1; n < 8; n++) if (plusDays(n).getDay() === wd) return n; };
+const nextWed = iso(plusDays(nextWd(3)));
+const nextMon = nextWd(1);
+await page.click(`[data-pickday="${nextWed}"]`);
 const nextSwimCard = await page.textContent('#app');
 await page.locator('.day-card').screenshot({ path: '/tmp/foulee-carte-natation.png' });
-const farWeek = await page.locator('[data-pickday="2026-12-21"] .dot, [data-pickday="2026-12-23"] .dot').count() >= 2;
-await page.click('[data-pickday="2026-11-09"]');
+const farWeek = await page.locator(`[data-pickday="${iso(plusDays(nextMon + 42))}"] .dot, [data-pickday="${iso(plusDays(nextMon + 44))}"] .dot`).count() >= 2;
+await page.click(`[data-pickday="${iso(plusDays(nextMon))}"]`);
 await page.screenshot({ path: '/tmp/foulee-semaine-9-nov.png', fullPage: true });
 await page.click('[data-tab="programme"]');
 await page.screenshot({ path: '/tmp/foulee-programme.png', fullPage: true });
@@ -150,6 +171,7 @@ await page.screenshot({ path: '/tmp/foulee-profil.png', fullPage: true });
 // Reprise après fermeture de l'app en pleine séance.
 await page.click('[data-tab="programme"]');
 await page.click('[data-start="test-4"]');
+await page.click('[data-ready]');
 await page.waitForTimeout(6500);
 await page.reload();
 await page.waitForSelector('[data-resume]');
@@ -168,6 +190,9 @@ server.close();
 
 const checks = {
   'la piste avance': t1 > 1,
+  'avant de partir : GPS, signaux, écran': prepText.includes('GPS prêt') && prepText.includes('Signaux prêts') && prepText.includes('Écran allumé'),
+  'fin : confirmation demandée': sheetText.includes('Terminer maintenant') && sheetText.includes('gardé pour le bilan'),
+  'fin : « Continuer » garde la séance': stillLive,
   'GPS mesuré pendant la séance': /^0,0[23]$/.test(gpsLine),
   'verrou tactile bloque les clics': lockedStill === 1 && before === after,
   'appui long sur le cadenas déverrouille': unlocked,
@@ -193,7 +218,7 @@ const checks = {
   'programme calculé (course + natation)': /palier [23]\/12/.test(programme) && programme.includes('30 longueurs') && programme.includes('Voir 2 semaines de plus'),
   'carte de la prochaine natation : conseils du bilan': nextSwimCard.includes('Conseils de ton dernier bilan') && nextSwimCard.includes('4 longueurs pour travailler ta respiration'),
   'programme continu : séances 8 semaines plus loin': farWeek,
-  'accueil : dernière séance = la plus récente': accueil.includes('mercredi 28 octobre') && !accueil.includes('30 septembre'),
+  'accueil : dernière séance = la plus récente': accueil.split('Dernière séance').at(-1).includes(new Date().toLocaleDateString('fr-FR', { day: 'numeric', month: 'long' })) && !accueil.includes('30 septembre'),
   'aucune erreur hors alertes d\u2019import': errors.filter((e) => !e.includes('séance(s) ajoutée(s)')).length === 0,
 };
 console.log({ resumedAt, t1, now1, now2, dur, gpsLine, swimdist, count, errors });

@@ -49,6 +49,7 @@ for (const [name, dev] of Object.entries(devices)) {
   await page.click('[data-tab="programme"]');
   await page.waitForTimeout(1000);
   await page.click('[data-start="p1"]');
+  await page.click('[data-ready]');
   await page.waitForSelector('#count');
   const player = (js) => page.evaluate(js);
   const seek = async (t, wait = 1800) => { await player(`document.getElementById('player').currentTime = ${t}`); await page.waitForTimeout(wait); };
@@ -103,6 +104,7 @@ for (const [name, dev] of Object.entries(devices)) {
   // Dernière récupération : on s'arrête là.
   await seek(RECUP + 480 + 30, 700);
   await page.tap('[data-finish]');
+  await page.tap('.finish-sheet [data-finishok]');
   await page.waitForSelector('[data-savebilan]');
   const bilanText = await page.textContent('#app');
   check(/9 répétitions au lieu de 7/.test(bilanText), `${name} : bilan prévu contre réalisé`);
