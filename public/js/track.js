@@ -50,20 +50,36 @@ export function buildEvents(steps, { voice = true } = {}) {
     if (voice && next && s.duration >= MIN_STEP_FOR_PRE) events.push({ at: stepEnd - PRE_ANNOUNCE, clip: preClipId(next.kind) });
     if (s.duration >= 15) for (const d of [3, 2, 1]) events.push({ at: stepEnd - d, clip: 'bip' });
   });
+  const half = halfwayAt(starts, end, events, voice);
+  if (half !== null) events.push({ at: half, clip: 'signal_moitie' });
   if (voice) {
     events.push({ at: end, clip: 'bip_long' });
     events.push({ at: end + 0.7, clip: 'end' });
   } else {
     events.push({ at: end, clip: 'signal_fin' });
   }
-  return { events: events.sort((a, b) => a.at - b.at), starts, end, total: end + TAIL };
+  return { events: events.sort((a, b) => a.at - b.at), starts, end, half, total: end + TAIL };
+}
+
+// Mi-séance : moitié du temps d'effort (intro exclue), décalée au plus près si un autre son
+// tombe trop près (sinon l'un des deux serait coupé). null si la séance est trop courte.
+const HALF_LEN = 0.9;
+export function halfwayAt(starts, end, events, voice = false) {
+  const mid = starts[0] + (end - starts[0]) / 2;
+  const before = voice ? 3.5 : 1; // une annonce parlée dure jusqu'à ~3 s
+  const free = (t) => t > starts[0] + 5 && t + HALF_LEN < end - 1
+    && events.every((e) => e.at <= t - before || e.at >= t + HALF_LEN + 0.2);
+  for (let k = 0; k <= 120; k++) {
+    for (const t of [mid + k * 0.5, mid - k * 0.5]) if (free(t)) return Math.round(t * 10) / 10;
+  }
+  return null;
 }
 
 // Assemble le MP3. `index` et `pack` viennent de public/audio (index.json, pack.mp3).
 // Un clip qui déborderait sur le suivant est tronqué : le son suivant reste à l'heure.
 export function assemble(steps, index, pack, options) {
   const { frameBytes: fb, frameSeconds: fs, clips } = index;
-  const { events, starts, end, total } = buildEvents(steps, options);
+  const { events, starts, end, half, total } = buildEvents(steps, options);
   const nFrames = Math.ceil(total / fs);
   const out = new Uint8Array(nFrames * fb);
   const sil = clips.silence;
@@ -79,7 +95,7 @@ export function assemble(steps, index, pack, options) {
     out.set(pack.subarray(clip.offset * fb, (clip.offset + frames) * fb), at * fb);
     return { ...e, frame: at, frames, truncated: frames < clip.frames };
   });
-  return { bytes: out, events: placed, starts, end, total: nFrames * fs };
+  return { bytes: out, events: placed, starts, end, half, total: nFrames * fs };
 }
 
 // Étape en cours à l'instant t (secondes de piste) : -1 = introduction, steps.length = fin.

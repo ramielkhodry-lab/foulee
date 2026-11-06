@@ -745,7 +745,7 @@ function curveTip(history, monday, kind) {
 // --- Sons -------------------------------------------------------------------
 
 // À changer à chaque régénération des clips : l'URL change, donc aucun ancien cache ne sert.
-const AUDIO_VERSION = '3';
+const AUDIO_VERSION = '4';
 let audioAssets = null;
 async function loadAudio() {
   if (audioAssets) return audioAssets;
@@ -938,6 +938,7 @@ function startSession(session, resume = null) {
     anchors: [], // repères (position dans la piste, heure) : heure réelle de chaque étape, pour le cardio
   };
   if (resume) live.gps.gaps = 1; // la mesure d'avant l'interruption est perdue
+  if (resume?.overSec) live.overBase = resume.overSec; // reprise après la fin du programme
   applyAudioMode();
   audio.src = url;
   audio.currentTime = resume?.pos || 0;
@@ -958,6 +959,7 @@ function saveLive() {
   try {
     localStorage.setItem(LIVE_KEY, JSON.stringify({
       session: live.session, startedAt: live.startedAt, pos: audio.currentTime || live.maxTime, skipped: [...live.skipped], savedAt: Date.now(),
+      overSec: live.overAt ? Math.round(liveElapsed()) : null,
     }));
   } catch {}
 }
@@ -981,8 +983,9 @@ function startGps() {
     (pos) => {
       if (!live) return;
       live.gpsError = null;
-      // Pas de distance pendant une pause : on ne compte que le temps de séance.
-      if (audio.paused) return;
+      // Pas de distance pendant une pause : on ne compte que le temps de séance. Après la fin
+      // du programme, la piste est finie mais la séance continue jusqu'à « Terminer ».
+      if (audio.paused && !live.overAt) return;
       if (pos.coords.accuracy <= 30) addAltitude(live.gps, pos.coords.altitude, pos.coords.altitudeAccuracy, pos.timestamp);
       addPoint(live.gps, { lat: pos.coords.latitude, lon: pos.coords.longitude, t: pos.timestamp, acc: pos.coords.accuracy });
     },
@@ -1131,6 +1134,12 @@ function reshapeSession(next) {
   saveLive();
   if (current === 'live') render();
 }
+// Temps de séance (s) : position dans la piste, puis horloge après la fin du programme.
+function liveElapsed() {
+  if (!live) return 0;
+  if (live.overAt) return live.overBase + (Date.now() - live.overAt) / 1000;
+  return Math.max(0, audio.currentTime - live.track.starts[0]);
+}
 const liveStep = () => (live ? stepAt(live.track.starts, live.track.end, audio.currentTime) : -1);
 function extendLive() {
   const i = liveStep();
@@ -1185,8 +1194,14 @@ audio.addEventListener('timeupdate', () => {
     updateMediaMetadata(i);
   }
 });
+// Fin du programme : la piste s'arrête, pas la séance. Chrono, GPS et distance continuent
+// (fin de la marche, retour) jusqu'à l'appui sur « Terminer ».
 audio.addEventListener('ended', () => {
-  if (live && current === 'live') go('bilan');
+  if (!live || live.done || live.overAt) return;
+  live.overBase ??= Math.max(0, live.maxTime - live.track.starts[0]);
+  live.overAt = Date.now();
+  saveLive();
+  if (current === 'live') render();
 });
 audio.addEventListener('pause', () => {
   saveLive();
@@ -1254,9 +1269,9 @@ function tick() {
     el('count').textContent = mmss(starts[0] - t);
     el('next').innerHTML = `<span class="muted">Ensuite</span> ${esc(KINDS[steps[0].kind].label)}`;
   } else if (i >= steps.length) {
-    el('now').textContent = 'Terminé !';
-    el('count').textContent = '0:00';
-    el('next').textContent = '';
+    el('now').textContent = 'Programme fini';
+    el('count').textContent = live.overAt ? `+${mmss((Date.now() - live.overAt) / 1000)}` : '0:00';
+    el('next').textContent = 'Le chrono et le GPS continuent jusqu\'à « Terminer ».';
   } else {
     el('now').textContent = effort === 'course' ? 'Cours' : 'Marche';
     el('count').textContent = mmss(starts[i] + steps[i].duration - t);
@@ -1265,9 +1280,24 @@ function tick() {
   }
   updateExtend(i);
   el('stepno').textContent = i < 0 ? 'Départ' : i >= steps.length ? 'Fin' : `Étape ${i + 1}/${steps.length} · ${KINDS[steps[i].kind].label}`;
-  el('progress').style.width = `${Math.min(100, ((t - starts[0]) / (end - starts[0])) * 100)}%`;
-  el('elapsed').textContent = mmss(Math.max(0, t - starts[0]));
-  const g = summary(live.gps, Math.max(0, t - starts[0]));
+  // Barre : chaque étape à sa couleur (vert = course, blanc = marche), passé plein, futur estompé.
+  const segs = el('bar')?.querySelectorAll('.seg > i') || [];
+  segs.forEach((f, k) => { f.style.width = `${Math.max(0, Math.min(1, (t - starts[k]) / steps[k].duration)) * 100}%`; });
+  if (el('cursor')) el('cursor').style.left = `${Math.max(0, Math.min(100, ((t - starts[0]) / (end - starts[0])) * 100))}%`;
+  // Mi-séance : même instant que le son gravé dans la piste. Seulement au franchissement
+  // (une reprise après la moitié ne le rejoue pas).
+  const half = live.track.half;
+  if (half && live.lastT !== undefined && live.lastT < half && t >= half && t - live.lastT < 2) {
+    document.body.classList.remove('flash-moitie');
+    void document.body.offsetWidth;
+    document.body.classList.add('flash-moitie');
+    setTimeout(() => document.body.classList.remove('flash-moitie'), 2600);
+    live.halfShownUntil = Date.now() + 8000;
+  }
+  live.lastT = t;
+  el('halfway').hidden = !(live.halfShownUntil > Date.now());
+  el('elapsed').textContent = mmss(liveElapsed());
+  const g = summary(live.gps, liveElapsed());
   el('dist').textContent = g.distanceKm ? g.distanceKm.toLocaleString('fr-FR', { minimumFractionDigits: 2 }) : '0,00';
   el('pace').textContent = g.allureSecKm ? allure(g.allureSecKm).replace('/km', '') : '–';
   el('gpsdot').classList.toggle('ok', !live.gpsError && Boolean(g.distanceKm));
@@ -1544,6 +1574,13 @@ const screens = {
   },
 
   live() {
+    const segmentsBar = () => {
+      if (!live) return '<div class="bar"></div>';
+      const { starts, end, half } = live.track;
+      const span = end - starts[0];
+      const pct = (x) => `${((x / span) * 100).toFixed(3)}%`;
+      return `<div class="bar" id="bar">${live.session.steps.map((s, i) => `<span class="seg ${KINDS[s.kind].effort}" style="left:${pct(starts[i] - starts[0])};width:${pct(s.duration)}"><i></i></span>`).join('')}${half ? `<b class="halfmark" style="left:${pct(half - starts[0])}"></b>` : ''}<span class="cursor" id="cursor"></span></div>`;
+    };
     const playing = !audio.paused;
     const interrupted = !playing && live && !live.userPaused && !live.swapping && audio.currentTime < live.track.end;
     return `
@@ -1554,7 +1591,8 @@ const screens = {
         <p class="count" id="count"></p>
         <p class="next" id="next"></p>
         <div class="extend" id="extend" hidden></div>
-        <div class="bar"><div id="progress"></div></div>
+        ${segmentsBar()}
+        <p class="halfway" id="halfway" hidden>Moitié de la séance faite</p>
         <div class="live-stats">
           <div><b id="dist">0,00</b><span>km</span></div>
           <div><b id="pace">–</b><span>allure /km</span></div>
@@ -1562,11 +1600,11 @@ const screens = {
         </div>
         <div class="gpsline" id="gps"></div>
         ${IOS && load().settings.son !== 'exclusif' ? '<p class="muted small" style="margin:0">Mode musique : iPhone hors silencieux, sinon pas de signaux.</p>' : ''}
-        <button class="btn-primary live-done" id="livedone" data-finishok hidden>Faire le bilan</button>
-        <div class="live-controls">
+        <button class="btn-primary live-done" id="livedone" data-finishok hidden>Terminer et faire le bilan</button>
+        ${live?.overAt ? '' : `<div class="live-controls">
           <button class="toggle${playing ? '' : ' paused'}" data-toggle>${playing ? 'Pause' : 'Reprendre'}</button>
           <button data-skip>Étape suivante</button>
-        </div>
+        </div>`}
         <div class="live-extra">
           <button class="lockbtn" data-touchlock>🔒 Bloquer l'écran</button>
           <button class="btn-stop" data-finish>Terminer…</button>
@@ -1635,7 +1673,7 @@ const screens = {
       <h1>Bilan de la séance</h1>
       <div class="card">
         <p><strong>${esc(b.sessionName)}</strong></p>
-        <p class="muted">${mmss(b.elapsedSec)} de séance · ${b.completedSteps} étape(s) sur ${b.steps.length}${b.skipped.length ? ` · ${b.skipped.length} passée(s)` : ''}</p>
+        <p class="muted">${mmss(b.elapsedSec)} de séance${b.prolongSec ? `, dont ${mmss(b.prolongSec)} après le programme` : ''} · ${b.completedSteps} étape(s) sur ${b.steps.length}${b.skipped.length ? ` · ${b.skipped.length} passée(s)` : ''}</p>
         ${b.extra ? `<p class="small">${extraLine(b)}</p>` : ''}
         ${b.trace ? `<div class="map" data-map="bilan"></div>${b.gpsIncomplet ? '<p class="muted small">En pointillés : écran verrouillé, le GPS ne suivait plus.</p>' : ''}` : ''}
         ${b.distanceSource === 'gps' ? `<p class="small">GPS : ${b.distanceKm.toLocaleString('fr-FR')} km${b.allureSecKm ? ` · ${allure(b.allureSecKm)}` : ''}${b.gpsIncomplet ? ' · <strong>incomplet</strong> (écran verrouillé un moment)' : ''}</p>` : ''}
@@ -2012,7 +2050,9 @@ function go(screen) {
     const reached = Math.min(live.maxTime, end);
     const lastIdx = stepAt(starts, end, reached);
     const completed = lastIdx >= steps.length ? steps.length : Math.max(0, lastIdx);
-    const elapsedSec = Math.round(Math.max(0, reached - starts[0]));
+    // Après la fin du programme, le temps passé jusqu'à « Terminer » compte aussi.
+    const elapsedSec = Math.round(live.overAt ? liveElapsed() : Math.max(0, reached - starts[0]));
+    const prolongSec = live.overAt ? Math.max(0, elapsedSec - Math.round(end - starts[0])) : 0;
     const gps = summary(live.gps, elapsedSec);
     stopLiveExtras();
     renderTouchLock();
@@ -2027,6 +2067,7 @@ function go(screen) {
       steps: steps,
       plannedSec: total(steps),
       elapsedSec,
+      ...(prolongSec ? { prolongSec } : {}),
       completedSteps: completed,
       skipped: [...live.skipped],
       ...(extraSummary(live.session, completed) || {}),
@@ -2039,6 +2080,7 @@ function go(screen) {
       trace: encodeTrace(gps.points),
       stepMs: stepTimes(live.anchors, starts, end, reached),
       endedAt: localNow(),
+      finMs: Date.now(), // appui sur « Terminer » : la montre est lue jusque-là
       difficulte: null,
       fatigue: null,
       douleur: '',
