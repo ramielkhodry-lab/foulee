@@ -42,7 +42,7 @@ for (const [name, dev] of [['iphone', 'iPhone 13'], ['android', 'Pixel 7']]) {
   let lat = 48.897;
   const walk = async (n) => {
     for (let i = 0; i < n; i++) {
-      lat += 4 / 111195; // 4 m vers le nord
+      lat += 2 / 111195; // 2 m vers le nord (5 m/s : sous le plafond anti-saut)
       await context.setGeolocation({ latitude: lat, longitude: 2.253, accuracy: 5 });
       await page.waitForTimeout(400);
     }
@@ -57,6 +57,17 @@ for (const [name, dev] of [['iphone', 'iPhone 13'], ['android', 'Pixel 7']]) {
   await page.screenshot({ path: `${out}/${name}-1-moitie.png` });
   await page.waitForTimeout(7000);
   const halfHidden = !(await page.isVisible('#halfway'));
+  // iOS ferme l'app (rechargement), puis « Reprendre » : distance et tracé d'avant gardés.
+  await walk(6);
+  const distBefore = parseFloat((await page.textContent('#dist')).replace(',', '.'));
+  await page.waitForTimeout(5500); // sauvegarde de la séance toutes les 5 s
+  await page.reload();
+  await page.waitForSelector('[data-resume]');
+  await page.waitForTimeout(800);
+  await page.click('[data-resume]');
+  await page.waitForSelector('#count');
+  await page.waitForTimeout(600);
+  const distResumed = parseFloat((await page.textContent('#dist')).replace(',', '.'));
   // Fin du programme : la piste se termine, la séance non.
   await player(() => { const a = document.getElementById('player'); a.currentTime = a.duration - 1; });
   await page.waitForTimeout(2500);
@@ -67,6 +78,7 @@ for (const [name, dev] of [['iphone', 'iPhone 13'], ['android', 'Pixel 7']]) {
   const t2 = await page.textContent('#elapsed');
   const distAfter = await page.textContent('#dist');
   const overText = await page.textContent('#live');
+  if (process.env.DEBUG) console.log({ distBefore, distResumed, distAtEnd, distAfter });
   const noControls = (await page.locator('[data-toggle]').count()) === 0;
   await page.screenshot({ path: `${out}/${name}-2-apres-programme.png` });
   await page.click('#livedone');
@@ -81,6 +93,7 @@ for (const [name, dev] of [['iphone', 'iPhone 13'], ['android', 'Pixel 7']]) {
     'barre : cases course et marche': segs.length === 5 && segs.some((c) => c.includes('course')) && segs.some((c) => c.includes('marche')),
     'mi-séance : message affiché au passage': halfShown,
     'mi-séance : message masqué ensuite': halfHidden,
+    'reprise après fermeture : distance gardée': distBefore > 0 && distResumed >= distBefore,
     'fin du programme : piste finie, toujours sur la séance': ended && overText.includes('Programme fini'),
     'fin du programme : plus de pause ni d’étape suivante': noControls,
     'après le programme : le chrono avance': sec(t2) - sec(t1) >= 2,

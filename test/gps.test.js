@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { haversine, createTrack, addPoint, addAltitude, ascent, markGap, summary } from '../public/js/gps.js';
+import { haversine, createTrack, addPoint, addAltitude, ascent, markGap, summary, packTrack, restoreTrack } from '../public/js/gps.js';
 
 // Point à `m` mètres au nord d'un point de Courbevoie.
 const at = (m, t, acc = 5) => ({ lat: 48.897 + m / 111195, lon: 2.253, t: t * 1000, acc });
@@ -76,4 +76,18 @@ test('dénivelé du téléphone : montées comptées, bruit de ± 2 m ignoré', 
   assert.ok(up >= 27 && up <= 33, `dénivelé ${up}`);
   assert.equal(ascent(alts.slice(0, 40).map((a, i) => [i, a])), 0);
   assert.equal(ascent([[0, 1]]), null); // trop peu de mesures : rien
+});
+
+test('reprise : mesure gardée, pas de distance inventée pendant la fermeture', () => {
+  const t = createTrack();
+  addPoint(t, { lat: 48.9, lon: 2.25, t: 0, acc: 5 });
+  addPoint(t, { lat: 48.9001, lon: 2.25, t: 10_000, acc: 5 });
+  const r = restoreTrack(JSON.parse(JSON.stringify(packTrack(t))));
+  assert.equal(r.points.length, 2);
+  assert.ok(Math.abs(r.meters - t.meters) < 0.1);
+  r.cut = true;
+  addPoint(r, { lat: 48.905, lon: 2.25, t: 600_000, acc: 5 }); // 550 m plus loin, app fermée
+  assert.ok(Math.abs(r.meters - t.meters) < 0.1);
+  addPoint(r, { lat: 48.9051, lon: 2.25, t: 610_000, acc: 5 });
+  assert.ok(r.meters > t.meters + 10);
 });

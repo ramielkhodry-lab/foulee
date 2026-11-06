@@ -3,7 +3,7 @@ import { assemble, stepAt, sample } from './track.js';
 import { MAX_EXTRA, extendState, canExtend, canRetract, extend, retract, extraSummary } from './extend.js';
 import { load, update, uid, PRESETS, onSave, replace, empty } from './store.js';
 import * as account from './account.js';
-import { createTrack, addPoint, addAltitude, markGap, summary, encodeTrace, decodeTrace } from './gps.js';
+import { createTrack, addPoint, addAltitude, markGap, summary, encodeTrace, decodeTrace, packTrack, restoreTrack } from './gps.js';
 import { drawTrace } from './map.js';
 import { stepTimes, summarize, summarizeMontre, montreStale, MONTRE_V, mergeDistance, recovery, recoveryAt, zoneLimits, zoneOf, zoneTimes, cardioLine, curveSvg, windowOf, swimWindow, dayRange, applySwim } from './cardio.js';
 import { iaInput, pendingIA, failedIA, failureMessage } from './ia.js';
@@ -975,7 +975,14 @@ function startSession(session, resume = null) {
     startedAt: resume?.startedAt || localNow(), gps: createTrack(), gpsError: null, userPaused: false,
     anchors: [], // repères (position dans la piste, heure) : heure réelle de chaque étape, pour le cardio
   };
-  if (resume) live.gps.gaps = 1; // la mesure d'avant l'interruption est perdue
+  if (resume) {
+    // Ce qui a été mesuré avant la fermeture est repris (tracé, distance, heures des étapes) ;
+    // le trajet fait pendant que l'app était fermée n'est pas inventé : coupure notée.
+    if (resume.gps) live.gps = restoreTrack(resume.gps);
+    if (Array.isArray(resume.anchors)) live.anchors = resume.anchors.slice(-900);
+    live.gps.gaps++;
+    live.gps.cut = true;
+  }
   if (resume?.overSec) live.overBase = resume.overSec; // reprise après la fin du programme
   applyAudioMode();
   audio.src = url;
@@ -998,6 +1005,7 @@ function saveLive() {
     localStorage.setItem(LIVE_KEY, JSON.stringify({
       session: live.session, startedAt: live.startedAt, pos: audio.currentTime || live.maxTime, skipped: [...live.skipped], savedAt: Date.now(),
       overSec: live.overAt ? Math.round(liveElapsed()) : null,
+      gps: packTrack(live.gps), anchors: live.anchors,
     }));
   } catch {}
 }

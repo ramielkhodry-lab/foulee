@@ -19,11 +19,29 @@ export function createTrack() {
   return { points: [], meters: 0, rejected: 0, gaps: 0, alts: [] };
 }
 
+// Mesure en cours gardée sur le téléphone (reprise si iOS ferme l'app pendant la séance).
+export function packTrack(track) {
+  return {
+    p: track.points.map((x) => [Math.round(x.lat * 1e6) / 1e6, Math.round(x.lon * 1e6) / 1e6, x.t]),
+    m: Math.round(track.meters * 10) / 10, g: track.gaps, a: track.alts || [],
+  };
+}
+export function restoreTrack(saved) {
+  const t = createTrack();
+  if (!saved || !Array.isArray(saved.p)) return t;
+  t.points = saved.p.filter((x) => Array.isArray(x) && x.length >= 3).map(([lat, lon, ts]) => ({ lat, lon, t: ts, acc: 0 }));
+  t.meters = Number(saved.m) || 0;
+  t.gaps = Number(saved.g) || 0;
+  t.alts = Array.isArray(saved.a) ? saved.a : [];
+  return t;
+}
+
 // Ajoute un point { lat, lon, t (ms), acc (m) }. Renvoie true s'il est retenu.
 export function addPoint(track, p) {
   if (!(p.acc <= MAX_ACCURACY)) { track.rejected++; return false; }
   const last = track.points.at(-1);
-  if (!last) { track.points.push(p); return true; }
+  // Premier point après une reprise : pas de distance avec le point d'avant (trajet non mesuré).
+  if (!last || track.cut) { track.cut = false; track.points.push(p); return true; }
   const d = haversine(last, p);
   const dt = (p.t - last.t) / 1000;
   if (dt <= 0) return false;
