@@ -52,10 +52,10 @@ for (const [name, dev] of [['iphone', 'iPhone 13'], ['android', 'Pixel 7']]) {
   const segs = await page.$$eval('#bar .seg', (l) => l.map((x) => x.className));
   // Mi-séance : on se place juste avant, le passage affiche le message.
   await player(() => { const a = document.getElementById('player'); a.currentTime = 7 + 120 - 1.5; });
-  await page.waitForTimeout(2600);
+  await page.waitForTimeout(4000); // après le flash
   const halfShown = await page.isVisible('#halfway');
   await page.screenshot({ path: `${out}/${name}-1-moitie.png` });
-  await page.waitForTimeout(8500);
+  await page.waitForTimeout(7000);
   const halfHidden = !(await page.isVisible('#halfway'));
   // Fin du programme : la piste se termine, la séance non.
   await player(() => { const a = document.getElementById('player'); a.currentTime = a.duration - 1; });

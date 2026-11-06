@@ -1271,6 +1271,7 @@ function tick() {
   } else if (i >= steps.length) {
     el('now').textContent = 'Programme fini';
     el('count').textContent = live.overAt ? `+${mmss((Date.now() - live.overAt) / 1000)}` : '0:00';
+    el('count').classList.toggle('over', Boolean(live.overAt));
     el('next').textContent = 'Le chrono et le GPS continuent jusqu\'à « Terminer ».';
   } else {
     el('now').textContent = effort === 'course' ? 'Cours' : 'Marche';
