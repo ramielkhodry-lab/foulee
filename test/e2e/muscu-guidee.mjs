@@ -39,7 +39,26 @@ for (const [name, dev] of Object.entries(devices)) {
   await page.clock.runFor(1500);
   await page.screenshot({ path: `${out}/${name}-1-accueil.png` });
   await page.click('.hero [data-muscugo], .day-card [data-muscugo]');
+  // Avant de commencer : exercices faisables à la maison, alternative même muscle.
+  await page.waitForSelector('.mprep-list');
+  await page.waitForSelector('[data-mstart]:not([disabled])');
+  const prepText = await page.textContent('.mprep-list');
+  if (/Tractions|machine|barre/i.test(prepText)) errors.push(`${name} : matériel absent proposé : ${prepText}`);
+  await page.selectOption('[data-mpswap="A:2"]', 'ytw');
+  await page.waitForTimeout(100);
+  if (!/Y-T-W/.test(await page.textContent('.mprep-list'))) errors.push(`${name} : alternative non prise`);
+  await page.screenshot({ path: `${out}/${name}-0-avant.png`, fullPage: true });
+  await page.click('[data-mstart]');
+  await page.waitForSelector('.mlive[data-phase="countdown"]');
+  await page.clock.runFor(300);
+  if (await page.textContent('#mcount') !== '3') errors.push(`${name} : décompte ${await page.textContent('#mcount')}`);
+  await page.clock.runFor(1000);
+  await page.screenshot({ path: `${out}/${name}-1b-decompte.png` });
+  if (await page.textContent('#mcount') !== '2') errors.push(`${name} : décompte ${await page.textContent('#mcount')}`);
+  await page.clock.runFor(2000);
   await page.waitForSelector('.mlive[data-phase="work"]');
+  await page.clock.runFor(1600); // fin du flash de départ (l'animation CSS suit le temps réel)
+  await page.waitForTimeout(1600);
   await page.click('[data-mreps="-1"]');
   await page.click('[data-mreps="-1"]');
   if (await page.textContent('#mreps') !== '13') errors.push(`${name} : stepper ${await page.textContent('#mreps')}`);

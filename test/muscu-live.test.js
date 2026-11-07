@@ -55,3 +55,37 @@ test('piste de récup : signal à la bonne image', () => {
   assert.equal(out[14 * 2], 1, 'bip à −3 s');
   assert.equal(out[0], 0);
 });
+
+test('décompte de 3 s avant la 1re série ; la durée part de la fin du décompte', async () => {
+  const { startCountdown, countLeft, endCountdown } = await import('../public/js/muscu-live.js');
+  const s = make();
+  startCountdown(s, 3, 0);
+  assert.equal(s.phase, 'countdown');
+  assert.equal(countLeft(s, 1000), 2);
+  setDone(s, 12, 1000);
+  assert.equal(s.phase, 'countdown', 'pas de série pendant le décompte');
+  endCountdown(s);
+  assert.equal(s.phase, 'work');
+  assert.equal(elapsedSec(s, 13000), 10);
+});
+
+test('piste du décompte : 3 bips puis le signal à 3 s', () => {
+  const fs = 0.024;
+  const index = { frameBytes: 1, frameSeconds: fs, clips: { silence: { offset: 0, frames: 1 }, bip: { offset: 1, frames: 2 }, signal_course: { offset: 3, frames: 2 } } };
+  const pack = new Uint8Array([0, 7, 7, 9, 9]);
+  const t = restTrack(3, index, pack, true);
+  for (const at of [0, 1, 2]) assert.equal(t[Math.round(at / fs)], 7, `bip à ${at} s`);
+  assert.equal(t[Math.round(3 / fs)], 9);
+  assert.equal(restTrack(3, index, pack)[0], 0, 'récup courte : pas de bips par défaut');
+});
+
+test('changer d’exercice avant la 1re série seulement', async () => {
+  const { swapExercise } = await import('../public/js/muscu-live.js');
+  const s = make();
+  swapExercise(s, { id: 'fentes', nom: 'Fentes', min: 10, max: 12 });
+  assert.equal(s.exercices[0].id, 'fentes');
+  assert.equal(s.exercices[0].reps.length, 2);
+  setDone(s, 10, 0); endRest(s);
+  swapExercise(s, { id: 'squat', nom: 'Squat' });
+  assert.equal(s.exercices[0].id, 'fentes', 'série déjà faite : on garde l’exercice');
+});

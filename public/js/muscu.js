@@ -5,7 +5,9 @@
 // Matériel : machine et poulie = salle ; barre = salle (ou maison équipée) ;
 // halteres = maison avec haltères ; corps = poids du corps, partout.
 // pas = la plus petite hausse de charge réaliste (kg).
-const E = (id, nom, muscle, materiel, pas = 0, unite = 'reps') => ({ id, nom, muscle, materiel, pas, unite });
+// besoin : ce qu'il faut en plus (affiché avant la séance). salle : seulement en salle,
+// même au poids du corps (barre de traction).
+const E = (id, nom, muscle, materiel, pas = 0, unite = 'reps', extra = {}) => ({ id, nom, muscle, materiel, pas, unite, ...extra });
 
 export const EXERCICES = [
   E('presse-pec', 'Presse pectorale', 'pectoraux', 'machine', 5),
@@ -19,7 +21,8 @@ export const EXERCICES = [
   E('rowing-h', 'Rowing haltère à un bras', 'dos', 'halteres', 2),
   E('rowing-barre', 'Rowing à la barre', 'dos', 'barre', 2.5),
   E('superman', 'Superman au sol', 'dos', 'corps'),
-  E('tractions', 'Tractions (barre fixe ou machine assistée)', 'dos', 'corps'),
+  E('ytw', 'Y-T-W allongé sur le ventre (bras en Y, en T, en W)', 'dos', 'corps'),
+  E('tractions', 'Tractions (barre fixe ou machine assistée)', 'dos', 'corps', 0, 'reps', { salle: true, besoin: 'une barre de traction' }),
 
   E('dev-epaules-m', 'Développé épaules à la machine', 'épaules', 'machine', 5),
   E('dev-militaire-h', 'Développé épaules haltères', 'épaules', 'halteres', 2),
@@ -41,16 +44,17 @@ export const EXERCICES = [
   E('pont-fessier', 'Pont fessier', 'ischios et fessiers', 'corps'),
 
   E('mollets-m', 'Mollets debout à la machine', 'mollets', 'machine', 5),
-  E('mollets-marche', 'Mollets sur une marche', 'mollets', 'corps'),
+  E('mollets-marche', 'Mollets sur une marche', 'mollets', 'corps', 0, 'reps', { besoin: 'une marche d\'escalier' }),
 
   E('curl-pupitre', 'Curl pupitre à la machine', 'biceps', 'machine', 2.5),
   E('curl-h', 'Curl haltères', 'biceps', 'halteres', 1),
   E('curl-poulie', 'Curl à la poulie', 'biceps', 'poulie', 2.5),
+  E('curl-serviette', 'Curl isométrique à la serviette (pied dessus, tirer et tenir)', 'biceps', 'corps', 0, 's', { besoin: 'une serviette' }),
 
   E('ext-poulie', 'Extension triceps à la poulie haute', 'triceps', 'poulie', 2.5),
   E('dips-m', 'Dips à la machine', 'triceps', 'machine', 5),
   E('ext-h', 'Extension haltère au-dessus de la tête', 'triceps', 'halteres', 1),
-  E('dips-banc', 'Dips sur un banc ou une chaise', 'triceps', 'corps'),
+  E('dips-banc', 'Dips sur un banc ou une chaise', 'triceps', 'corps', 0, 'reps', { besoin: 'une chaise stable ou un banc' }),
 
   E('crunch-m', 'Crunch à la machine', 'abdos', 'machine', 5),
   E('releves', 'Relevés de jambes allongé', 'abdos', 'corps'),
@@ -88,7 +92,11 @@ export const SEANCES = {
   L: { titre: 'Bas du corps', slots: [['quadriceps', 0], ['ischios et fessiers', 0], ['quadriceps', 1], ['mollets', 0], ['abdos', 0]] },
 };
 
-export const alternatives = (muscle, lieu = 'salle') => EXERCICES.filter((e) => e.muscle === muscle && LIEUX[lieu].materiel.includes(e.materiel));
+// Exercices du muscle faisables avec le matériel du lieu (une barre de traction = salle).
+export const alternatives = (muscle, lieu = 'salle') => {
+  const l = LIEUX[lieu] ? lieu : 'salle';
+  return EXERCICES.filter((e) => e.muscle === muscle && LIEUX[l].materiel.includes(e.materiel) && (!e.salle || l === 'salle'));
+};
 
 // Exercice d'une case de séance : le choix de la personne s'il existe, sinon le n-ième disponible.
 export function slotExercise(seance, i, lieu = 'salle', choix = {}) {
