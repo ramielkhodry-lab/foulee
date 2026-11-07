@@ -649,3 +649,14 @@ body.flash-muscu { animation: flash-muscu 1.5s ease-out; }
 .q-card .ico { flex: none; width: 46px; height: 46px; }
 /* « Je suis prêt » reste à portée du pouce, au-dessus de la barre d'onglets */
 .prep-go { position: sticky; bottom: calc(84px + env(safe-area-inset-bottom)); z-index: 5; padding: 10px 0 6px; background: linear-gradient(to bottom, rgba(0,0,0,0), #000 30%); }
+
+/* Muscu : avant de commencer (exercices, matériel, alternatives) */
+.mprep-list { list-style: none; padding: 0; margin: 0 0 10px; display: grid; gap: 8px; }
+.mprep-ex { background: var(--surface); border-radius: 16px; padding: 12px 14px; border-left: 4px solid var(--muscu); }
+.mprep-ex > b { display: block; margin-bottom: 2px; }
+.mprep-ex > span { display: block; }
+.mprep-alt { display: block; margin-top: 10px; }
+.mprep-alt span { display: block; font-size: 13px; color: var(--muted); margin-bottom: 4px; }
+.mprep-alt select, .mlive .mswap { width: 100%; max-width: 100%; }
+.mlive .mswap { margin: 10px 0 0; }
+.mlive[data-phase="countdown"] .count { font-size: clamp(160px, 55vw, 260px); }

@@ -9,7 +9,7 @@ import { stepTimes, summarize, summarizeMontre, montreStale, MONTRE_V, mergeDist
 import { iaInput, pendingIA, failedIA, failureMessage } from './ia.js';
 import { tipsOf, tipsSource, hasIA } from './conseils.js';
 import { GOALS_MUSCU, LIEUX, NIVEAUX_MUSCU, MUSCLES, alternatives, byId, muscuPlan, nextSeance, nextLoad, tonnage } from './muscu.js';
-import { createGuided, currentExercise, suggestedReps, setDone, skipExercise, restLeft, adjustRest, endRest, finish, elapsedSec as guidedElapsed, setsDone, setsTotal, restTrack } from './muscu-live.js';
+import { createGuided, currentExercise, suggestedReps, setDone, skipExercise, restLeft, adjustRest, endRest, finish, elapsedSec as guidedElapsed, setsDone, setsTotal, restTrack, startCountdown, countLeft, endCountdown, swapExercise } from './muscu-live.js';
 import { upcoming, moveOptions, planOptions, nextRunLevel, runLevel, afterBilan, HORIZON, GOALS_RUN, START_RUN, GOALS_SWIM, START_SWIM, LEVELS } from './plan.js';
 
 const app = document.getElementById('app');
@@ -1659,6 +1659,40 @@ const screens = {
       </div>`;
   },
 
+  // Avant la muscu : exercices du jour, ce qu'il faut, un autre exercice du même muscle si besoin.
+  mprep() {
+    const d = load();
+    const p = todayMuscuPlan(d);
+    const lieu = LIEUX[d.profile.questionnaire?.lieu] ? d.profile.questionnaire.lieu : 'salle';
+    const a = mprepAudio;
+    const besoins = [...new Set(p.exercices.map((x) => x.besoin).filter(Boolean))];
+    const sound = a === 'erreur'
+      ? '<li class="prep-item ko"><b>✕ Sons non chargés</b><span>Tu peux faire la séance, mais sans signal de fin de récup (le flash reste). Vérifie ta connexion.</span><button class="btn-ghost small-btn" data-msoundretry>Réessayer</button></li>'
+      : a !== 'ok'
+        ? '<li class="prep-item wait"><b>… Chargement des sons</b><span>Quelques secondes.</span></li>'
+        : `<li class="prep-item ok"><b>✓ Signaux prêts</b><span>3 bips puis un signal au départ et à la fin de chaque récup.${IOS && d.settings.son !== 'exclusif' ? ' iPhone <strong>hors mode silencieux</strong>, sinon aucun signal.' : ' Monte le volume média.'}</span></li>`;
+    return `
+      <p class="eyebrow" style="margin-top:0">Avant de commencer</p>
+      <h1 class="prep-title">${esc(p.title)}</h1>
+      <p class="muted" style="margin:0 0 12px">${esc(LIEUX[lieu].label)}${LIEUX[lieu].detail ? ` · ${esc(LIEUX[lieu].detail)}` : ''} · ${p.exercices.length} exercices</p>
+      ${besoins.length ? `<div class="notice small"><strong>Il te faut :</strong> ${esc(besoins.join(', '))}.</div>` : ''}
+      <ul class="mprep-list">${p.exercices.map((x) => {
+        const alts = alternatives(x.muscle, lieu);
+        return `<li class="mprep-ex">
+          <b>${esc(x.nom)}</b>
+          <span class="muted small">${esc(x.muscle)} · ${x.series} séries de ${x.min} à ${x.max}${x.unite === 's' ? ' s' : ' répétitions'}${x.besoin ? ` · il faut ${esc(x.besoin)}` : ''}</span>
+          ${alts.length > 1 ? `<label class="mprep-alt"><span>Pas le matériel ou pas envie ? Même muscle :</span><select data-mpswap="${p.seance}:${x.slot}" aria-label="Autre exercice pour ${esc(x.muscle)}">${alts.map((e) => `<option value="${e.id}" ${e.id === x.id ? 'selected' : ''}>${esc(e.nom)}${e.besoin ? ` (${esc(e.besoin)})` : ''}</option>`).join('')}</select></label>` : ''}
+        </li>`;
+      }).join('')}</ul>
+      <p class="muted small">Ton choix est gardé pour les prochaines séances. Matériel : Profil > questionnaire.</p>
+      <ul class="prep-list">${sound}</ul>
+      <div class="prep-go">
+        <button class="cta muscu" data-mstart ${a === 'chargement' ? 'disabled' : ''}><span>C'est parti</span><i>›</i></button>
+        <p class="muted small" style="text-align:center;margin:8px 0 0">${a === 'chargement' ? 'Le bouton s\'active quand les sons sont chargés.' : 'Décompte de 3 secondes, puis le premier exercice.'}</p>
+      </div>
+      <button class="day-link" data-mprepback style="display:block;margin:6px auto 0">Retour</button>`;
+  },
+
   muscu() {
     const s = guided;
     if (!s) return '';
@@ -1670,6 +1704,15 @@ const screens = {
         <div class="live-top"><span>${esc(s.sessionName)}</span><span>⏱ <b id="mtime">${mmss(guidedElapsed(s))}</b></span></div>
         <div class="bar"><div style="width:${pct}%"></div></div>`;
     const end = '<button data-mfinish>Terminer la séance</button>';
+    if (s.phase === 'countdown') {
+      return `
+      <div class="live mlive" id="mlive" data-phase="countdown">${head}
+        <p class="now">Prépare-toi</p>
+        <p class="count" id="mcount">${Math.max(1, Math.ceil(countLeft(s)))}</p>
+        <p class="next">Premier exercice : <b>${esc(x.nom)}</b></p>
+        <p class="muted" style="margin:4px 0 0">${x.min} à ${x.max} ${unit(x)}</p>
+      </div>`;
+    }
     if (s.phase === 'rest') {
       return `
       <div class="live mlive" id="mlive" data-phase="rest">${head}
@@ -1696,6 +1739,7 @@ const screens = {
         <p class="mname">${esc(x.nom)}</p>
         <p class="next">Objectif : ${x.min} à ${x.max} ${unit(x)}</p>
         <p class="muted small" style="margin:4px 0 0">${esc(x.reason || '')}</p>
+        ${s.set === 0 && liveAlts(x).length > 1 ? `<select class="mswap" data-mswap aria-label="Autre exercice, même muscle">${liveAlts(x).map((e) => `<option value="${e.id}" ${e.id === x.id ? 'selected' : ''}>${e.id === x.id ? 'Changer d\'exercice (même muscle)…' : esc(e.nom)}</option>`).join('')}</select>` : ''}
         ${x.materiel === 'corps' ? '' : `<div class="kg mkg"><input id="mkg" type="number" inputmode="decimal" step="0.5" min="0" placeholder="?" value="${x.poids ?? ''}"><span>kg${x.materiel === 'halteres' ? ' par haltère' : ''}</span></div>`}
         <div class="mstepper">
           <button data-mreps="-1" aria-label="Une de moins">−</button>
@@ -2073,7 +2117,7 @@ function placeWeek() {
 }
 
 // Onglet allumé pour chaque écran.
-const TAB_OF = { prepare: 'demarrer', questionnaire: 'profil', edit: 'programme', live: 'demarrer', muscu: 'demarrer', bilan: 'progression', saisie: 'progression', suite: 'programme', compte: 'profil' };
+const TAB_OF = { prepare: 'demarrer', mprep: 'demarrer', questionnaire: 'profil', edit: 'programme', live: 'demarrer', muscu: 'demarrer', bilan: 'progression', saisie: 'progression', suite: 'programme', compte: 'profil' };
 
 function render() {
   if (live) live.gpsHtml = null; // l'écran est redessiné : le message GPS aussi
@@ -2596,6 +2640,28 @@ document.addEventListener('click', (e) => {
 });
 
 document.addEventListener('change', (e) => {
+  if (e.target.dataset.mpswap) {
+    // Avant la séance : autre exercice du même muscle, gardé pour les prochaines fois.
+    const key = e.target.dataset.mpswap;
+    update((d) => { d.settings.muscuChoix = { ...d.settings.muscuChoix, [key]: e.target.value }; });
+    render();
+    return;
+  }
+  if (e.target.dataset.mswap !== undefined && guided) {
+    // Pendant la séance, avant la 1re série : on change d'exercice (même muscle).
+    const x = currentExercise(guided);
+    const ex = byId(e.target.value);
+    if (!x || !ex || ex.id === x.id) return;
+    const d = load();
+    const goal = GOALS_MUSCU[d.profile.questionnaire?.objectifMuscu] || GOALS_MUSCU.muscle;
+    const next = nextLoad(ex, d.history, goal);
+    swapExercise(guided, { id: ex.id, nom: ex.nom, muscle: ex.muscle, materiel: ex.materiel, unite: ex.unite, min: next.min, max: next.max, poids: next.poids, reason: next.reason });
+    if (guided.seance && x.slot !== undefined) update((dd) => { dd.settings.muscuChoix = { ...dd.settings.muscuChoix, [`${guided.seance}:${x.slot}`]: ex.id }; });
+    mDraft = { key: null, reps: 0 };
+    saveGuided();
+    render();
+    return;
+  }
   if (e.target.name === 'annonces') {
     update((d) => { d.settings.annonces = e.target.value; });
   } else if (e.target.name === 'mode') {
@@ -2688,12 +2754,17 @@ function stopRestAudio() {
   if (restUrl) URL.revokeObjectURL(restUrl);
   restUrl = null;
 }
-// Lancée dans le geste (« Série faite », ±15 s) : iOS refuse un son lancé plus tard par une minuterie.
+// Lancée dans le geste (« C'est parti », « Série faite », ±15 s) : iOS refuse un son lancé plus
+// tard par une minuterie. Le décompte de départ joue le premier son de la séance : le lecteur
+// et la session audio sont actifs dès le départ, pas seulement à la première récup.
 function playRest() {
   stopRestAudio();
-  if (!audioAssets || !guided || guided.phase !== 'rest') return;
+  if (!guided || (guided.phase !== 'rest' && guided.phase !== 'countdown')) return;
+  if (!audioAssets) { loadAudio().catch(() => {}); return; }
   try {
-    const bytes = restTrack(restLeft(guided), audioAssets.index, audioAssets.pack);
+    const bytes = guided.phase === 'countdown'
+      ? restTrack(countLeft(guided), audioAssets.index, audioAssets.pack, true)
+      : restTrack(restLeft(guided), audioAssets.index, audioAssets.pack);
     restUrl = URL.createObjectURL(new Blob([bytes], { type: 'audio/mpeg' }));
     applyAudioMode();
     restAudio.src = restUrl;
@@ -2717,6 +2788,19 @@ function guidedLoop() {
     if (current !== 'muscu' || !guided) return guidedLoop();
     const t = document.getElementById('mtime');
     if (t) t.textContent = mmss(guidedElapsed(guided));
+    if (guided.phase === 'countdown') {
+      const c = countLeft(guided);
+      if (c <= 0) {
+        endCountdown(guided);
+        saveGuided();
+        flashMuscu();
+        render();
+        return;
+      }
+      const el = document.getElementById('mcount');
+      if (el) el.textContent = Math.max(1, Math.ceil(c));
+      return;
+    }
     if (guided.phase !== 'rest') return;
     const left = restLeft(guided);
     if (left <= 0) {
@@ -2731,24 +2815,44 @@ function guidedLoop() {
   }, 250);
 }
 
+// Séance de muscu du jour (ou la suivante du cycle), avec les exercices choisis.
+function todayMuscuPlan(d) {
+  const q = d.profile.questionnaire || {};
+  return planFor(d, 1).find((x) => x.sport === 'muscu' && x.date === today())
+    || muscuPlan(nextSeance(d.history, (q.joursMuscu || []).length), d.history, q, d.settings.muscuChoix || {});
+}
+
+// Exercices du même muscle pour le matériel déclaré.
+const liveAlts = (x) => alternatives(x.muscle, load().profile.questionnaire?.lieu || 'salle');
+
+// « Démarrer » : d'abord l'écran « Avant de commencer » (une séance en cours reprend directement).
+let mprepAudio = null;
+function openMuscuPrep() {
+  if (savedGuided()) return startGuided();
+  mprepAudio = audioAssets ? 'ok' : 'chargement';
+  if (!audioAssets) {
+    loadAudio().then(() => { mprepAudio = 'ok'; }).catch(() => { mprepAudio = 'erreur'; })
+      .finally(() => { if (current === 'mprep') render(); });
+  }
+  go('mprep');
+}
+
 function startGuided() {
   if (!audioAssets) loadAudio().catch(() => {});
   const resume = savedGuided();
   if (resume) {
     guided = resume;
   } else {
-    const d = load();
-    const q = d.profile.questionnaire || {};
-    const p = planFor(d, 1).find((x) => x.sport === 'muscu' && x.date === today())
-      || muscuPlan(nextSeance(d.history, (q.joursMuscu || []).length), d.history, q, d.settings.muscuChoix || {});
+    const p = todayMuscuPlan(load());
     const log = muscuLog(p);
     guided = createGuided({ ...log, exercices: log.exercices.map((x, i) => ({ ...x, reason: p.exercices[i].reason })), repos: p.repos });
+    startCountdown(guided, 3);
   }
   mDraft = { key: null, reps: 0 };
   saveGuided();
   keepAwake();
   go('muscu');
-  if (guided.phase === 'rest') playRest();
+  if (guided.phase === 'rest' || guided.phase === 'countdown') playRest();
 }
 
 function finishGuided() {
@@ -2784,7 +2888,15 @@ document.addEventListener('click', (e) => {
   const t = e.target.closest('button');
   if (!t) return;
   const ds = t.dataset;
-  if ('muscugo' in ds) return startGuided();
+  if ('muscugo' in ds) return openMuscuPrep();
+  if ('mstart' in ds) return startGuided();
+  if ('mprepback' in ds) return go('accueil');
+  if ('msoundretry' in ds) {
+    mprepAudio = 'chargement';
+    render();
+    loadAudio().then(() => { mprepAudio = 'ok'; }).catch(() => { mprepAudio = 'erreur'; }).finally(() => { if (current === 'mprep') render(); });
+    return;
+  }
   if (current !== 'muscu' || !guided) return;
   if (ds.mreps) {
     const x = currentExercise(guided);
@@ -2800,6 +2912,7 @@ document.addEventListener('click', (e) => {
     saveGuided();
     render();
     playRest();
+    keepAwake(); // écran qui se verrouille pendant la récup = plus de signal : on redemande à chaque série
   } else if (ds.mrest) {
     adjustRest(guided, Number(ds.mrest));
     saveGuided();

@@ -49,3 +49,18 @@ test('programme du frère : course + muscu, jamais de natation, un sport par jou
   assert.deepEqual([m1.seance, m2.seance], ['A', 'B']);
   assert.equal(tonnage({ exercices: [{ poids: 50, reps: [10, 10, 8] }, { poids: null, reps: [15] }] }), 1400);
 });
+
+test('maison sans matériel : jamais de tractions, une alternative pour chaque muscle', () => {
+  for (const seance of ['A', 'B', 'H', 'L']) {
+    const p = muscuPlan(seance, [], { lieu: 'corps', objectifMuscu: 'tonus' });
+    assert.ok(!p.exercices.some((x) => x.id === 'tractions'), `${seance} : tractions proposées sans barre`);
+    assert.ok(p.exercices.every((x) => x.materiel === 'corps'), seance);
+    assert.equal(p.exercices.length, SEANCES[seance].slots.length, `${seance} : un exercice par case`);
+  }
+  // Même un ancien choix « tractions » enregistré n'est plus proposé à la maison.
+  const p = muscuPlan('B', [], { lieu: 'corps' }, { 'B:1': 'tractions' });
+  assert.equal(p.exercices[1].muscle, 'dos');
+  assert.notEqual(p.exercices[1].id, 'tractions');
+  assert.ok(!alternatives('dos', 'halteres').some((e) => e.id === 'tractions'));
+  assert.ok(alternatives('dos', 'salle').some((e) => e.id === 'tractions'));
+});

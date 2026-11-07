@@ -17,6 +17,29 @@ export function createGuided({ seance, sessionName, exercices, repos }, now = Da
   };
 }
 
+// Décompte avant la première série (« 3, 2, 1 ») : la séance, donc la durée mesurée,
+// commence à la fin du décompte.
+export function startCountdown(s, seconds = 3, now = Date.now()) {
+  if (s.phase !== 'work' || s.ex || s.set || s.exercices.some((x) => x.reps.some((r) => r > 0))) return s;
+  s.phase = 'countdown';
+  s.countEnd = now + seconds * 1000;
+  s.startedAt = s.countEnd;
+  return s;
+}
+export const countLeft = (s, now = Date.now()) => (s.phase === 'countdown' ? Math.max(0, (s.countEnd - now) / 1000) : 0);
+export function endCountdown(s) {
+  if (s.phase === 'countdown') { s.phase = 'work'; s.countEnd = null; }
+  return s;
+}
+
+// Autre exercice du même muscle à la place de l'exercice en cours, tant qu'aucune série n'est faite.
+export function swapExercise(s, ex) {
+  const x = currentExercise(s);
+  if (!x || s.phase !== 'work' || x.reps.some((r) => r > 0)) return s;
+  s.exercices[s.ex] = { ...x, ...ex, reps: x.reps.map(() => null) };
+  return s;
+}
+
 export const currentExercise = (s) => s.exercices[s.ex] || null;
 
 // Répétitions proposées pour la série en cours : celles de la série d'avant, sinon le haut de l'objectif.
@@ -83,7 +106,8 @@ export const setsTotal = (s) => s.exercices.reduce((a, x) => a + x.reps.length, 
 
 // Piste de récup : silence, bips à −3, −2, −1 s, puis le signal de reprise.
 // Jouée dès « Série faite » (dans le geste : iOS l'exige), elle sonne à l'heure même écran éteint.
-export function restTrack(seconds, index, pack) {
+// bips : forcés pour le décompte de départ (3 s), sinon seulement si la récup dure 6 s ou plus.
+export function restTrack(seconds, index, pack, bips = seconds >= 6) {
   const { frameBytes: fb, frameSeconds: fs, clips } = index;
   const go = clips.signal_course;
   const startGo = Math.round(seconds / fs);
@@ -95,7 +119,7 @@ export function restTrack(seconds, index, pack) {
     const frames = Math.max(0, Math.min(clip.frames, max, nFrames - at));
     if (at >= 0) out.set(pack.subarray(clip.offset * fb, (clip.offset + frames) * fb), at * fb);
   };
-  if (seconds >= 6) for (const d of [3, 2, 1]) put(clips.bip, Math.round((seconds - d) / fs), Math.round(1 / fs));
+  if (bips) for (const d of [3, 2, 1]) put(clips.bip, Math.round((seconds - d) / fs), Math.round(1 / fs));
   put(go, startGo, go.frames);
   return out;
 }
