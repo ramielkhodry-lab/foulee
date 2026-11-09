@@ -134,6 +134,8 @@ body.flash-moitie { animation: flash-moitie 2.6s ease-out; }
 .live-stats div { border-top: 1px solid var(--line); padding-top: 10px; min-width: 0; }
 .live-stats b { display: block; font-size: clamp(26px, 8vw, 36px); font-weight: 800; letter-spacing: -0.03em; line-height: 1.05; white-space: nowrap; }
 .live-stats span { font-size: 12px; color: var(--muted); text-transform: uppercase; letter-spacing: 0.08em; font-weight: 700; }
+.live-stats small { display: block; font-size: 13px; color: var(--muted); font-weight: 700; margin-top: 2px; }
+.live[data-effort="course"] #pace { color: var(--run); }
 .gpsline { font-size: 14px; color: var(--muted); margin: 8px 0 0; min-height: 20px; }
 .live-controls { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-top: auto; padding-top: 18px; }
 .live-controls button { min-height: 76px; font-size: 20px; font-weight: 800; border-radius: 22px; }
