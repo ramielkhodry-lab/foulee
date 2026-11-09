@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { haversine, createTrack, addPoint, addAltitude, ascent, markGap, summary, packTrack, restoreTrack } from '../public/js/gps.js';
+import { haversine, createTrack, addPoint, addAltitude, ascent, markGap, summary, packTrack, restoreTrack, currentPace } from '../public/js/gps.js';
 
 // Point à `m` mètres au nord d'un point de Courbevoie.
 const at = (m, t, acc = 5) => ({ lat: 48.897 + m / 111195, lon: 2.253, t: t * 1000, acc });
@@ -90,4 +90,37 @@ test('reprise : mesure gardée, pas de distance inventée pendant la fermeture',
   assert.ok(Math.abs(r.meters - t.meters) < 0.1);
   addPoint(r, { lat: 48.9051, lon: 2.25, t: 610_000, acc: 5 });
   assert.ok(r.meters > t.meters + 10);
+});
+
+test('allure du moment : les ~25 dernières secondes, pas la moyenne de la séance', () => {
+  const tr = createTrack();
+  // 2 min de marche à 12 min/km puis 1 min de course à 6 min/km, un point par seconde.
+  let m = 0;
+  for (let s = 0; s <= 180; s++) {
+    if (s > 0) m += s <= 120 ? 1000 / 720 : 1000 / 360;
+    addPoint(tr, at(m, s));
+  }
+  const p = currentPace(tr, 180 * 1000);
+  assert.ok(Math.abs(p - 360) <= 10, `allure ${p}`);
+  assert.ok(summary(tr, 180).allureSecKm > 450); // la moyenne, elle, est bien plus lente
+});
+
+test('allure du moment : rien si le GPS ne suit plus, est imprécis ou trop récent', () => {
+  const run = (acc, until = 60) => {
+    const tr = createTrack();
+    for (let s = 0; s <= until; s++) addPoint(tr, at(s * 3, s, acc));
+    return tr;
+  };
+  assert.equal(currentPace(createTrack(), 0), null);
+  assert.ok(currentPace(run(5), 60 * 1000) > 0);
+  assert.equal(currentPace(run(5), 75 * 1000), null); // plus de point depuis 15 s
+  assert.equal(currentPace(run(25), 60 * 1000), null); // précision moyenne 25 m
+  assert.equal(currentPace(run(5, 6), 6 * 1000), null); // 6 s de mesure seulement
+  // Reprise après une coupure : on n'additionne pas le trajet non mesuré.
+  const tr = run(5);
+  markGap(tr); tr.cut = true;
+  assert.equal(currentPace(tr, 60 * 1000), null);
+  addPoint(tr, at(400, 120));
+  for (let s = 121; s <= 125; s++) addPoint(tr, at(400 + (s - 120) * 3, s));
+  assert.equal(currentPace(tr, 125 * 1000), null); // 5 s depuis la reprise : trop peu
 });

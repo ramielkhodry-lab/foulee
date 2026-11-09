@@ -3,7 +3,7 @@ import { assemble, stepAt, sample } from './track.js';
 import { MAX_EXTRA, extendState, canExtend, canRetract, extend, retract, extraSummary } from './extend.js';
 import { load, update, uid, PRESETS, onSave, replace, empty } from './store.js';
 import * as account from './account.js';
-import { createTrack, addPoint, addAltitude, markGap, summary, encodeTrace, decodeTrace, packTrack, restoreTrack } from './gps.js';
+import { createTrack, addPoint, addAltitude, markGap, summary, currentPace, encodeTrace, decodeTrace, packTrack, restoreTrack } from './gps.js';
 import { drawTrace } from './map.js';
 import { stepTimes, summarize, summarizeMontre, montreStale, MONTRE_V, mergeDistance, recovery, recoveryAt, zoneLimits, zoneOf, zoneTimes, cardioLine, curveSvg, windowOf, swimWindow, dayRange, applySwim } from './cardio.js';
 import { iaInput, pendingIA, failedIA, failureMessage } from './ia.js';
@@ -1346,7 +1346,10 @@ function tick() {
   el('elapsed').textContent = mmss(liveElapsed());
   const g = summary(live.gps, liveElapsed());
   el('dist').textContent = g.distanceKm ? g.distanceKm.toLocaleString('fr-FR', { minimumFractionDigits: 2 }) : '0,00';
-  el('pace').textContent = g.allureSecKm ? allure(g.allureSecKm).replace('/km', '') : '–';
+  // Allure du moment (≈ 25 dernières secondes) ; la moyenne de la séance en dessous.
+  const now = currentPace(live.gps, Date.now());
+  el('pace').textContent = now ? allure(now).replace('/km', '') : '–';
+  el('paceavg').textContent = g.allureSecKm ? `moy. ${allure(g.allureSecKm).replace('/km', '')}` : 'moy. –';
   el('gpsdot').classList.toggle('ok', !live.gpsError && Boolean(g.distanceKm));
   el('gpsstate').textContent = live.gpsError || (g.distanceKm ? 'GPS' : 'GPS…');
   // Message GPS : réécrit seulement s'il change (le bouton « Réessayer » doit rester cliquable).
@@ -1642,7 +1645,7 @@ const screens = {
         <p class="halfway" id="halfway" hidden>Moitié de la séance faite</p>
         <div class="live-stats">
           <div><b id="dist">0,00</b><span>km</span></div>
-          <div><b id="pace">–</b><span>allure /km</span></div>
+          <div><b id="pace">–</b><span>allure /km</span><small id="paceavg">moy. –</small></div>
           <div><b id="elapsed">0:00</b><span>temps</span></div>
         </div>
         <div class="gpsline" id="gps"></div>

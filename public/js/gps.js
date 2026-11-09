@@ -100,6 +100,38 @@ export function summary(track, movingSec) {
   };
 }
 
+// Allure du moment (s/km) : distance des ~25 dernières secondes de points retenus, pour lisser
+// le bruit du GPS. Rien (null) plutôt qu'une valeur fausse si le GPS ne suit plus (aucun point
+// depuis 10 s : arrêt, pause, écran verrouillé), s'il est imprécis ou s'il y a trop peu de mesure.
+const PACE_WINDOW = 25; // s
+const PACE_MIN_SEC = 12; // s de mesure au moins
+const PACE_MIN_M = 20; // m parcourus au moins
+const PACE_STALE = 10; // s sans point = plus d'allure
+const PACE_HOLE = 10; // s entre deux points = trou (pause, reprise) : la fenêtre s'arrête là
+const PACE_MAX_ACC = 20; // m : précision moyenne exigée
+export function currentPace(track, now) {
+  const pts = track.points;
+  const last = pts.at(-1);
+  if (!last || track.cut || (now - last.t) / 1000 > PACE_STALE) return null;
+  let m = 0;
+  let acc = last.acc || 0;
+  let n = 1;
+  let first = last;
+  for (let i = pts.length - 2; i >= 0; i--) {
+    const a = pts[i];
+    const b = pts[i + 1];
+    if ((b.t - a.t) / 1000 > PACE_HOLE || (last.t - a.t) / 1000 > PACE_WINDOW) break;
+    m += haversine(a, b);
+    acc += a.acc || 0;
+    n++;
+    first = a;
+  }
+  const sec = (last.t - first.t) / 1000;
+  if (sec < PACE_MIN_SEC || m < PACE_MIN_M || acc / n > PACE_MAX_ACC) return null;
+  const secKm = (sec / m) * 1000;
+  return secKm > 3600 ? null : Math.round(secKm); // plus lent que 60 min/km : à l'arrêt
+}
+
 // Tracé compact pour l'historique (synchronisé, donc il doit rester léger) :
 // segments coupés quand le GPS s'est interrompu plus de 30 s, un point tous les 5 m au plus,
 // chaque segment encodé comme une polyline (lat, lon au 1e-5 près, secondes depuis le départ).
