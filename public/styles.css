@@ -583,6 +583,9 @@ body.sheet-open { overflow: hidden; }
 .mstepper b { text-align: center; font-size: clamp(80px, 26vw, 120px); font-weight: 900; line-height: 1; letter-spacing: -0.04em; font-variant-numeric: tabular-nums; }
 .live-controls.one { grid-template-columns: 1fr; }
 .live-controls .mgo, .live-extra .mgo { background: var(--muscu); border-color: var(--muscu); color: var(--on-accent); }
+body.flash-tranche { animation: flash-tranche 2.6s ease-out; }
+@keyframes flash-tranche { 0%, 15% { background: var(--muscu); } 30% { background: var(--bg); } 45%, 60% { background: var(--muscu); } 100% { background: var(--bg); } }
+.mlive[data-phase="hold"] .count { font-size: clamp(140px, 48vw, 240px); }
 body.flash-muscu { animation: flash-muscu 1.5s ease-out; }
 @keyframes flash-muscu { 0%, 40% { background: var(--muscu); } 100% { background: var(--bg); } }
 
