@@ -9,7 +9,7 @@ import { stepTimes, summarize, summarizeMontre, montreStale, MONTRE_V, mergeDist
 import { iaInput, pendingIA, failedIA, failureMessage } from './ia.js';
 import { tipsOf, tipsSource, hasIA } from './conseils.js';
 import { GOALS_MUSCU, LIEUX, NIVEAUX_MUSCU, MUSCLES, alternatives, byId, muscuPlan, nextSeance, nextLoad, tonnage } from './muscu.js';
-import { createGuided, currentExercise, suggestedReps, setDone, skipExercise, restLeft, adjustRest, endRest, finish, elapsedSec as guidedElapsed, setsDone, setsTotal, restTrack, startCountdown, countLeft, endCountdown, swapExercise } from './muscu-live.js';
+import { createGuided, currentExercise, suggestedReps, setDone, skipExercise, restLeft, adjustRest, endRest, finish, elapsedSec as guidedElapsed, setsDone, setsTotal, restTrack, startCountdown, countLeft, endCountdown, swapExercise, startHold, cancelHold, stopHold, holdLead, holdElapsed, holdOver, holdTrack } from './muscu-live.js';
 import { upcoming, moveOptions, planOptions, nextRunLevel, runLevel, afterBilan, HORIZON, GOALS_RUN, START_RUN, GOALS_SWIM, START_SWIM, LEVELS } from './plan.js';
 
 const app = document.getElementById('app');
@@ -1734,6 +1734,26 @@ const screens = {
         </div>
       </div>`;
     }
+    if (s.hold) {
+      const lead = holdLead(s);
+      const el = Math.floor(holdElapsed(s));
+      return `
+      <div class="live mlive" id="mlive" data-phase="hold">${head}
+        <p class="mstep">Exercice ${s.ex + 1}/${n} · série ${s.set + 1}/${x.reps.length}</p>
+        <p class="mname">${esc(x.nom)}</p>
+        <p class="now" id="mholdnow">${lead > 0 ? 'Mets-toi en place' : el >= s.hold.min ? 'Dans la tranche' : 'Tiens'}</p>
+        <p class="count" id="mhold">${lead > 0 ? Math.max(1, Math.ceil(lead)) : el}</p>
+        <p class="next">Signal à <b>${s.hold.min} s</b>, fin à <b>${s.hold.max} s</b></p>
+        ${load().settings.son !== 'exclusif' ? '<p class="muted small" style="margin:10px 0 0">iPhone hors silencieux. Au signal de fin, la série est notée et la récup démarre seule.</p>' : ''}
+        <div class="live-controls one">
+          <button class="mgo" data-mholdstop>J'arrête là</button>
+        </div>
+        <div class="live-extra">
+          <button data-mholdcancel>Annuler le minuteur</button>
+          ${end}
+        </div>
+      </div>`;
+    }
     const key = `${s.ex}:${s.set}`;
     if (mDraft.key !== key) mDraft = { key, reps: suggestedReps(s) };
     return `
@@ -1743,6 +1763,7 @@ const screens = {
         <p class="next">Objectif : ${x.min} à ${x.max} ${unit(x)}</p>
         <p class="muted small" style="margin:4px 0 0">${esc(x.reason || '')}</p>
         ${s.set === 0 && liveAlts(x).length > 1 ? `<select class="mswap" data-mswap aria-label="Autre exercice, même muscle">${liveAlts(x).map((e) => `<option value="${e.id}" ${e.id === x.id ? 'selected' : ''}>${e.id === x.id ? 'Changer d\'exercice (même muscle)…' : esc(e.nom)}</option>`).join('')}</select>` : ''}
+        ${x.unite === 's' ? `<div class="live-controls one" style="margin-top:14px"><button class="mgo" data-mholdgo>Lancer le minuteur</button></div><p class="muted small" style="text-align:center;margin:6px 0 0">3 s pour te placer, un signal à ${x.min} s, la fin à ${x.max} s. Ou note tes secondes à la main :</p>` : ''}
         ${x.materiel === 'corps' ? '' : `<div class="kg mkg"><input id="mkg" type="number" inputmode="decimal" step="0.5" min="0" placeholder="?" value="${x.poids ?? ''}"><span>kg${x.materiel === 'halteres' ? ' par haltère' : ''}</span></div>`}
         <div class="mstepper">
           <button data-mreps="-1" aria-label="Une de moins">−</button>
@@ -1751,7 +1772,7 @@ const screens = {
         </div>
         <p class="muted small" style="text-align:center;margin:0">${x.unite === 's' ? 'secondes tenues' : 'répétitions faites'}</p>
         <div class="live-controls one">
-          <button class="mgo" data-msetdone>Série faite${s.set + 1 < x.reps.length || s.ex + 1 < n ? ` · récup ${s.repos} s` : ''}</button>
+          <button class="${x.unite === 's' ? '' : 'mgo'}" data-msetdone>Série faite${s.set + 1 < x.reps.length || s.ex + 1 < n ? ` · récup ${s.repos} s` : ''}</button>
         </div>
         <div class="live-extra">
           <button data-mskip>Passer l'exercice</button>
@@ -2762,10 +2783,11 @@ function stopRestAudio() {
 // et la session audio sont actifs dès le départ, pas seulement à la première récup.
 function playRest() {
   stopRestAudio();
-  if (!guided || (guided.phase !== 'rest' && guided.phase !== 'countdown')) return;
+  if (!guided || (guided.phase !== 'rest' && guided.phase !== 'countdown' && !guided.hold)) return;
   if (!audioAssets) { loadAudio().catch(() => {}); return; }
   try {
-    const bytes = guided.phase === 'countdown'
+    const bytes = guided.hold ? holdTrack(guided, audioAssets.index, audioAssets.pack)
+      : guided.phase === 'countdown'
       ? restTrack(countLeft(guided), audioAssets.index, audioAssets.pack, true)
       : restTrack(restLeft(guided), audioAssets.index, audioAssets.pack);
     restUrl = URL.createObjectURL(new Blob([bytes], { type: 'audio/mpeg' }));
@@ -2781,6 +2803,14 @@ function flashMuscu() {
   void document.body.offsetWidth;
   document.body.classList.add('flash-muscu');
   setTimeout(() => document.body.classList.remove('flash-muscu'), 1500);
+}
+
+// Minimum atteint : flash double (comme le signal mi-séance), distinct du flash de fin.
+function flashHold() {
+  document.body.classList.remove('flash-tranche');
+  void document.body.offsetWidth;
+  document.body.classList.add('flash-tranche');
+  setTimeout(() => document.body.classList.remove('flash-tranche'), 2600);
 }
 
 function guidedLoop() {
@@ -2802,6 +2832,28 @@ function guidedLoop() {
       }
       const el = document.getElementById('mcount');
       if (el) el.textContent = Math.max(1, Math.ceil(c));
+      return;
+    }
+    if (guided.hold) {
+      if (holdOver(guided)) {
+        stopHold(guided); // noté au maximum ; la récup est déjà dans la piste en cours
+        if (guided.phase === 'done') { flashMuscu(); return finishGuided(); }
+        saveGuided();
+        flashMuscu();
+        render();
+        return;
+      }
+      const lead = holdLead(guided);
+      const el = Math.floor(holdElapsed(guided));
+      const now = document.getElementById('mholdnow');
+      const label = lead > 0 ? 'Mets-toi en place' : el >= guided.hold.min ? 'Dans la tranche' : 'Tiens';
+      if (now && now.textContent !== label) {
+        if (now.textContent === 'Mets-toi en place') flashMuscu();
+        else if (label === 'Dans la tranche') flashHold();
+        now.textContent = label;
+      }
+      const c = document.getElementById('mhold');
+      if (c) c.textContent = lead > 0 ? Math.max(1, Math.ceil(lead)) : el;
       return;
     }
     if (guided.phase !== 'rest') return;
@@ -2855,7 +2907,7 @@ function startGuided() {
   saveGuided();
   keepAwake();
   go('muscu');
-  if (guided.phase === 'rest' || guided.phase === 'countdown') playRest();
+  if (guided.phase === 'rest' || guided.phase === 'countdown' || guided.hold) playRest();
 }
 
 function finishGuided() {
@@ -2901,7 +2953,24 @@ document.addEventListener('click', (e) => {
     return;
   }
   if (current !== 'muscu' || !guided) return;
-  if (ds.mreps) {
+  if ('mholdgo' in ds) {
+    startHold(guided);
+    saveGuided();
+    render();
+    playRest(); // dans le geste : départ, minimum, fin et récup sont dans la même piste
+    keepAwake();
+  } else if ('mholdcancel' in ds) {
+    cancelHold(guided);
+    stopRestAudio();
+    saveGuided();
+    render();
+  } else if ('mholdstop' in ds) {
+    stopHold(guided);
+    if (guided.phase === 'done') return finishGuided();
+    saveGuided();
+    render();
+    if (guided.phase === 'rest') playRest(); else stopRestAudio();
+  } else if (ds.mreps) {
     const x = currentExercise(guided);
     const step = x.unite === 's' ? 5 : 1;
     mDraft.reps = Math.max(1, Math.min(300, mDraft.reps + Number(ds.mreps) * step));

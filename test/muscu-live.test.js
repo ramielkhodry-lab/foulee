@@ -89,3 +89,74 @@ test('changer d’exercice avant la 1re série seulement', async () => {
   swapExercise(s, { id: 'squat', nom: 'Squat' });
   assert.equal(s.exercices[0].id, 'fentes', 'série déjà faite : on garde l’exercice');
 });
+
+import { startHold, stopHold, holdOver, holdTrack, cancelHold, HOLD_LEAD } from '../public/js/muscu-live.js';
+
+const gainage = () => createGuided({ seance: 'A', sessionName: 'Gainage', repos: 60, exercices: [
+  { id: 'gainage', nom: 'Gainage', unite: 's', min: 30, max: 45, reps: [null, null] },
+] }, 0);
+
+test('minuteur : au maximum, série notée au max et récup calée sur l\'heure du max', () => {
+  const s = gainage();
+  startHold(s, 1000);
+  const start = 1000 + HOLD_LEAD * 1000;
+  assert.equal(s.phase, 'work');
+  assert.equal(holdOver(s, start + 44_000), false);
+  assert.equal(holdOver(s, start + 45_000), true);
+  stopHold(s, start + 47_000);
+  assert.equal(s.exercices[0].reps[0], 45);
+  assert.equal(s.phase, 'rest');
+  assert.equal(s.restEnd, start + 45_000 + 60_000);
+  assert.equal(s.hold, undefined);
+});
+
+test('minuteur : arrêt à la main = secondes tenues ; arrêt pendant la mise en place = rien', () => {
+  const s = gainage();
+  startHold(s, 0);
+  stopHold(s, 2000);
+  assert.equal(s.exercices[0].reps[0], null);
+  assert.equal(s.phase, 'work');
+  startHold(s, 0);
+  stopHold(s, 3000 + 33_400);
+  assert.equal(s.exercices[0].reps[0], 33);
+  startHold(s, 0); // en récup : refusé
+  assert.equal(s.hold, undefined);
+});
+
+test('minuteur : refusé pour un exercice en répétitions ; annulable', () => {
+  const s = createGuided({ seance: 'A', sessionName: 'x', repos: 60, exercices: [{ id: 'pompes', unite: 'reps', min: 8, max: 12, reps: [null] }] }, 0);
+  startHold(s, 0);
+  assert.equal(s.hold, undefined);
+  const g = gainage();
+  startHold(g, 0);
+  cancelHold(g);
+  assert.equal(g.hold, undefined);
+  assert.equal(g.phase, 'work');
+});
+
+test('piste du minuteur : bips de départ, signal au minimum, fin au maximum, puis récup', () => {
+  const fs = 0.5;
+  const index = { frameBytes: 1, frameSeconds: fs, clips: {
+    silence: { offset: 0, frames: 1 }, bip: { offset: 1, frames: 1 }, signal_course: { offset: 2, frames: 1 },
+    signal_moitie: { offset: 3, frames: 1 }, signal_fin: { offset: 4, frames: 1 },
+  } };
+  const pack = new Uint8Array([0, 1, 2, 3, 4]);
+  const s = gainage();
+  startHold(s, 0);
+  const t = holdTrack(s, index, pack, 0);
+  const at = (sec) => t[Math.round(sec / fs)];
+  assert.equal(at(0), 1); assert.equal(at(1), 1); assert.equal(at(2), 1);
+  assert.equal(at(3), 2, 'départ après 3 s');
+  assert.equal(at(33), 3, 'signal au minimum (30 s)');
+  assert.equal(at(48), 4, 'fin au maximum (45 s)');
+  assert.equal(at(48 + 60), 2, 'reprise après la récup');
+  assert.equal(at(48 + 57), 1, 'bips avant la reprise');
+  // Dernière série : rien après la fin.
+  s.set = 1;
+  const last = holdTrack(s, index, pack, 0);
+  assert.ok(last.length < Math.round(50 / fs));
+  // Reprise en cours de maintien : la piste repart de maintenant.
+  const mid = holdTrack(s, index, pack, 3000 + 40_000);
+  assert.equal(mid[Math.round(5 / fs)], 4);
+  assert.equal(mid[0], 0);
+});
