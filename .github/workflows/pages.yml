@@ -32,7 +32,9 @@ jobs:
       - name: Installer ffmpeg
         timeout-minutes: 10
         run: |
-          sudo sed -i 's#http://azure.archive.ubuntu.com#http://archive.ubuntu.com#g' /etc/apt/sources.list.d/*.sources /etc/apt/sources.list 2>/dev/null || true
+          # Les runners GitHub lisent la liste des miroirs dans apt-mirrors.txt (Azure en premier) :
+          # changer seulement sources.list ne suffit pas.
+          sudo sed -i 's#http://azure.archive.ubuntu.com#http://archive.ubuntu.com#g' /etc/apt/apt-mirrors.txt /etc/apt/sources.list.d/*.sources /etc/apt/sources.list 2>/dev/null || true
           sudo apt-get update && sudo apt-get install -y --no-install-recommends ffmpeg
       - run: npm test
 
