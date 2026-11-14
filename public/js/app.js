@@ -1,5 +1,5 @@
 import { KINDS } from './phrases.js';
-import { assemble, stepAt, sample } from './track.js';
+import { assemble, stepAt, sample, stepStarts } from './track.js';
 import { MAX_EXTRA, extendState, canExtend, canRetract, extend, retract, extraSummary } from './extend.js';
 import { load, update, uid, PRESETS, onSave, replace, empty } from './store.js';
 import * as account from './account.js';
@@ -915,6 +915,13 @@ const PARK_KEY = 'foulee.bilan';
 let parkedBilan = null;
 try { parkedBilan = JSON.parse(localStorage.getItem(PARK_KEY)); } catch {}
 const pendingBilan = () => parkedBilan;
+const canResume = (r) => Date.now() - r.savedAt < 3 * 3600 * 1000;
+function resumeAlert(r) {
+  const fresh = canResume(r);
+  return `<div class="alert">Séance interrompue : « ${esc(r.session.name)} », arrêtée à ${mmss(r.pos)}${fresh ? '' : ` (${esc(dateLabel(r.startedAt))})`}. Ce que tu as fait est gardé.
+    <div class="row" style="margin-top:10px">${fresh ? '<button class="btn-dark" data-resume>Reprendre</button>' : ''}<button class="${fresh ? '' : 'btn-dark'}" data-finishsaved>Terminer et enregistrer</button></div>
+    <button class="day-link" data-dropresume style="display:block;margin:6px auto 0">Supprimer cette séance</button></div>`;
+}
 function parkBilan(b) {
   parkedBilan = b;
   try { if (b) localStorage.setItem(PARK_KEY, JSON.stringify(b)); else localStorage.removeItem(PARK_KEY); } catch {}
@@ -1021,7 +1028,9 @@ function clearLive() {
 function savedLive() {
   try {
     const s = JSON.parse(localStorage.getItem(LIVE_KEY));
-    return s && Date.now() - s.savedAt < 3 * 3600 * 1000 ? s : null;
+    // Gardée 7 jours : une course faite ne disparaît jamais en silence. Reprendre le son n'a de
+    // sens que dans les 3 heures ; après, seul « Terminer et enregistrer » est proposé.
+    return s && s.session?.steps && Date.now() - s.savedAt < 7 * 24 * 3600 * 1000 ? s : null;
   } catch {
     return null;
   }
@@ -1505,8 +1514,8 @@ const screens = {
       </header>
       <p class="motto">Discipline aujourd'hui<br>Progrès demain</p>
       ${pendingBilanAlert()}
-      ${resumable ? `<div class="alert">Séance interrompue : « ${esc(resumable.session.name)} », arrêtée à ${mmss(resumable.pos)}.
-        <div class="row" style="margin-top:10px"><button class="btn-dark" data-resume>Reprendre</button><button data-dropresume>Abandonner</button></div></div>` : ''}
+      ${resumable ? resumeAlert(resumable) : ''}
+      ${muscuResumeAlert()}
       ${d.profile.questionnaire ? '' : questionnaireBanner()}
       ${weekStrip(d.history, plan, selDay)}
       ${dayPanel(d.history, plan, selDay)}
@@ -1551,7 +1560,8 @@ const screens = {
     return `
       <h1>Démarrer</h1>
       ${pendingBilanAlert()}
-      ${resumable && !pendingBilan() ? `<button class="option" data-resume><span><span>Reprendre « ${esc(resumable.session.name)} »</span><span class="muted">Arrêtée à ${mmss(resumable.pos)}</span></span><span class="go">▶</span></button>` : ''}
+      ${resumable && !pendingBilan() && !canResume(resumable) ? resumeAlert(resumable) : ''}
+      ${resumable && !pendingBilan() && canResume(resumable) ? `<button class="option" data-resume><span><span>Reprendre « ${esc(resumable.session.name)} »</span><span class="muted">Arrêtée à ${mmss(resumable.pos)}</span></span><span class="go">▶</span></button>` : ''}
       ${todayItem?.sport === 'course' ? `<h3 style="margin-top:0">Prévu aujourd'hui</h3>
         <button class="option" data-startplan="${esc(todayItem.date)}"><span><span>Palier ${todayItem.level} · ${Math.round(total(todayItem.steps) / 60)} min</span><span class="muted">${esc(todayItem.title)}</span></span><span class="go">▶</span></button>` : ''}
       ${todayItem?.sport === 'natation' ? `<h3 style="margin-top:0">Prévu aujourd'hui</h3>
@@ -2169,47 +2179,18 @@ function go(screen) {
     if (!audio.paused) anchor();
     audio.pause();
     const { starts, end } = live.track;
-    const steps = live.session.steps;
     const reached = Math.min(live.maxTime, end);
-    const lastIdx = stepAt(starts, end, reached);
-    const completed = lastIdx >= steps.length ? steps.length : Math.max(0, lastIdx);
     // Après la fin du programme, le temps passé jusqu'à « Terminer » compte aussi.
     const elapsedSec = Math.round(live.overAt ? liveElapsed() : Math.max(0, reached - starts[0]));
     const prolongSec = live.overAt ? Math.max(0, elapsedSec - Math.round(end - starts[0])) : 0;
-    const gps = summary(live.gps, elapsedSec);
     stopLiveExtras();
     renderTouchLock();
     live.done = true;
-    bilan = {
-      id: uid(),
-      sport: 'course',
-      source: 'guidee',
-      date: live.startedAt,
-      sessionName: live.session.name,
-      level: live.session.level ?? null,
-      ...(live.session.refaite ? { refaite: live.session.refaite } : {}),
-      steps: steps,
-      plannedSec: total(steps),
-      elapsedSec,
-      ...(prolongSec ? { prolongSec } : {}),
-      completedSteps: completed,
-      skipped: [...live.skipped],
-      ...(extraSummary(live.session, completed) || {}),
-      distanceKm: gps.distanceKm,
-      distanceEstimee: false,
-      distanceSource: gps.distanceKm ? 'gps' : null,
-      allureSecKm: gps.allureSecKm,
-      gpsIncomplet: gps.gpsIncomplet,
-      deniveleM: gps.deniveleM,
-      trace: encodeTrace(gps.points),
-      stepMs: stepTimes(live.anchors, starts, end, reached),
-      endedAt: localNow(),
-      finMs: Date.now(), // appui sur « Terminer » : la montre est lue jusque-là
-      difficulte: null,
-      fatigue: null,
-      douleur: '',
-      commentaire: '',
-    };
+    bilan = runBilan({
+      session: live.session, starts, end, reached, elapsedSec, prolongSec, track: live.gps,
+      skipped: [...live.skipped], startedAt: live.startedAt, anchors: live.anchors,
+      endedAt: localNow(), finMs: Date.now(), // appui sur « Terminer » : la montre est lue jusque-là
+    });
     // Gardé tout de suite : si iOS ferme l'app sur l'écran du bilan, la séance revient en « Bilan à faire ».
     parkBilan(bilan);
   }
@@ -2220,6 +2201,64 @@ function go(screen) {
 }
 
 // --- Actions ------------------------------------------------------------------
+
+// Bilan d'une course guidée, à partir de ce qui a été mesuré (séance en cours ou séance sauvegardée).
+function runBilan({ session, starts, end, reached, elapsedSec, prolongSec = 0, track, skipped, startedAt, anchors, endedAt, finMs }) {
+  const steps = session.steps;
+  const lastIdx = stepAt(starts, end, reached);
+  const completed = lastIdx >= steps.length ? steps.length : Math.max(0, lastIdx);
+  const gps = summary(track, elapsedSec);
+  return {
+    id: uid(),
+    sport: 'course',
+    source: 'guidee',
+    date: startedAt,
+    sessionName: session.name,
+    level: session.level ?? null,
+    ...(session.refaite ? { refaite: session.refaite } : {}),
+    steps,
+    plannedSec: total(steps),
+    elapsedSec,
+    ...(prolongSec ? { prolongSec } : {}),
+    completedSteps: completed,
+    skipped,
+    ...(extraSummary(session, completed) || {}),
+    distanceKm: gps.distanceKm,
+    distanceEstimee: false,
+    distanceSource: gps.distanceKm ? 'gps' : null,
+    allureSecKm: gps.allureSecKm,
+    gpsIncomplet: gps.gpsIncomplet,
+    deniveleM: gps.deniveleM,
+    trace: encodeTrace(gps.points),
+    stepMs: stepTimes(anchors || [], starts, end, reached),
+    endedAt,
+    finMs,
+    difficulte: null,
+    fatigue: null,
+    douleur: '',
+    commentaire: '',
+  };
+}
+
+// Séance interrompue (app fermée par iOS) : « Terminer et enregistrer » va au bilan avec ce
+// qui a été mesuré jusqu'à la dernière sauvegarde, sans relancer le son.
+function finishSaved() {
+  const r = savedLive();
+  if (!r) return;
+  const { starts, end } = stepStarts(r.session.steps);
+  const reached = Math.min(r.pos || 0, end);
+  const elapsedSec = Math.round(r.overSec ?? Math.max(0, reached - starts[0]));
+  const prolongSec = r.overSec ? Math.max(0, elapsedSec - Math.round(end - starts[0])) : 0;
+  const track = r.gps ? restoreTrack(r.gps) : createTrack();
+  bilan = runBilan({
+    session: r.session, starts, end, reached, elapsedSec, prolongSec, track,
+    skipped: r.skipped || [], startedAt: r.startedAt, anchors: Array.isArray(r.anchors) ? r.anchors : [],
+    endedAt: new Date(r.savedAt).toLocaleString('sv-SE').replace(' ', 'T'), finMs: r.savedAt,
+  });
+  parkBilan(bilan);
+  clearLive();
+  go('bilan');
+}
 
 // « Refaire cette séance » : la même course (mêmes étapes, même guidage) ou la même muscu.
 // Elle s'enregistre comme une séance de plus, liée à l'ancienne par `refaite`.
@@ -2507,8 +2546,11 @@ document.addEventListener('click', (e) => {
     render();
   } else if ('resume' in ds) {
     const r = savedLive();
-    if (r) startSession(r.session, r);
+    if (r && canResume(r)) startSession(r.session, r);
+  } else if ('finishsaved' in ds) {
+    finishSaved();
   } else if ('dropresume' in ds) {
+    if (!confirm('Supprimer cette séance ? Elle ne sera pas enregistrée et ne pourra pas être récupérée.')) return;
     clearLive();
     render();
   } else if (ds.replay) {
@@ -2673,6 +2715,7 @@ document.addEventListener('click', (e) => {
     if (bilan.sport === 'autre' && (!bilan.activite || !bilan.elapsedSec)) { alert('Indique l’activité et sa durée.'); return; }
     const entry = bilan;
     update((d) => { d.history.push(entry); });
+    if (entry.sport === 'muscu' && entry.source === 'guidee') { try { localStorage.removeItem(MUSCU_KEY); } catch {} }
     if (entry.sport !== 'autre') progSport = entry.sport; // Progression s'ouvre sur le sport qu'on vient de noter
     bilan = null;
     showSuite(entry);
@@ -2812,18 +2855,42 @@ let guidedTimer = null;
 
 function saveGuided() {
   try {
-    if (guided && guided.phase !== 'done') localStorage.setItem(MUSCU_KEY, JSON.stringify(guided));
+    // Séance finie : gardée aussi, jusqu'à l'enregistrement de la saisie.
+    if (guided) localStorage.setItem(MUSCU_KEY, JSON.stringify({ ...guided, savedAt: guided.phase === 'done' ? guided.endedAt || Date.now() : Date.now() }));
     else localStorage.removeItem(MUSCU_KEY);
   } catch {}
 }
-function savedGuided() {
-  if (guided && guided.phase !== 'done') return guided;
+// Muscu sauvegardée : gardée 7 jours (jamais perdue en silence), reprise possible 4 heures.
+function storedGuided() {
   try {
     const s = JSON.parse(localStorage.getItem(MUSCU_KEY));
-    return s && s.phase !== 'done' && Date.now() - s.startedAt < 4 * 3600 * 1000 ? s : null;
+    return s && Array.isArray(s.exercices) && Date.now() - (s.savedAt || s.startedAt) < 7 * 24 * 3600 * 1000 ? s : null;
   } catch {
     return null;
   }
+}
+const freshGuided = (s) => Date.now() - (s.savedAt || s.startedAt) < 4 * 3600 * 1000;
+function savedGuided() {
+  if (guided && guided.phase !== 'done') return guided;
+  const s = storedGuided();
+  return s && s.phase !== 'done' && freshGuided(s) ? s : null;
+}
+function muscuResumeAlert() {
+  if (guided) return '';
+  const s = storedGuided();
+  if (!s) return '';
+  const n = setsDone(s);
+  const fresh = freshGuided(s) && s.phase !== 'done';
+  return `<div class="alert">Muscu interrompue : « ${esc(s.sessionName)} », ${n} série${n > 1 ? 's' : ''} notée${n > 1 ? 's' : ''}${fresh ? '' : ` (${esc(dateLabel(new Date(s.startedAt).toLocaleDateString('sv-SE')))})`}. Ce que tu as fait est gardé.
+    <div class="row" style="margin-top:10px">${fresh ? '<button class="btn-dark" data-muscugo>Reprendre</button>' : ''}${n ? `<button class="${fresh ? '' : 'btn-dark'}" data-mfinishsaved>Terminer et enregistrer</button>` : ''}</div>
+    <button class="day-link" data-mdropsaved style="display:block;margin:6px auto 0">Supprimer cette séance</button></div>`;
+}
+// « Terminer et enregistrer » : bilan avec les séries notées, fin à la dernière action.
+function finishStoredGuided() {
+  const s = storedGuided();
+  if (!s || !setsDone(s)) return;
+  guided = { ...s, endedAt: s.endedAt || s.savedAt || Date.now() };
+  finishGuided();
 }
 
 function stopRestAudio() {
@@ -2987,8 +3054,10 @@ function finishGuided() {
     elapsedSec: Math.max(60, Math.round(guidedElapsed(g) / 60) * 60),
     horaires: `${hm(g.startedAt)} → ${hm(g.endedAt)}`,
   });
+  // La séance sauvegardée reste jusqu'à l'enregistrement de la saisie : app fermée ou saisie
+  // quittée, « Muscu interrompue » la propose encore sur l'Accueil.
+  if (setsDone(g)) saveGuided(); else { try { localStorage.removeItem(MUSCU_KEY); } catch {} }
   guided = null;
-  saveGuided();
   bilan = b;
   go('saisie');
 }
@@ -3003,6 +3072,12 @@ document.addEventListener('click', (e) => {
   const ds = t.dataset;
   if ('muscugo' in ds) return openMuscuPrep();
   if ('mstart' in ds) return startGuided();
+  if ('mfinishsaved' in ds) return finishStoredGuided();
+  if ('mdropsaved' in ds) {
+    if (!confirm('Supprimer cette séance de muscu ? Les séries notées ne seront pas enregistrées.')) return;
+    try { localStorage.removeItem(MUSCU_KEY); } catch {}
+    return render();
+  }
   if ('mprepback' in ds) { mReplay = null; return go('accueil'); }
   if ('msoundretry' in ds) {
     mprepAudio = 'chargement';
