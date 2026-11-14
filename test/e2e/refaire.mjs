@@ -77,6 +77,12 @@ for (const [name, dev] of [['iphone', 'iPhone 13'], ['android', 'Pixel 7']]) {
   await page.click('[data-tab="accueil"]');
   await page.waitForTimeout(500);
 
+  // Accueil du jour : la course faite apparaît au-dessus de la muscu prévue.
+  await page.click('[data-tab="accueil"]');
+  await page.waitForTimeout(500);
+  const todayText = await page.textContent('#app');
+  await page.screenshot({ path: `${out}/${name}-0-accueil-apres.png` });
+
   // Muscu du mardi refaite.
   await page.click('[data-pickday="2026-11-10"]');
   await page.waitForSelector('[data-replay="m1"]');
@@ -93,6 +99,7 @@ for (const [name, dev] of [['iphone', 'iPhone 13'], ['android', 'Pixel 7']]) {
     'mêmes étapes': nSegs === steps4.length,
     'enregistrée avec refaite + palier 4': st.h && st.h.refaite === 'r2' && st.h.level === 4 && st.h.steps.length === steps4.length,
     'lundi 16 : course toujours prévue': st.plan.some((p) => p.startsWith('2026-11-16 course')),
+    'accueil : la course faite apparaît avec la muscu prévue': /Fait aujourd'hui/.test(todayText) && /Séance refaite : la même que lundi 9 novembre/.test(todayText),
     'muscu : mêmes exercices': mNames.join() === 'Squat au poids du corps,Pompes' && /Les mêmes exercices que mardi 10 novembre/.test(mprep),
     'aucune erreur': errors.length === 0,
   };
