@@ -665,3 +665,9 @@ body.flash-muscu { animation: flash-muscu 1.5s ease-out; }
 .mprep-alt select, .mlive .mswap { width: 100%; max-width: 100%; }
 .mlive .mswap { margin: 10px 0 0; }
 .mlive[data-phase="countdown"] .count { font-size: clamp(160px, 55vw, 260px); }
+
+/* Refaire une séance déjà faite */
+.li-more .replay { display: block; width: 100%; margin-top: 12px; font-weight: 700; }
+.li-more .replay.course { color: var(--run); border-color: var(--run); }
+.li-more .replay.muscu { color: var(--muscu); border-color: var(--muscu); }
+.replay-note { margin-top: 0; }
