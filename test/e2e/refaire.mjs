@@ -64,6 +64,12 @@ for (const [name, dev] of [['iphone', 'iPhone 13'], ['android', 'Pixel 7']]) {
   await page.waitForSelector('#livedone:not([hidden])', { timeout: 10000 });
   await page.click('#livedone');
   await page.waitForSelector('[data-savebilan]');
+  // iOS ferme l'app sur l'écran du bilan : la séance revient en « Bilan à faire ».
+  await page.reload();
+  const parked = await page.waitForSelector('[data-backbilan]', { timeout: 5000 }).then(() => true).catch(() => false);
+  await page.screenshot({ path: `${out}/${name}-1b-bilan-a-faire.png` });
+  if (parked) await page.click('[data-backbilan]');
+  await page.waitForSelector('[data-savebilan]');
   await page.click('[data-scale="difficulte"][data-v="3"]');
   await page.click('[data-savebilan]');
   await page.waitForTimeout(800);
@@ -97,6 +103,7 @@ for (const [name, dev] of [['iphone', 'iPhone 13'], ['android', 'Pixel 7']]) {
     'bouton sur la course de lundi': true,
     'avant de partir : même séance, note lundi': prepTitle.includes('Palier 4 · lundi') && /La même séance que lundi 9 novembre/.test(prepText),
     'mêmes étapes': nSegs === steps4.length,
+    'app fermée sur le bilan : « Bilan à faire » au retour': parked,
     'enregistrée avec refaite + palier 4': st.h && st.h.refaite === 'r2' && st.h.level === 4 && st.h.steps.length === steps4.length,
     'lundi 16 : course toujours prévue': st.plan.some((p) => p.startsWith('2026-11-16 course')),
     'accueil : la course faite apparaît avec la muscu prévue': /Fait aujourd'hui/.test(todayText) && /Séance refaite : la même que lundi 9 novembre/.test(todayText),

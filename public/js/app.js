@@ -2210,6 +2210,8 @@ function go(screen) {
       douleur: '',
       commentaire: '',
     };
+    // Gardé tout de suite : si iOS ferme l'app sur l'écran du bilan, la séance revient en « Bilan à faire ».
+    parkBilan(bilan);
   }
   if (screen !== 'profil') cardioUi.link = null; // le lien d'import ne reste affiché que sur Profil
   current = screen;
