@@ -128,13 +128,23 @@ export function cardioDelta(runs) {
 }
 const cardioBonus = (c) => (c && c.delta <= -3 ? ` Cardio ${c.what} en baisse à palier égal (${c.cur} bpm contre ${c.before}) : tu progresses.` : '');
 
+// Course refaite (« Refaire cette séance ») à un palier plus bas que la dernière course du
+// programme : elle compte dans l'historique, mais ne fait pas redescendre le programme,
+// sauf douleur ou difficulté 5. Au même palier ou plus haut, elle compte comme les autres.
+function keepReplay(h, i, runs) {
+  if (!h.refaite || hasPain(h) || h.difficulte === 5) return true;
+  const ref = runs.slice(0, i).reverse().find((x) => !x.refaite);
+  return !ref || h.level >= ref.level;
+}
+
 export function nextRunLevel(history, opts = {}) {
   const max = opts.maxLevel ?? 12;
   const start = Math.min(max, opts.startLevel ?? 1);
   const runs = history
     .map((h) => ((h.sport || 'course') === 'course' && !h.level && runLevel(h) ? { ...h, level: runLevel(h) } : h))
     .filter((h) => (h.sport || 'course') === 'course' && h.level)
-    .sort((a, b) => String(a.date).localeCompare(String(b.date)));
+    .sort((a, b) => String(a.date).localeCompare(String(b.date)))
+    .filter(keepReplay);
   if (runs.length === 0) {
     if (start > 1) return { level: start, reason: `${opts.startNote || 'Point de départ'} : ${LEVELS[start - 1].label}.` };
     return { level: 1, reason: 'Premier palier : alterner 2 min de course et 2 min de marche.' };

@@ -10,6 +10,7 @@ import { iaInput, pendingIA, failedIA, failureMessage } from './ia.js';
 import { tipsOf, tipsSource, hasIA } from './conseils.js';
 import { GOALS_MUSCU, LIEUX, NIVEAUX_MUSCU, MUSCLES, alternatives, byId, muscuPlan, nextSeance, nextLoad, tonnage } from './muscu.js';
 import { createGuided, currentExercise, suggestedReps, setDone, skipExercise, restLeft, adjustRest, endRest, finish, elapsedSec as guidedElapsed, setsDone, setsTotal, restTrack, startCountdown, countLeft, endCountdown, swapExercise, startHold, cancelHold, stopHold, holdLead, holdElapsed, holdOver, holdTrack } from './muscu-live.js';
+import { replayRun, replayMuscu, canReplay } from './refaire.js';
 import { upcoming, moveOptions, planOptions, nextRunLevel, runLevel, afterBilan, HORIZON, GOALS_RUN, START_RUN, GOALS_SWIM, START_SWIM, LEVELS } from './plan.js';
 
 const app = document.getElementById('app');
@@ -392,6 +393,8 @@ function extraLine(h) {
   return `<b>${prevues + done} répétitions au lieu de ${prevues}</b> : +${done} ajoutée${done > 1 ? 's' : ''} en direct${done < h.extra ? ` (${h.extra - done} lancée${h.extra - done > 1 ? 's' : ''} sans être finie${h.extra - done > 1 ? 's' : ''})` : ''}.`;
 }
 
+const refOf = (h) => load().history.find((x) => x.id === h.refaite) || null;
+
 // Séance passée : ligne dépliable, le détail reste à un toucher.
 function historyRow(h, open = false) {
   const sport = sportOf(h);
@@ -435,6 +438,8 @@ function historyRow(h, open = false) {
         ${h.commentaire ? `<p class="small">« ${esc(h.commentaire)} »</p>` : ''}
         ${!feel.length && !h.commentaire && !h.structure ? '<p class="muted small">Pas de ressenti noté.</p>' : ''}
         ${coachTips(h)}
+        ${h.refaite ? `<p class="muted small">Séance refaite${refOf(h) ? ` : la même que ${esc(dateLabel(refOf(h).date))}` : ''}.</p>` : ''}
+        ${canReplay(h) && !live && !guided ? `<button class="btn-ghost replay ${sport}" data-replay="${esc(h.id)}">↻ Refaire cette séance</button>` : ''}
         ${sport === 'course' ? `<div class="fixrun" data-fixbox="${esc(h.id)}"><button class="day-link" data-fixrun="${esc(h.id)}">Corriger avec les chiffres de ma montre</button></div>` : ''}
       </div>
     </details>`;
@@ -1605,6 +1610,7 @@ const screens = {
     return `
       <p class="eyebrow" style="margin-top:0">Avant de partir</p>
       <h1 class="prep-title">${esc(s.name)}</h1>
+      ${s.refaite ? `<p class="notice small replay-note"><strong>La même séance que ${esc(dateLabel(s.refaiteDate))}</strong>, étape par étape. Elle compte comme une course de plus : ${s.refaiteNote}</p>` : ''}
       <section class="prep-sum">
         <p class="hero-num">${Math.round(total(s.steps) / 60)}<small>min</small></p>
         <p class="muted" style="margin:0">${s.steps.length} étapes · ${runs.length} en course</p>
@@ -1677,6 +1683,7 @@ const screens = {
     return `
       <p class="eyebrow" style="margin-top:0">Avant de commencer</p>
       <h1 class="prep-title">${esc(p.title)}</h1>
+      ${p.refaite ? `<p class="notice small replay-note"><strong>Les mêmes exercices que ${esc(dateLabel(p.refaiteDate))}.</strong> Charges et objectifs recalculés sur ta dernière fois, comme d'habitude.</p>` : ''}
       <p class="muted" style="margin:0 0 12px">${esc(LIEUX[lieu].label)}${LIEUX[lieu].detail ? ` · ${esc(LIEUX[lieu].detail)}` : ''} · ${p.exercices.length} exercices</p>
       ${besoins.length ? `<div class="notice small"><strong>Il te faut :</strong> ${esc(besoins.join(', '))}.</div>` : ''}
       <ul class="mprep-list">${p.exercices.map((x) => {
@@ -1687,7 +1694,7 @@ const screens = {
           ${alts.length > 1 ? `<label class="mprep-alt"><span>Pas le matériel ou pas envie ? Même muscle :</span><select data-mpswap="${p.seance}:${x.slot}" aria-label="Autre exercice pour ${esc(x.muscle)}">${alts.map((e) => `<option value="${e.id}" ${e.id === x.id ? 'selected' : ''}>${esc(e.nom)}${e.besoin ? ` (${esc(e.besoin)})` : ''}</option>`).join('')}</select></label>` : ''}
         </li>`;
       }).join('')}</ul>
-      <p class="muted small">Ton choix est gardé pour les prochaines séances. Matériel : Profil > questionnaire.</p>
+      <p class="muted small">${p.refaite ? 'Un changement ici vaut pour cette fois seulement.' : 'Ton choix est gardé pour les prochaines séances. Matériel : Profil > questionnaire.'}</p>
       <ul class="prep-list">${sound}</ul>
       <div class="prep-go">
         <button class="cta muscu" data-mstart ${a === 'chargement' ? 'disabled' : ''}><span>C'est parti</span><i>›</i></button>
@@ -2179,6 +2186,7 @@ function go(screen) {
       date: live.startedAt,
       sessionName: live.session.name,
       level: live.session.level ?? null,
+      ...(live.session.refaite ? { refaite: live.session.refaite } : {}),
       steps: steps,
       plannedSec: total(steps),
       elapsedSec,
@@ -2209,6 +2217,33 @@ function go(screen) {
 }
 
 // --- Actions ------------------------------------------------------------------
+
+// « Refaire cette séance » : la même course (mêmes étapes, même guidage) ou la même muscu.
+// Elle s'enregistre comme une séance de plus, liée à l'ancienne par `refaite`.
+function replaySession(id) {
+  const d = load();
+  const h = d.history.find((x) => x.id === id);
+  if (!h || live || guided) return;
+  if (h.sport === 'muscu') {
+    const goal = GOALS_MUSCU[d.profile.questionnaire?.objectifMuscu] || GOALS_MUSCU.muscle;
+    const p = replayMuscu(h, d.history, goal);
+    if (!p) return;
+    mReplay = { ...p, refaiteDate: h.date };
+    openMuscuPrep();
+    return;
+  }
+  const r = replayRun(h);
+  if (!r) return;
+  const plan = planFor(d);
+  const todayRun = plan.find((p) => p.date === today() && p.sport === 'course');
+  const nextRun = plan.find((p) => p.sport === 'course');
+  const note = todayRun
+    ? `elle remplace la course prévue aujourd'hui (palier ${todayRun.level}).`
+    : r.level && nextRun && r.level < nextRun.level
+      ? `palier plus bas que ton programme (palier ${nextRun.level}), qui ne redescendra pas à cause d'elle, sauf douleur.`
+      : 'ta prochaine course prévue s\'adaptera à ton bilan, comme d\'habitude.';
+  openPrepare({ id: `refaire-${h.id}`, name: r.name, steps: r.steps, level: r.level, refaite: h.id, refaiteDate: h.date, refaiteNote: note });
+}
 
 function showSuite(entry) {
   const d = load();
@@ -2473,6 +2508,8 @@ document.addEventListener('click', (e) => {
   } else if ('dropresume' in ds) {
     clearLive();
     render();
+  } else if (ds.replay) {
+    replaySession(ds.replay);
   } else if (ds.startplan) {
     const p = planFor(load()).find((x) => x.date === ds.startplan && x.sport === 'course');
     if (p) openPrepare({ id: `plan-${p.date}`, name: `Palier ${p.level} · ${p.title}`, steps: p.steps, level: p.level });
@@ -2667,6 +2704,19 @@ document.addEventListener('change', (e) => {
   if (e.target.dataset.mpswap) {
     // Avant la séance : autre exercice du même muscle, gardé pour les prochaines fois.
     const key = e.target.dataset.mpswap;
+    if (mReplay) {
+      // Séance refaite : le changement vaut pour cette fois, le programme garde ses choix.
+      const slot = Number(key.split(':')[1]);
+      const i = mReplay.exercices.findIndex((x) => x.slot === slot);
+      const ex = byId(e.target.value);
+      if (i >= 0 && ex) {
+        const d = load();
+        const goal = GOALS_MUSCU[d.profile.questionnaire?.objectifMuscu] || GOALS_MUSCU.muscle;
+        mReplay.exercices[i] = { slot, ...ex, series: mReplay.exercices[i].series, ...nextLoad(ex, d.history, goal) };
+      }
+      render();
+      return;
+    }
     update((d) => { d.settings.muscuChoix = { ...d.settings.muscuChoix, [key]: e.target.value }; });
     render();
     return;
@@ -2871,7 +2921,9 @@ function guidedLoop() {
 }
 
 // Séance de muscu du jour (ou la suivante du cycle), avec les exercices choisis.
+let mReplay = null; // séance de muscu refaite (plan prêt), le temps de l'écran « Avant de commencer »
 function todayMuscuPlan(d) {
+  if (mReplay) return mReplay;
   const q = d.profile.questionnaire || {};
   return planFor(d, 1).find((x) => x.sport === 'muscu' && x.date === today())
     || muscuPlan(nextSeance(d.history, (q.joursMuscu || []).length), d.history, q, d.settings.muscuChoix || {});
@@ -2883,7 +2935,7 @@ const liveAlts = (x) => alternatives(x.muscle, load().profile.questionnaire?.lie
 // « Démarrer » : d'abord l'écran « Avant de commencer » (une séance en cours reprend directement).
 let mprepAudio = null;
 function openMuscuPrep() {
-  if (savedGuided()) return startGuided();
+  if (savedGuided()) { mReplay = null; return startGuided(); }
   mprepAudio = audioAssets ? 'ok' : 'chargement';
   if (!audioAssets) {
     loadAudio().then(() => { mprepAudio = 'ok'; }).catch(() => { mprepAudio = 'erreur'; })
@@ -2901,6 +2953,8 @@ function startGuided() {
     const p = todayMuscuPlan(load());
     const log = muscuLog(p);
     guided = createGuided({ ...log, exercices: log.exercices.map((x, i) => ({ ...x, reason: p.exercices[i].reason })), repos: p.repos });
+    if (p.refaite) guided.refaite = p.refaite;
+    mReplay = null;
     startCountdown(guided, 3);
   }
   mDraft = { key: null, reps: 0 };
@@ -2925,6 +2979,7 @@ function finishGuided() {
     endedAt: new Date(g.endedAt).toLocaleString('sv-SE').replace(' ', 'T'),
     seance: g.seance,
     sessionName: g.sessionName,
+    ...(g.refaite ? { refaite: g.refaite } : {}),
     exercices: g.exercices.map(({ reason, ...x }) => ({ ...x, reps: [...x.reps] })),
     elapsedSec: Math.max(60, Math.round(guidedElapsed(g) / 60) * 60),
     horaires: `${hm(g.startedAt)} → ${hm(g.endedAt)}`,
@@ -2945,7 +3000,7 @@ document.addEventListener('click', (e) => {
   const ds = t.dataset;
   if ('muscugo' in ds) return openMuscuPrep();
   if ('mstart' in ds) return startGuided();
-  if ('mprepback' in ds) return go('accueil');
+  if ('mprepback' in ds) { mReplay = null; return go('accueil'); }
   if ('msoundretry' in ds) {
     mprepAudio = 'chargement';
     render();
