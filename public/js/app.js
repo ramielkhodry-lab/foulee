@@ -581,8 +581,9 @@ function dayPanel(history, plan, sel) {
       ${manualButtons(load(), 'btn-ghost', sel)}</section>`;
   }
   const p = plan.find((x) => x.date === sel);
-  if (p && p.sport !== 'repos') return sessionCard(p);
   const doneToday = sel === t ? history.filter((h) => String(h.date).slice(0, 10) === sel) : [];
+  // Séance faite aujourd'hui (ex. une course refaite) un jour où autre chose est prévu : on montre les deux.
+  if (p && p.sport !== 'repos') return `${doneToday.length ? `<h3 style="margin-top:0">Fait aujourd'hui</h3><div class="list" style="margin-bottom:16px">${doneToday.map((h) => historyRow(h)).join('')}</div>` : ''}${sessionCard(p)}`;
   if (doneToday.length) return `<h3 style="margin-top:0">Aujourd'hui</h3><div class="list">${doneToday.map((h) => historyRow(h, true)).join('')}</div>`;
   return `
     <section class="day-card repos">
