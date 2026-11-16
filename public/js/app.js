@@ -996,7 +996,7 @@ function startSession(session, resume = null) {
   // iOS refuse de lancer l'audio sinon.
   let track;
   try {
-    track = assemble(session.steps, audioAssets.index, audioAssets.pack, { voice: load().settings.annonces === 'voix' });
+    track = assemble(session.steps, audioAssets.index, audioAssets.pack, { voice: load().settings.annonces === 'voix', leadIn: session.leadIn });
   } catch (e) {
     alert(`Impossible de préparer la séance : ${e.message}. Ferme et rouvre Foulée pour la mettre à jour.`);
     return;
@@ -1190,7 +1190,7 @@ function reshapeSession(next) {
   if (!live || next === live.session) return;
   let track;
   try {
-    track = assemble(next.steps, audioAssets.index, audioAssets.pack, { voice: load().settings.annonces === 'voix' });
+    track = assemble(next.steps, audioAssets.index, audioAssets.pack, { voice: load().settings.annonces === 'voix', leadIn: next.leadIn });
   } catch (e) {
     alert(`Impossible d'ajouter la répétition : ${e.message}`);
     return;
@@ -1595,7 +1595,7 @@ const screens = {
       <h3>Noter une séance faite</h3>
       ${manualButtons(d, '')}
       <h3>Vérifier les signaux</h3>
-      <button class="option" data-starttest><span><span>Séance test · ${total(testSession().steps)} s</span><span class="muted">4 × 10 s de course, 5 s de marche entre. Ne compte nulle part.</span></span><span class="go">▶</span></button>`;
+      <button class="option" data-starttest><span><span>Séance test · ${total(testSession().steps)} s</span><span class="muted">Étapes de 10 s, premier signal après 2 s. Ne compte nulle part.</span></span><span class="go">▶</span></button>`;
   },
 
   testfin() {
@@ -1607,11 +1607,11 @@ const screens = {
       <h3>Tu aurais dû entendre et voir</h3>
       <ul class="prep-list">
         <li class="prep-item info"><b>Départ de chaque étape</b><span>Notes qui montent = cours (écran vert qui clignote), notes qui descendent = marche (écran blanc qui clignote).</span></li>
-        <li class="prep-item info"><b>3 bips avant chaque changement</b><span>Y compris pendant les marches de 5 s.</span></li>
+        <li class="prep-item info"><b>3 bips avant chaque changement</b><span>À 7, 8 et 9 s de chaque étape.</span></li>
         <li class="prep-item info"><b>Mi-séance</b><span>${t.halfPassed ? `Un signal à part, un flash et « Moitié de la séance faite » pendant 8 s, à ${mmss(t.halfAt || 0)} sur le chrono.` : 'Pas atteinte : tu as arrêté avant la moitié.'}</span></li>
         <li class="prep-item info"><b>Fin</b><span>${t.complete ? 'Un signal de fin, puis « Programme fini » et le chrono qui continue.' : 'Pas atteinte : tu as arrêté avant.'}</span></li>
       </ul>
-      <p class="muted small">Un son manquant sur iPhone en mode « Avec ma musique » : vérifie le bouton silencieux sur le côté.</p>
+      <p class="notice small"><strong>Aucun son mais le chrono défilait ?</strong> La piste jouait : c'est l'iPhone qui coupait le son. En mode « Avec ma musique », le mode silencieux coupe tous les signaux (interrupteur sur le côté, ou bouton Action sur iPhone 15 et plus : la cloche barrée en haut de l'écran). Monte aussi le volume <em>pendant</em> la séance.</p>
       <div class="row"><button data-tab="accueil">Accueil</button><button class="btn-dark" data-starttest>Refaire le test</button></div>`;
   },
 
@@ -1662,7 +1662,7 @@ const screens = {
       <p class="eyebrow" style="margin-top:0">Avant de partir</p>
       <h1 class="prep-title">${esc(s.name)}</h1>
       ${s.ask && !s.ask.choix ? `<section class="why-tips course">${palierAsk(s.ask)}</section>` : ''}
-      ${isTest(s) ? '<p class="notice small replay-note"><strong>Séance test, elle ne compte nulle part</strong> : pas d\'historique, pas de bilan, aucun effet sur ton programme. Le vrai moteur de séance : signaux, 3 bips avant chaque changement, flash, barre, mi-séance, verrou.</p>' : ''}
+      ${isTest(s) ? `<p class="notice small replay-note"><strong>Séance test, elle ne compte nulle part</strong> : pas d'historique, pas de bilan, aucun effet sur ton programme. Le vrai moteur de séance : signaux, 3 bips avant chaque changement, flash, barre, mi-séance, verrou.</p>${IOS && load().settings.son !== 'exclusif' ? '<p class="alert"><strong>Mode silencieux coupé et volume monté, sinon aucun son.</strong> En mode « Avec ma musique », l\'iPhone en silencieux ne joue aucun signal.</p>' : ''}` : ''}
       ${s.refaite ? `<p class="notice small replay-note"><strong>La même séance que ${esc(dateLabel(s.refaiteDate))}</strong>, étape par étape. Elle compte comme une course de plus : ${s.refaiteNote}</p>` : ''}
       <section class="prep-sum">
         ${total(s.steps) < 120 ? `<p class="hero-num">${total(s.steps)}<small>s</small></p>` : `<p class="hero-num">${Math.round(total(s.steps) / 60)}<small>min</small></p>`}
@@ -1677,7 +1677,7 @@ const screens = {
       </ul>
       <div class="prep-go">
         <button class="cta" data-ready ${p.audio === 'ok' ? '' : 'disabled'}><span>Je suis prêt</span><i>›</i></button>
-        <p class="muted small" style="text-align:center;margin:8px 0 0">${p.audio === 'ok' ? '7 secondes d\'introduction, puis la première étape.' : 'Le bouton s\'active quand les sons sont chargés.'}</p>
+        <p class="muted small" style="text-align:center;margin:8px 0 0">${p.audio === 'ok' ? `${s.leadIn ?? 7} secondes d'introduction, puis la première étape.` : 'Le bouton s\'active quand les sons sont chargés.'}</p>
       </div>
       <button class="day-link" data-prepback style="display:block;margin:6px auto 0">Retour</button>`;
   },

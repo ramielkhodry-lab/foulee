@@ -1,4 +1,4 @@
-// Séance test (4 × 10 s) : le vrai moteur de séance, et rien n'est enregistré.
+// Séance test (étapes de 10 s) : le vrai moteur de séance, et rien n'est enregistré.
 import { createRequire } from 'node:module';
 const { chromium, devices } = createRequire(import.meta.url)('playwright');
 import { createServer } from 'node:http';
@@ -56,7 +56,7 @@ for (const [name, dev] of [['iphone', 'iPhone 13'], ['android', 'Pixel 7']]) {
   await page.waitForSelector('#count');
   const segs = await page.locator('#bar .seg').count();
   // Juste avant la mi-séance (48 s de piste), puis on laisse jouer.
-  await page.evaluate(() => { document.getElementById('player').currentTime = 46.5; });
+  await page.evaluate(() => { document.getElementById('player').currentTime = 21.5; });
   await page.waitForFunction(() => !document.getElementById('halfway').hidden, null, { timeout: 8000 });
   await page.screenshot({ path: `${out}/${name}-2-mi-seance.png` });
   // Pendant le test, aucune sauvegarde de reprise : la course interrompue d'avant reste intacte.
@@ -66,7 +66,7 @@ for (const [name, dev] of [['iphone', 'iPhone 13'], ['android', 'Pixel 7']]) {
   const locked = await page.isVisible('#touchlock');
   await page.screenshot({ path: `${out}/${name}-3-verrou.png` });
   await page.evaluate(() => { document.getElementById('touchlock')?.remove(); });
-  await page.evaluate(() => { document.getElementById('player').currentTime = 80; });
+  await page.evaluate(() => { document.getElementById('player').currentTime = 40; });
   await page.waitForSelector('#livedone:not([hidden])', { timeout: 15000 });
   const doneLabel = await page.textContent('#livedone');
   await page.click('#livedone');
@@ -88,7 +88,7 @@ for (const [name, dev] of [['iphone', 'iPhone 13'], ['android', 'Pixel 7']]) {
 
   const checks = {
     'avant de partir : séance test annoncée': prepNote,
-    'barre : 9 étapes': segs === 9,
+    'barre : 4 étapes': segs === 4,
     'mi-séance affichée': true,
     'verrou posé': locked,
     'bouton de fin : « Terminer le test »': doneLabel.includes('Terminer le test'),
