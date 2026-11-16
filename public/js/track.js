@@ -26,7 +26,8 @@ export function validateSteps(steps) {
   if (!Array.isArray(steps) || steps.length === 0) throw new Error('Séance vide');
   for (const s of steps) {
     if (!KINDS[s.kind]) throw new Error(`Type d'étape inconnu : ${s.kind}`);
-    if (!Number.isInteger(s.duration) || s.duration < 10 || s.duration > 4 * 3600) {
+    // 5 s minimum : la séance test a des marches de 5 s (l'éditeur, lui, impose 10 s).
+    if (!Number.isInteger(s.duration) || s.duration < 5 || s.duration > 4 * 3600) {
       throw new Error(`Durée invalide : ${s.duration}`);
     }
   }
@@ -48,7 +49,8 @@ export function buildEvents(steps, { voice = true } = {}) {
     const next = steps[i + 1];
     const stepEnd = starts[i] + s.duration;
     if (voice && next && s.duration >= MIN_STEP_FOR_PRE) events.push({ at: stepEnd - PRE_ANNOUNCE, clip: preClipId(next.kind) });
-    if (s.duration >= 15) for (const d of [3, 2, 1]) events.push({ at: stepEnd - d, clip: 'bip' });
+    // 3 bips avant chaque changement. Une étape de 5 s les a aussi (signal à 0 s, bips à 2, 3, 4 s).
+    if (s.duration >= 5) for (const d of [3, 2, 1]) events.push({ at: stepEnd - d, clip: 'bip' });
   });
   const half = halfwayAt(starts, end, events, voice);
   if (half !== null) events.push({ at: half, clip: 'signal_moitie' });

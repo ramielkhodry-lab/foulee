@@ -146,3 +146,22 @@ test('mi-séance : signal à la moitié du temps d\'effort, sans écraser un aut
   const { half } = buildEvents([{ kind: 'course', duration: 600 }]);
   assert.equal(half, LEAD_IN + 300);
 });
+
+test('séance test : 4 × 10 s de course, signaux, 3 bips même sur 5 s, mi-séance et fin', async () => {
+  const { testSession } = await import('../public/js/test-seance.js');
+  const s = testSession();
+  const runs = s.steps.filter((x) => x.kind === 'course_lente');
+  assert.equal(runs.length, 4);
+  assert.ok(runs.every((x) => x.duration === 10));
+  assert.deepEqual(s.steps.filter((x) => x.kind === 'marche').map((x) => x.duration), [5, 5, 5]);
+  const { events, starts, end, half } = buildEvents(s.steps, { voice: false });
+  for (const [i, st] of s.steps.entries()) {
+    const stepEnd = starts[i] + st.duration;
+    for (const d of [3, 2, 1]) assert.ok(events.some((e) => e.clip === 'bip' && e.at === stepEnd - d), `bip ${d} avant la fin de l'étape ${i}`);
+  }
+  assert.equal(events.filter((e) => e.clip === 'signal_course').length, 4);
+  assert.ok(half !== null && half > starts[0] && half < end);
+  assert.equal(events.at(-1).clip, 'signal_fin');
+  // Aucun son ne se chevauche : chaque clip finit avant le suivant (signal ≤ 0,94 s).
+  for (let k = 1; k < events.length; k++) assert.ok(events[k].at - events[k - 1].at >= 0.95, `${events[k - 1].clip} → ${events[k].clip}`);
+});
