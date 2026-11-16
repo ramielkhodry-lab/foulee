@@ -11,6 +11,7 @@ import { tipsOf, tipsSource, hasIA } from './conseils.js';
 import { GOALS_MUSCU, LIEUX, NIVEAUX_MUSCU, MUSCLES, alternatives, byId, muscuPlan, nextSeance, nextLoad, tonnage } from './muscu.js';
 import { createGuided, currentExercise, suggestedReps, setDone, skipExercise, restLeft, adjustRest, endRest, finish, elapsedSec as guidedElapsed, setsDone, setsTotal, restTrack, startCountdown, countLeft, endCountdown, swapExercise, startHold, cancelHold, stopHold, holdLead, holdElapsed, holdOver, holdTrack } from './muscu-live.js';
 import { replayRun, replayMuscu, canReplay } from './refaire.js';
+import { testSession, isTest } from './test-seance.js';
 import { upcoming, moveOptions, planOptions, nextRunLevel, runLevel, afterBilan, HORIZON, GOALS_RUN, START_RUN, GOALS_SWIM, START_SWIM, LEVELS } from './plan.js';
 
 const app = document.getElementById('app');
@@ -968,7 +969,7 @@ function openFinishSheet() {
         <h2>Terminer maintenant ?</h2>
         <p>Il reste <b>${mmss(left)}</b> et ${stepsLeft} étape${stepsLeft > 1 ? 's' : ''}. Ce que tu as déjà fait est gardé pour le bilan.</p>
         <button class="btn-primary" data-finishno>Continuer la séance</button>
-        <button class="btn-stop" data-finishok>Terminer et faire le bilan</button>
+        <button class="btn-stop" data-finishok>${isTest(live.session) ? 'Arrêter le test' : 'Terminer et faire le bilan'}</button>
       </div>
     </div>`);
   document.body.classList.add('sheet-open');
@@ -981,6 +982,7 @@ function closeFinishSheet() {
 // --- Séance en cours ----------------------------------------------------------
 
 let live = null; // { session, track, url, skipped:Set, maxTime, lastStep }
+let testDone = null; // fin de la séance test : ce qui a été joué (rien n'est enregistré)
 
 const localNow = () => new Date().toLocaleString('sv-SE').replace(' ', 'T'); // AAAA-MM-JJTHH:MM:SS, heure locale
 
@@ -1031,7 +1033,7 @@ function startSession(session, resume = null) {
 const LIVE_KEY = 'foulee.live';
 let lastLiveSave = 0;
 function saveLive() {
-  if (!live) return;
+  if (!live || isTest(live.session)) return; // séance test : rien à reprendre
   lastLiveSave = Date.now();
   try {
     localStorage.setItem(LIVE_KEY, JSON.stringify({
@@ -1591,7 +1593,26 @@ const screens = {
       <h3>Course guidée</h3>
       ${d.sessions.map((x) => `<button class="option" data-start="${esc(x.id)}"><span><span>${esc(x.name)}</span><span class="muted">${minutesLabel(total(x.steps))} · ${x.steps.length} étapes</span></span><span class="go">▶</span></button>`).join('')}
       <h3>Noter une séance faite</h3>
-      ${manualButtons(d, '')}`;
+      ${manualButtons(d, '')}
+      <h3>Vérifier les signaux</h3>
+      <button class="option" data-starttest><span><span>Séance test · ${total(testSession().steps)} s</span><span class="muted">4 × 10 s de course, 5 s de marche entre. Ne compte nulle part.</span></span><span class="go">▶</span></button>`;
+  },
+
+  testfin() {
+    const t = testDone || {};
+    return `
+      <p class="eyebrow" style="margin-top:0">Séance test</p>
+      <h1 class="prep-title">${t.complete ? 'Test terminé' : 'Test arrêté'}</h1>
+      <p class="notice small">Rien n'a été enregistré : ni historique, ni bilan, ni effet sur ton programme. Joué : ${mmss(t.elapsedSec || 0)}.</p>
+      <h3>Tu aurais dû entendre et voir</h3>
+      <ul class="prep-list">
+        <li class="prep-item info"><b>Départ de chaque étape</b><span>Notes qui montent = cours (écran vert qui clignote), notes qui descendent = marche (écran blanc qui clignote).</span></li>
+        <li class="prep-item info"><b>3 bips avant chaque changement</b><span>Y compris pendant les marches de 5 s.</span></li>
+        <li class="prep-item info"><b>Mi-séance</b><span>${t.halfPassed ? `Un signal à part, un flash et « Moitié de la séance faite » pendant 8 s, à ${mmss(t.halfAt || 0)} sur le chrono.` : 'Pas atteinte : tu as arrêté avant la moitié.'}</span></li>
+        <li class="prep-item info"><b>Fin</b><span>${t.complete ? 'Un signal de fin, puis « Programme fini » et le chrono qui continue.' : 'Pas atteinte : tu as arrêté avant.'}</span></li>
+      </ul>
+      <p class="muted small">Un son manquant sur iPhone en mode « Avec ma musique » : vérifie le bouton silencieux sur le côté.</p>
+      <div class="row"><button data-tab="accueil">Accueil</button><button class="btn-dark" data-starttest>Refaire le test</button></div>`;
   },
 
   seance(embedded) {
@@ -1641,9 +1662,10 @@ const screens = {
       <p class="eyebrow" style="margin-top:0">Avant de partir</p>
       <h1 class="prep-title">${esc(s.name)}</h1>
       ${s.ask && !s.ask.choix ? `<section class="why-tips course">${palierAsk(s.ask)}</section>` : ''}
+      ${isTest(s) ? '<p class="notice small replay-note"><strong>Séance test, elle ne compte nulle part</strong> : pas d\'historique, pas de bilan, aucun effet sur ton programme. Le vrai moteur de séance : signaux, 3 bips avant chaque changement, flash, barre, mi-séance, verrou.</p>' : ''}
       ${s.refaite ? `<p class="notice small replay-note"><strong>La même séance que ${esc(dateLabel(s.refaiteDate))}</strong>, étape par étape. Elle compte comme une course de plus : ${s.refaiteNote}</p>` : ''}
       <section class="prep-sum">
-        <p class="hero-num">${Math.round(total(s.steps) / 60)}<small>min</small></p>
+        ${total(s.steps) < 120 ? `<p class="hero-num">${total(s.steps)}<small>s</small></p>` : `<p class="hero-num">${Math.round(total(s.steps) / 60)}<small>min</small></p>`}
         <p class="muted" style="margin:0">${s.steps.length} étapes · ${runs.length} en course</p>
         <div class="effort-bar">${s.steps.map((x) => `<i class="${KINDS[x.kind].effort}" style="flex:${x.duration}"></i>`).join('')}</div>
         <p class="small" style="margin:8px 0 0">${esc(stepsSummary(s.steps))}</p>
@@ -1687,7 +1709,7 @@ const screens = {
         </div>
         <div class="gpsline" id="gps"></div>
         ${IOS && load().settings.son !== 'exclusif' ? '<p class="muted small" style="margin:0">Mode musique : iPhone hors silencieux, sinon pas de signaux.</p>' : ''}
-        <button class="btn-primary live-done" id="livedone" data-finishok hidden>Terminer et faire le bilan</button>
+        <button class="btn-primary live-done" id="livedone" data-finishok hidden>${isTest(live?.session) ? 'Terminer le test' : 'Terminer et faire le bilan'}</button>
         ${live?.overAt ? '' : `<div class="live-controls">
           <button class="toggle${playing ? '' : ' paused'}" data-toggle>${playing ? 'Pause' : 'Reprendre'}</button>
           <button data-skip>Étape suivante</button>
@@ -2179,7 +2201,7 @@ function placeWeek() {
 }
 
 // Onglet allumé pour chaque écran.
-const TAB_OF = { prepare: 'demarrer', mprep: 'demarrer', questionnaire: 'profil', edit: 'programme', live: 'demarrer', muscu: 'demarrer', bilan: 'progression', saisie: 'progression', suite: 'programme', compte: 'profil' };
+const TAB_OF = { testfin: 'demarrer', prepare: 'demarrer', mprep: 'demarrer', questionnaire: 'profil', edit: 'programme', live: 'demarrer', muscu: 'demarrer', bilan: 'progression', saisie: 'progression', suite: 'programme', compte: 'profil' };
 
 function render() {
   if (live) live.gpsHtml = null; // l'écran est redessiné : le message GPS aussi
@@ -2195,6 +2217,17 @@ function render() {
 function go(screen) {
   if (screen !== 'live') closeFinishSheet();
   if (screen !== 'prepare' && prep) { stopPrepGps(); testAudio.pause(); prep = null; }
+  // Séance test : pas de bilan, pas de mise de côté. On arrête tout et on dit ce qu'on a vérifié.
+  if (screen === 'bilan' && live && !live.done && isTest(live.session)) {
+    audio.pause();
+    stopLiveExtras();
+    renderTouchLock();
+    live.done = true;
+    testDone = { elapsedSec: Math.round(liveElapsed()), halfPassed: live.maxTime >= (live.track.half || Infinity), complete: live.maxTime >= live.track.end, halfAt: live.track.half ? live.track.half - live.track.starts[0] : null };
+    URL.revokeObjectURL(live.url);
+    live = null;
+    screen = 'testfin';
+  }
   if (screen === 'bilan' && live && !live.done) {
     if (!audio.paused) anchor();
     audio.pause();
@@ -2517,6 +2550,9 @@ document.addEventListener('click', (e) => {
     go(ds.tab === 'demarrer' && live && !live.done ? 'live' : ds.tab);
   } else if (ds.start) {
     openPrepare(findSession(ds.start));
+  } else if ('starttest' in ds) {
+    if (live && !live.done) return;
+    openPrepare(testSession());
   } else if ('ready' in ds) {
     if (!prep) return;
     const s = prep.session;
