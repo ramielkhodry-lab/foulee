@@ -12,9 +12,10 @@ const MIN_STEP_FOR_PRE = 25; // en dessous, pas de pré-annonce (elle couvrirait
 const TAIL = 8; // secondes après la fin, pour le message final
 
 // Étapes → début de chaque étape (secondes depuis le début de la piste).
-export function stepStarts(steps) {
+// leadIn : introduction plus courte possible (séance test : 2 s).
+export function stepStarts(steps, leadIn = LEAD_IN) {
   const starts = [];
-  let t = LEAD_IN;
+  let t = leadIn;
   for (const s of steps) {
     starts.push(t);
     t += s.duration;
@@ -35,9 +36,9 @@ export function validateSteps(steps) {
 
 // Liste des sons à jouer : [{ at: secondes, clip: id }], triée.
 // voice=false : signaux seuls (montée = course, descente = marche), sans annonce parlée.
-export function buildEvents(steps, { voice = true } = {}) {
+export function buildEvents(steps, { voice = true, leadIn = LEAD_IN } = {}) {
   validateSteps(steps);
-  const { starts, end } = stepStarts(steps);
+  const { starts, end } = stepStarts(steps, leadIn);
   const events = voice ? [{ at: 0.3, clip: 'intro' }] : [];
   steps.forEach((s, i) => {
     if (voice) {
