@@ -447,6 +447,8 @@ details.hist[open] .li { border-bottom: 0; }
 .why-tips .tips-head { margin-top: 10px; color: var(--ink); font-weight: 700; font-size: 13px; text-transform: uppercase; letter-spacing: 0.08em; }
 .why-tips ul { margin: 0; padding-left: 18px; color: var(--ink); }
 .why-tips li { margin: 0 0 6px; }
+.palier-ask { margin: 10px 0 6px; padding: 12px; border-radius: 14px; background: rgba(200, 255, 46, 0.08); border: 1px solid rgba(200, 255, 46, 0.45); color: var(--ink); }
+.palier-ask .row { margin-top: 10px; }
 .conseils { list-style: none; margin: 0 0 8px; padding: 0; counter-reset: c; }
 .conseils li { counter-increment: c; position: relative; padding: 0 0 14px 40px; font-size: 16px; }
 .conseils li::before { content: counter(c); position: absolute; left: 0; top: -2px; font-family: var(--display); font-style: italic; font-weight: 800; font-size: 26px; color: var(--run); }

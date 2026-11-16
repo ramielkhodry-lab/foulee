@@ -76,9 +76,26 @@ const exoList = (p) => `<ol class="exos">${p.exercices.map((x) => `<li><b>${esc(
 const shortDate = (d) => new Date(`${String(d).slice(0, 10)}T12:00`).toLocaleDateString('fr-FR', { weekday: 'short', day: 'numeric', month: 'short' });
 
 // Pourquoi cette séance, et les conseils tirés du dernier bilan du même sport.
+// Baisse de palier proposée après une douleur ou une séance très dure : c'est toi qui tranches.
+const lvlShort = (id) => esc(LEVELS[id - 1].label);
+function palierAsk(a) {
+  if (!a) return '';
+  const k = esc(a.key);
+  if (a.choix) {
+    return `<p class="small">
+      <button class="day-link" data-palier="${a.choix === 'maintenir' ? 'ok' : 'maintenir'}|${k}">${a.choix === 'maintenir' ? `Redescendre plutôt au palier ${a.to}` : `Maintenir plutôt le palier ${a.from}`} ›</button></p>`;
+  }
+  return `<div class="palier-ask">
+    <p>Je préconise de redescendre au <b>palier ${a.to}</b> (${lvlShort(a.to)}) : ${esc(a.why)} à ta dernière course. Si ce n'était pas lié à l'entraînement (malade, autre chose), tu peux garder la séance prévue.</p>
+    <div class="row"><button data-palier="ok|${k}">OK, redescendre</button><button class="btn-dark" data-palier="maintenir|${k}">Maintenir le palier ${a.from}</button></div>
+    <p class="muted small" style="margin:6px 0 0">Palier ${a.from} : ${lvlShort(a.from)}.</p>
+  </div>`;
+}
+
 const whyTips = (p) => `
   <div class="why-tips ${p.sport}">
     <p>${esc(p.reason)}</p>
+    ${p.sport === 'course' ? palierAsk(p.ask) : ''}
     ${p.tips?.length ? `<p class="tips-head">${p.tipsSource === 'ia' ? 'Conseils de l’IA sur ton dernier bilan' : 'Conseils de ton dernier bilan · règles'}</p><ul>${p.tips.slice(0, 3).map((t) => `<li>${esc(t)}</li>`).join('')}</ul>` : ''}
   </div>`;
 
@@ -822,6 +839,8 @@ function applyAudioMode() {
 let prep = null; // { session, from, gps, acc, watch, audio, testing }
 const testAudio = new Audio();
 testAudio.setAttribute('playsinline', '');
+
+const planSession = (p) => ({ id: `plan-${p.date}`, name: `Palier ${p.level} · ${p.title}`, steps: p.steps, level: p.level, ask: p.ask });
 
 function openPrepare(session) {
   if (!session) return;
@@ -1621,6 +1640,7 @@ const screens = {
     return `
       <p class="eyebrow" style="margin-top:0">Avant de partir</p>
       <h1 class="prep-title">${esc(s.name)}</h1>
+      ${s.ask && !s.ask.choix ? `<section class="why-tips course">${palierAsk(s.ask)}</section>` : ''}
       ${s.refaite ? `<p class="notice small replay-note"><strong>La même séance que ${esc(dateLabel(s.refaiteDate))}</strong>, étape par étape. Elle compte comme une course de plus : ${s.refaiteNote}</p>` : ''}
       <section class="prep-sum">
         <p class="hero-num">${Math.round(total(s.steps) / 60)}<small>min</small></p>
@@ -2557,7 +2577,16 @@ document.addEventListener('click', (e) => {
     replaySession(ds.replay);
   } else if (ds.startplan) {
     const p = planFor(load()).find((x) => x.date === ds.startplan && x.sport === 'course');
-    if (p) openPrepare({ id: `plan-${p.date}`, name: `Palier ${p.level} · ${p.title}`, steps: p.steps, level: p.level });
+    if (p) openPrepare(planSession(p));
+  } else if (ds.palier) {
+    const [choix, key] = ds.palier.split('|');
+    update((d) => { d.settings.palierChoix = { key, choix, at: new Date().toISOString() }; });
+    // Avant de partir : la séance (et donc le minuteur) suit le palier choisi.
+    if (current === 'prepare' && prep?.session.id?.startsWith('plan-')) {
+      const p = planFor(load()).find((x) => `plan-${x.date}` === prep.session.id && x.sport === 'course');
+      if (p) prep.session = planSession(p);
+    }
+    render();
   } else if (ds.edit) {
     editing = structuredClone(findSession(ds.edit));
     go('edit');

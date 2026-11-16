@@ -231,3 +231,24 @@ test('décalage annulé par retour au jour d’origine, et oublié une fois la s
   const plan = upcoming([{ sport: 'muscu', date: from, exercices: [] }], settings, from, 14, Q_FRERE);
   assert.notEqual(plan.find((p) => p.date === '2026-11-04')?.sport, 'muscu');
 });
+
+test('baisse de palier : proposée, maintenue ou acceptée selon la réponse', () => {
+  const sick = { id: 'r1', sport: 'course', date: '2026-11-14T09:00:00', level: 2, douleur: 'ventre', difficulte: 3 };
+  const r = nextRunLevel([sick], { maxLevel: 18 });
+  assert.equal(r.level, 1);
+  assert.deepEqual([r.ask.key, r.ask.from, r.ask.to, r.ask.choix], ['r1', 2, 1, null]);
+  const keep = nextRunLevel([sick], { maxLevel: 18, palierChoix: { key: 'r1', choix: 'maintenir' } });
+  assert.equal(keep.level, 2);
+  assert.equal(keep.ask.choix, 'maintenir');
+  assert.equal(nextRunLevel([sick], { maxLevel: 18, palierChoix: { key: 'r1', choix: 'ok' } }).level, 1);
+  // Réponse donnée pour une autre course : sans effet.
+  assert.equal(nextRunLevel([sick], { maxLevel: 18, palierChoix: { key: 'autre', choix: 'maintenir' } }).level, 1);
+  // Au palier 1 : rien à demander.
+  assert.equal(nextRunLevel([{ ...sick, level: 1 }], { maxLevel: 18 }).ask, undefined);
+  // Le programme suit le choix : la prochaine course est au palier maintenu, et seule elle porte la question.
+  const plan = upcoming([sick], { palierChoix: { key: 'r1', choix: 'maintenir' } }, '2026-11-16', 14);
+  const courses = plan.filter((x) => x.sport === 'course');
+  assert.equal(courses[0].level, 2);
+  assert.equal(courses[0].ask.choix, 'maintenir');
+  assert.equal(courses[1].ask, undefined);
+});
