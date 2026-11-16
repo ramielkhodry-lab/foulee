@@ -80,6 +80,7 @@ export function planOptions(q, settings = {}) {
     joursCourse: sports.includes('course') ? (q?.joursCourse ?? settings.joursCourse ?? [1, 5]) : [],
     joursNatation: sports.includes('natation') ? (q?.joursNatation ?? settings.joursNatation ?? [3]) : [],
     joursMuscu: sports.includes('muscu') ? (q?.joursMuscu ?? []) : [],
+    palierChoix: settings.palierChoix || null,
   };
 }
 
@@ -152,7 +153,15 @@ export function nextRunLevel(history, opts = {}) {
   const last = runs.at(-1);
   const incomplete = unfinished(last);
   if (hasPain(last) || last.difficulte === 5) {
-    return { level: Math.min(max, Math.max(1, last.level - 1)), reason: `Ta dernière course était ${hasPain(last) ? 'douloureuse' : 'très dure'} : on redescend d'un palier.` };
+    const down = Math.min(max, Math.max(1, last.level - 1));
+    const why = hasPain(last) ? `douleur notée (${last.douleur.trim()})` : 'séance notée très dure';
+    if (down >= last.level) return { level: down, reason: `Ta dernière course était ${hasPain(last) ? 'douloureuse' : 'très dure'} : on garde ce palier.` };
+    // Une baisse n'est jamais imposée : la séance du jour demande « OK ou maintenir ? »
+    // (réponse dans settings.palierChoix, liée à cette course précise).
+    const ask = { key: String(last.id || last.date), from: last.level, to: down, why };
+    const c = opts.palierChoix?.key === ask.key ? opts.palierChoix.choix : null;
+    if (c === 'maintenir') return { level: Math.min(max, last.level), reason: `Tu as choisi de maintenir le palier ${last.level} malgré la ${why}.`, ask: { ...ask, choix: c } };
+    return { level: down, reason: `Ta dernière course était ${hasPain(last) ? 'douloureuse' : 'très dure'} : on redescend d'un palier.`, ask: { ...ask, choix: c } };
   }
   if (last.difficulte === 4 || incomplete) {
     return { level: Math.min(max, last.level), reason: incomplete ? "Tu n'as pas fini la dernière séance : on refait le même palier." : 'Dernière course dure : on consolide le même palier.' };
@@ -317,7 +326,7 @@ export function upcoming(history, settings, from, days = 14, q = null) {
         out.push({ date, sport: 'repos', reason: 'Course prévue décalée : il faut un jour de repos entre deux courses.' });
       } else {
         const lvl = LEVELS[level - 1];
-        out.push({ date, sport: 'course', level, max: opts.maxLevel, title: lvl.label, steps: levelSteps(level), reason: moveNote(date, 'course', takeNote('course', reason)), ...takeTips('course'), ...movedTag(date, 'course') });
+        out.push({ date, sport: 'course', level, max: opts.maxLevel, title: lvl.label, steps: levelSteps(level), reason: moveNote(date, 'course', takeNote('course', reason)), ...takeTips('course'), ...movedTag(date, 'course'), ...(run.ask && !out.some((x) => x.sport === 'course') ? { ask: run.ask } : {}) });
         runPlaced = date;
         // Hypothèse pour les séances suivantes : la séance se passe bien (difficulté 3).
         reason = 'Prévu si la séance précédente se passe bien. Recalculé après ton bilan.';
