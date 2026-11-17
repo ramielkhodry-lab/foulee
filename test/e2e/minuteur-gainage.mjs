@@ -74,6 +74,7 @@ for (const [name, dev] of Object.entries(devices)) {
   await page.screenshot({ path: `${out}/${name}-5-recup-auto.png` });
   // Série 2 : arrêt à la main à 38 s.
   await page.click('[data-mrestskip]');
+  await page.clock.runFor(3500); // « Reprendre dans 3 s »
   await page.click('[data-mholdgo]');
   await page.clock.runFor(3000 + 38_300);
   await page.click('[data-mholdstop]');
