@@ -339,7 +339,7 @@ export function upcoming(history, settings, from, days = 14, q = null) {
       swimLongueurs = Math.min(opts.maxLongueurs, swimLongueurs + 2);
       swimReason = 'Prévu si la séance précédente se passe bien. Recalculé après ton bilan.';
     } else if (isDay('muscu', joursMuscu, date, wd)) {
-      const m = muscuPlan(seance, history, q || {}, settings.muscuChoix || {});
+      const m = muscuPlan(seance, history, q || {}, settings.muscuChoix || {}, settings.materiel);
       out.push({ date, sport: 'muscu', ...m, reason: moveNote(date, 'muscu', takeNote('muscu', firstMuscu.reason ?? m.reason)), ...takeTips('muscu'), ...movedTag(date, 'muscu') });
       firstMuscu.reason = 'Charges recalculées après chaque séance notée.';
       seance = followingSeance(seance, joursMuscu.length);
