@@ -663,6 +663,10 @@ body.flash-muscu { animation: flash-muscu 1.5s ease-out; }
 .mprep-ex > b { display: block; margin-bottom: 2px; }
 .mprep-ex > span { display: block; }
 .mprep-alt { display: block; margin-top: 10px; }
+.mprep-mat { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin: 0 0 12px; }
+.mprep-mat span { font-size: 13px; color: var(--muted); }
+.mprep-mat button { padding: 8px 14px; border-radius: 999px; border: 1px solid var(--line, #333); background: transparent; color: inherit; font: inherit; font-size: 14px; }
+.mprep-mat button.on { border-color: var(--muscu, #FF7A1A); color: var(--muscu, #FF7A1A); font-weight: 600; }
 .mprep-alt span { display: block; font-size: 13px; color: var(--muted); margin-bottom: 4px; }
 .mprep-alt select, .mlive .mswap { width: 100%; max-width: 100%; }
 .mlive .mswap { margin: 10px 0 0; }

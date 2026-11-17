@@ -64,3 +64,31 @@ test('maison sans matériel : jamais de tractions, une alternative pour chaque m
   assert.ok(!alternatives('dos', 'halteres').some((e) => e.id === 'tractions'));
   assert.ok(alternatives('dos', 'salle').some((e) => e.id === 'tractions'));
 });
+
+test('matériel en plus : alternatives en plus, programme par défaut inchangé', async () => {
+  const { alternatives, slotExercise, muscuPlan, nextLoad, GOALS_MUSCU, byId } = await import('../public/js/muscu.js');
+  const base = alternatives('biceps', 'corps').map((e) => e.id);
+  assert.deepEqual(base, ['curl-serviette']);
+  const plus = alternatives('biceps', 'corps', ['halteres', 'elastique']).map((e) => e.id);
+  for (const id of ['curl-serviette', 'curl-h', 'curl-marteau', 'curl-elastique']) assert.ok(plus.includes(id), id);
+  assert.ok(!plus.includes('curl-poulie'));
+  // Défaut inchangé
+  assert.equal(slotExercise('B', 4, 'corps', {}, ['halteres']).id, 'curl-serviette');
+  // Choix gardé s'il est faisable, sinon retour au défaut
+  assert.equal(slotExercise('B', 4, 'corps', { 'B:4': 'curl-marteau' }, ['halteres']).id, 'curl-marteau');
+  assert.equal(slotExercise('B', 4, 'corps', { 'B:4': 'curl-marteau' }, []).id, 'curl-serviette');
+  assert.equal(slotExercise('B', 4, 'corps', { 'B:4': 'curl-marteau' }).id, 'curl-serviette');
+  const p = muscuPlan('B', [], { lieu: 'corps', objectifMuscu: 'tonus' }, { 'B:4': 'curl-elastique' }, ['elastique']);
+  assert.equal(p.exercices.find((x) => x.slot === 4).id, 'curl-elastique');
+  // Chaque muscle a au moins 2 choix avec haltères + élastiques à la maison
+  for (const m of ['pectoraux', 'dos', 'épaules', 'quadriceps', 'ischios et fessiers', 'mollets', 'biceps', 'triceps']) {
+    assert.ok(alternatives(m, 'corps', ['halteres', 'elastique']).length >= 2, m);
+  }
+  // Élastique : pas de kg, progression par élastique plus dur
+  const ex = byId('curl-elastique');
+  const goal = GOALS_MUSCU.tonus;
+  const h = [{ sport: 'muscu', date: '2026-11-10', exercices: [{ id: 'curl-elastique', reps: [15, 15], min: 12, max: 15 }] }];
+  const n = nextLoad(ex, h, goal);
+  assert.equal(n.poids, null);
+  assert.match(n.reason, /élastique plus dur/);
+});

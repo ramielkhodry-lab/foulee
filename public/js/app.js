@@ -8,7 +8,7 @@ import { drawTrace } from './map.js';
 import { stepTimes, summarize, summarizeMontre, montreStale, MONTRE_V, mergeDistance, recovery, recoveryAt, zoneLimits, zoneOf, zoneTimes, cardioLine, curveSvg, windowOf, swimWindow, dayRange, applySwim } from './cardio.js';
 import { iaInput, pendingIA, failedIA, failureMessage } from './ia.js';
 import { tipsOf, tipsSource, hasIA } from './conseils.js';
-import { GOALS_MUSCU, LIEUX, NIVEAUX_MUSCU, MUSCLES, alternatives, byId, muscuPlan, nextSeance, nextLoad, tonnage } from './muscu.js';
+import { GOALS_MUSCU, LIEUX, MATERIEL_PLUS, NIVEAUX_MUSCU, MUSCLES, alternatives, byId, muscuPlan, nextSeance, nextLoad, sansCharge, tonnage } from './muscu.js';
 import { createGuided, currentExercise, suggestedReps, setDone, skipExercise, restLeft, adjustRest, endRest, finish, elapsedSec as guidedElapsed, setsDone, setsTotal, restTrack, startCountdown, countLeft, endCountdown, swapExercise, startHold, cancelHold, stopHold, holdLead, holdElapsed, holdOver, holdTrack } from './muscu-live.js';
 import { replayRun, replayMuscu, canReplay } from './refaire.js';
 import { testSession, isTest } from './test-seance.js';
@@ -72,7 +72,7 @@ const moveLink = (p) => `<button class="day-link" data-move="${esc(p.date)}|${p.
 const shortDayName = (iso) => new Date(`${iso}T12:00`).toLocaleDateString('fr-FR', { weekday: 'long', day: 'numeric' });
 const kgLabel = (kg) => `${String(kg).replace('.', ',')} kg`;
 // « 3 × 8-12 · 40 kg » : la dose d'un exercice prévu.
-const dose = (x) => `${x.series} × ${x.min}–${x.max}${x.unite === 's' ? ' s' : ''}${x.poids ? ` · ${kgLabel(x.poids)}` : x.materiel === 'corps' ? '' : ' · charge à trouver'}`;
+const dose = (x) => `${x.series} × ${x.min}–${x.max}${x.unite === 's' ? ' s' : ''}${x.poids ? ` · ${kgLabel(x.poids)}` : x.materiel === 'corps' ? '' : x.materiel === 'elastique' ? ' · élastique' : ' · charge à trouver'}`;
 const exoList = (p) => `<ol class="exos">${p.exercices.map((x) => `<li><b>${esc(x.nom)}</b><span class="dose">${dose(x)}</span><span class="why">${esc(x.muscle)} · ${esc(x.reason)}</span></li>`).join('')}</ol>`;
 const shortDate = (d) => new Date(`${String(d).slice(0, 10)}T12:00`).toLocaleDateString('fr-FR', { weekday: 'short', day: 'numeric', month: 'short' });
 
@@ -552,14 +552,14 @@ function muscuLibrary(d) {
   }
   const info = (e) => {
     const x = last[e.id];
-    if (!x) return e.materiel === 'corps' ? 'poids du corps' : { machine: 'machine', poulie: 'poulie', barre: 'barre', halteres: 'haltères' }[e.materiel];
+    if (!x) return e.materiel === 'corps' ? 'poids du corps' : { machine: 'machine', poulie: 'poulie', barre: 'barre', halteres: 'haltères', elastique: 'élastique' }[e.materiel];
     return `dernière fois : ${x.poids ? `${kgLabel(x.poids)} × ` : ''}${Math.max(...x.reps)}${x.unite === 's' ? ' s' : ''}`;
   };
   return `
     <h3>Exercices par muscle</h3>
     <p class="muted small">${esc(LIEUX[lieu].label)}. Pour changer un exercice du programme, choisis-en un autre du même muscle quand tu notes ta séance.</p>
     <div class="lib">${MUSCLES.map((m) => {
-      const list = alternatives(m, lieu);
+      const list = alternatives(m, lieu, d.settings.materiel);
       if (!list.length) return '';
       return `<details><summary>${esc(m[0].toUpperCase() + m.slice(1))} <span class="muted small" style="margin-left:auto;margin-right:8px">${list.length}</span></summary><ul>${list.map((e) => `<li>${esc(e.nom)}<span>${esc(info(e))}</span></li>`).join('')}</ul></details>`;
     }).join('')}</div>`;
@@ -1739,15 +1739,16 @@ const screens = {
       ${p.refaite ? `<p class="notice small replay-note"><strong>Les mêmes exercices que ${esc(dateLabel(p.refaiteDate))}.</strong> Charges et objectifs recalculés sur ta dernière fois, comme d'habitude.</p>` : ''}
       <p class="muted" style="margin:0 0 12px">${esc(LIEUX[lieu].label)}${LIEUX[lieu].detail ? ` · ${esc(LIEUX[lieu].detail)}` : ''} · ${p.exercices.length} exercices</p>
       ${besoins.length ? `<div class="notice small"><strong>Il te faut :</strong> ${esc(besoins.join(', '))}.</div>` : ''}
+      <div class="mprep-mat"><span>Tu as aussi :</span>${Object.entries(MATERIEL_PLUS).filter(([m]) => !LIEUX[lieu].materiel.includes(m)).map(([m, l]) => `<button data-mmat="${m}" class="${(d.settings.materiel || []).includes(m) ? 'on' : ''}" aria-pressed="${(d.settings.materiel || []).includes(m)}">${(d.settings.materiel || []).includes(m) ? '✓ ' : ''}${esc(l)}</button>`).join('')}</div>
       <ul class="mprep-list">${p.exercices.map((x) => {
-        const alts = alternatives(x.muscle, lieu);
+        const alts = alternatives(x.muscle, lieu, d.settings.materiel);
         return `<li class="mprep-ex">
           <b>${esc(x.nom)}</b>
           <span class="muted small">${esc(x.muscle)} · ${x.series} séries de ${x.min} à ${x.max}${x.unite === 's' ? ' s' : ' répétitions'}${x.besoin ? ` · il faut ${esc(x.besoin)}` : ''}</span>
           ${alts.length > 1 ? `<label class="mprep-alt"><span>Pas le matériel ou pas envie ? Même muscle :</span><select data-mpswap="${p.seance}:${x.slot}" aria-label="Autre exercice pour ${esc(x.muscle)}">${alts.map((e) => `<option value="${e.id}" ${e.id === x.id ? 'selected' : ''}>${esc(e.nom)}${e.besoin ? ` (${esc(e.besoin)})` : ''}</option>`).join('')}</select></label>` : ''}
         </li>`;
       }).join('')}</ul>
-      <p class="muted small">${p.refaite ? 'Un changement ici vaut pour cette fois seulement.' : 'Ton choix est gardé pour les prochaines séances. Matériel : Profil > questionnaire.'}</p>
+      <p class="muted small">${p.refaite ? 'Un changement ici vaut pour cette fois seulement.' : 'Ton choix est gardé pour les prochaines séances. Coche ton matériel ci-dessus pour avoir plus d\'exercices dans les menus.'}</p>
       <ul class="prep-list">${sound}</ul>
       <div class="prep-go">
         <button class="cta muscu" data-mstart ${a === 'chargement' ? 'disabled' : ''}><span>C'est parti</span><i>›</i></button>
@@ -1824,7 +1825,7 @@ const screens = {
         <p class="muted small" style="margin:4px 0 0">${esc(x.reason || '')}</p>
         ${s.set === 0 && liveAlts(x).length > 1 ? `<select class="mswap" data-mswap aria-label="Autre exercice, même muscle">${liveAlts(x).map((e) => `<option value="${e.id}" ${e.id === x.id ? 'selected' : ''}>${e.id === x.id ? 'Changer d\'exercice (même muscle)…' : esc(e.nom)}</option>`).join('')}</select>` : ''}
         ${x.unite === 's' ? `<div class="live-controls one" style="margin-top:14px"><button class="mgo" data-mholdgo>Lancer le minuteur</button></div><p class="muted small" style="text-align:center;margin:6px 0 0">3 s pour te placer, un signal à ${x.min} s, la fin à ${x.max} s. Ou note tes secondes à la main :</p>` : ''}
-        ${x.materiel === 'corps' ? '' : `<div class="kg mkg"><input id="mkg" type="number" inputmode="decimal" step="0.5" min="0" placeholder="?" value="${x.poids ?? ''}"><span>kg${x.materiel === 'halteres' ? ' par haltère' : ''}</span></div>`}
+        ${sansCharge(x) ? '' : `<div class="kg mkg"><input id="mkg" type="number" inputmode="decimal" step="0.5" min="0" placeholder="?" value="${x.poids ?? ''}"><span>kg${x.materiel === 'halteres' ? ' par haltère' : ''}</span></div>`}
         <div class="mstepper">
           <button data-mreps="-1" aria-label="Une de moins">−</button>
           <b id="mreps">${mDraft.reps}</b>
@@ -2423,7 +2424,7 @@ function newManual(sport) {
     // Séance libre : la prochaine séance du cycle.
     const d = load();
     const q = d.profile.questionnaire || {};
-    const p = muscuPlan(nextSeance(d.history, (q.joursMuscu || []).length), d.history, q, d.settings.muscuChoix || {});
+    const p = muscuPlan(nextSeance(d.history, (q.joursMuscu || []).length), d.history, q, d.settings.muscuChoix || {}, d.settings.materiel);
     return { id: uid(), sport, source: 'manuelle', date: today(), elapsedSec: null, ...muscuLog(p), difficulte: null, fatigue: null, douleur: '', commentaire: '' };
   }
   return {
@@ -2483,8 +2484,8 @@ function muscuForm(b) {
   return `
     <p class="muted small">Note ce que tu as vraiment fait : une série vide = pas faite. La charge de la prochaine séance en dépend.</p>
     ${b.exercices.map((x, i) => {
-      const alts = alternatives(x.muscle, lieu);
-      const body = x.materiel === 'corps';
+      const alts = alternatives(x.muscle, lieu, load().settings.materiel);
+      const body = sansCharge(x);
       return `
       <section class="exo-log">
         <h2>${esc(x.nom)}</h2>
@@ -3061,11 +3062,11 @@ function todayMuscuPlan(d) {
   if (mReplay) return mReplay;
   const q = d.profile.questionnaire || {};
   return planFor(d, 1).find((x) => x.sport === 'muscu' && x.date === today())
-    || muscuPlan(nextSeance(d.history, (q.joursMuscu || []).length), d.history, q, d.settings.muscuChoix || {});
+    || muscuPlan(nextSeance(d.history, (q.joursMuscu || []).length), d.history, q, d.settings.muscuChoix || {}, d.settings.materiel);
 }
 
 // Exercices du même muscle pour le matériel déclaré.
-const liveAlts = (x) => alternatives(x.muscle, load().profile.questionnaire?.lieu || 'salle');
+const liveAlts = (x) => { const d = load(); return alternatives(x.muscle, d.profile.questionnaire?.lieu || 'salle', d.settings.materiel); };
 
 // « Démarrer » : d'abord l'écran « Avant de commencer » (une séance en cours reprend directement).
 let mprepAudio = null;
@@ -3144,6 +3145,15 @@ document.addEventListener('click', (e) => {
     return render();
   }
   if ('mprepback' in ds) { mReplay = null; return go('accueil'); }
+  if (ds.mmat) {
+    // Matériel en plus (haltères, élastiques) : plus d'exercices dans les menus « même muscle ».
+    const m = ds.mmat;
+    update((d) => {
+      const cur = Array.isArray(d.settings.materiel) ? d.settings.materiel : [];
+      d.settings.materiel = cur.includes(m) ? cur.filter((x) => x !== m) : [...cur, m];
+    });
+    return render();
+  }
   if ('msoundretry' in ds) {
     mprepAudio = 'chargement';
     render();

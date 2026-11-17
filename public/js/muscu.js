@@ -3,7 +3,9 @@
 // rien n'est stocké : le programme se recalcule depuis l'historique.
 
 // Matériel : machine et poulie = salle ; barre = salle (ou maison équipée) ;
-// halteres = maison avec haltères ; corps = poids du corps, partout.
+// halteres = maison avec haltères ; elastique = élastiques de résistance (sans charge
+// en kg : on progresse en répétitions puis en passant à l'élastique plus dur) ;
+// corps = poids du corps, partout.
 // pas = la plus petite hausse de charge réaliste (kg).
 // besoin : ce qu'il faut en plus (affiché avant la séance). salle : seulement en salle,
 // même au poids du corps (barre de traction).
@@ -15,10 +17,13 @@ export const EXERCICES = [
   E('dev-couche-h', 'Développé couché haltères', 'pectoraux', 'halteres', 2),
   E('ecarte-poulie', 'Écarté à la poulie', 'pectoraux', 'poulie', 2.5),
   E('pompes', 'Pompes', 'pectoraux', 'corps'),
+  E('pompes-elastique', 'Pompes avec élastique dans le dos (tenu sous les mains)', 'pectoraux', 'elastique'),
 
   E('tirage-vertical', 'Tirage vertical', 'dos', 'machine', 5),
   E('rowing-assis', 'Rowing assis', 'dos', 'machine', 5),
   E('rowing-h', 'Rowing haltère à un bras', 'dos', 'halteres', 2),
+  E('rowing-elastique', 'Rowing à l\'élastique (assis, élastique autour des pieds)', 'dos', 'elastique'),
+  E('ecarte-elastique', 'Écartés à l\'élastique bras tendus (devant la poitrine)', 'dos', 'elastique'),
   E('rowing-barre', 'Rowing à la barre', 'dos', 'barre', 2.5),
   E('superman', 'Superman au sol', 'dos', 'corps'),
   E('ytw', 'Y-T-W allongé sur le ventre (bras en Y, en T, en W)', 'dos', 'corps'),
@@ -28,6 +33,8 @@ export const EXERCICES = [
   E('dev-militaire-h', 'Développé épaules haltères', 'épaules', 'halteres', 2),
   E('elevations', 'Élévations latérales haltères', 'épaules', 'halteres', 1),
   E('face-pull', 'Face pull à la poulie', 'épaules', 'poulie', 2.5),
+  E('elevations-elastique', 'Élévations latérales à l\'élastique (pied dessus)', 'épaules', 'elastique'),
+  E('dev-epaules-elastique', 'Développé épaules à l\'élastique (pieds dessus)', 'épaules', 'elastique'),
   E('pompes-piquees', 'Pompes piquées', 'épaules', 'corps'),
 
   E('presse-cuisses', 'Presse à cuisses', 'quadriceps', 'machine', 10),
@@ -35,25 +42,31 @@ export const EXERCICES = [
   E('squat', 'Squat à la barre', 'quadriceps', 'barre', 2.5),
   E('goblet', 'Goblet squat (haltère contre la poitrine)', 'quadriceps', 'halteres', 2),
   E('fentes-h', 'Fentes haltères', 'quadriceps', 'halteres', 2),
+  E('squat-elastique', 'Squat à l\'élastique (pieds dessus, élastique sur les épaules)', 'quadriceps', 'elastique'),
   E('squat-corps', 'Squat au poids du corps', 'quadriceps', 'corps'),
   E('fentes', 'Fentes au poids du corps', 'quadriceps', 'corps'),
 
   E('leg-curl', 'Leg curl', 'ischios et fessiers', 'machine', 5),
   E('hip-thrust', 'Hip thrust à la barre', 'ischios et fessiers', 'barre', 5),
   E('sdt-jt-h', 'Soulevé de terre jambes tendues haltères', 'ischios et fessiers', 'halteres', 2),
+  E('sdt-elastique', 'Soulevé de terre jambes tendues à l\'élastique (pieds dessus)', 'ischios et fessiers', 'elastique'),
   E('pont-fessier', 'Pont fessier', 'ischios et fessiers', 'corps'),
 
   E('mollets-m', 'Mollets debout à la machine', 'mollets', 'machine', 5),
+  E('mollets-h', 'Mollets sur une marche avec haltère', 'mollets', 'halteres', 2, 'reps', { besoin: 'une marche d\'escalier' }),
   E('mollets-marche', 'Mollets sur une marche', 'mollets', 'corps', 0, 'reps', { besoin: 'une marche d\'escalier' }),
 
   E('curl-pupitre', 'Curl pupitre à la machine', 'biceps', 'machine', 2.5),
   E('curl-h', 'Curl haltères', 'biceps', 'halteres', 1),
+  E('curl-marteau', 'Curl marteau haltères (paumes face à face)', 'biceps', 'halteres', 1),
+  E('curl-elastique', 'Curl à l\'élastique (pieds dessus)', 'biceps', 'elastique'),
   E('curl-poulie', 'Curl à la poulie', 'biceps', 'poulie', 2.5),
   E('curl-serviette', 'Curl isométrique à la serviette (pied dessus, tirer et tenir)', 'biceps', 'corps', 0, 's', { besoin: 'une serviette' }),
 
   E('ext-poulie', 'Extension triceps à la poulie haute', 'triceps', 'poulie', 2.5),
   E('dips-m', 'Dips à la machine', 'triceps', 'machine', 5),
   E('ext-h', 'Extension haltère au-dessus de la tête', 'triceps', 'halteres', 1),
+  E('ext-elastique', 'Extension triceps à l\'élastique au-dessus de la tête (pied dessus)', 'triceps', 'elastique'),
   E('dips-banc', 'Dips sur un banc ou une chaise', 'triceps', 'corps', 0, 'reps', { besoin: 'une chaise stable ou un banc' }),
 
   E('crunch-m', 'Crunch à la machine', 'abdos', 'machine', 5),
@@ -62,6 +75,8 @@ export const EXERCICES = [
 ];
 export const MUSCLES = [...new Set(EXERCICES.map((e) => e.muscle))];
 export const byId = (id) => EXERCICES.find((e) => e.id === id);
+// Sans charge en kg à noter : poids du corps et élastiques.
+export const sansCharge = (x) => x?.materiel === 'corps' || x?.materiel === 'elastique';
 
 // Où l'on s'entraîne → matériel disponible, du plus guidé au plus libre.
 export const LIEUX = {
@@ -69,6 +84,10 @@ export const LIEUX = {
   halteres: { label: 'À la maison avec des haltères', materiel: ['halteres', 'corps'] },
   corps: { label: 'À la maison sans matériel', detail: 'poids du corps', materiel: ['corps'] },
 };
+// Matériel en plus du lieu (réglage settings.materiel, optionnel) : il ajoute des
+// exercices aux menus « même muscle » sans changer les exercices par défaut du programme.
+export const MATERIEL_PLUS = { halteres: 'Haltères', elastique: 'Élastiques' };
+const plus = (extra) => (Array.isArray(extra) ? extra.filter((m) => MATERIEL_PLUS[m]) : []);
 
 // Objectif → séries, fourchette de répétitions, repos.
 export const GOALS_MUSCU = {
@@ -92,17 +111,19 @@ export const SEANCES = {
   L: { titre: 'Bas du corps', slots: [['quadriceps', 0], ['ischios et fessiers', 0], ['quadriceps', 1], ['mollets', 0], ['abdos', 0]] },
 };
 
-// Exercices du muscle faisables avec le matériel du lieu (une barre de traction = salle).
-export const alternatives = (muscle, lieu = 'salle') => {
+// Exercices du muscle faisables avec le matériel du lieu (+ matériel en plus), une barre de traction = salle.
+export const alternatives = (muscle, lieu = 'salle', extra = []) => {
   const l = LIEUX[lieu] ? lieu : 'salle';
-  return EXERCICES.filter((e) => e.muscle === muscle && LIEUX[l].materiel.includes(e.materiel) && (!e.salle || l === 'salle'));
+  const dispo = [...LIEUX[l].materiel, ...plus(extra)];
+  return EXERCICES.filter((e) => e.muscle === muscle && dispo.includes(e.materiel) && (!e.salle || l === 'salle'));
 };
 
-// Exercice d'une case de séance : le choix de la personne s'il existe, sinon le n-ième disponible.
-export function slotExercise(seance, i, lieu = 'salle', choix = {}) {
+// Exercice d'une case de séance : le choix de la personne s'il existe (matériel en plus compris),
+// sinon le n-ième disponible avec le matériel du lieu seul (le programme par défaut ne bouge pas).
+export function slotExercise(seance, i, lieu = 'salle', choix = {}, extra = []) {
   const [muscle, variante] = SEANCES[seance].slots[i];
+  const chosen = alternatives(muscle, lieu, extra).find((e) => e.id === choix[`${seance}:${i}`]);
   const list = alternatives(muscle, lieu);
-  const chosen = list.find((e) => e.id === choix[`${seance}:${i}`]);
   return chosen || list[Math.min(variante, list.length - 1)] || null;
 }
 
@@ -124,9 +145,16 @@ export function nextLoad(ex, history, goal) {
   const unit = ex.unite === 's' ? 's' : 'répétitions';
   if (!last) {
     if (ex.materiel === 'corps') return { poids: null, min, max, reason: `Premier essai : fais ce que tu peux, sans dépasser ${max} ${unit}.` };
+    if (ex.materiel === 'elastique') return { poids: null, min, max, reason: `Premier essai : prends l'élastique avec lequel tu fais ${max} ${unit} en gardant 2 en réserve.` };
     return { poids: null, min, max, reason: `Premier essai : prends une charge que tu peux soulever ${max} fois en gardant 2 répétitions en réserve.` };
   }
   const done = last.reps.map((r) => Number(r) || 0); // série non faite = 0
+  if (ex.materiel === 'elastique') {
+    // Pas de kg : tout au haut de la fourchette → élastique plus dur, même fourchette.
+    if (done.every((r) => r >= max)) return { poids: null, min, max, reason: `Toutes tes séries à ${max} ${unit} la dernière fois : passe à l'élastique plus dur.` };
+    if (done.some((r) => r < min)) return { poids: null, min, max, reason: `Moins de ${min} ${unit} sur une série : garde le même élastique.` };
+    return { poids: null, min, max, reason: `Même élastique : vise ${max} ${unit} sur chaque série.` };
+  }
   if (ex.materiel === 'corps') {
     // On repart de la fourchette visée la dernière fois.
     const lmin = last.min || min;
@@ -159,13 +187,13 @@ export function followingSeance(seance, joursParSemaine) {
 }
 
 // Détail d'une séance de musculation pour ce profil.
-export function muscuPlan(seance, history, q = {}, choix = {}) {
+export function muscuPlan(seance, history, q = {}, choix = {}, extra = []) {
   const goal = GOALS_MUSCU[q.objectifMuscu] || GOALS_MUSCU.muscle;
   const lieu = LIEUX[q.lieu] ? q.lieu : 'salle';
   const adapting = q.niveauMuscu !== 'regulier' && muscuSessions(history).length < ADAPTATION;
   const series = Math.max(2, goal.series - (adapting ? 1 : 0));
   const exercices = SEANCES[seance].slots.map((_, i) => {
-    const ex = slotExercise(seance, i, lieu, choix);
+    const ex = slotExercise(seance, i, lieu, choix, extra);
     if (!ex) return null;
     return { slot: i, ...ex, series, ...nextLoad(ex, history, goal) };
   }).filter(Boolean);
