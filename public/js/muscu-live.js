@@ -85,6 +85,7 @@ export function setDone(s, reps, now = Date.now()) {
   x.reps[s.set] = Math.max(1, Math.round(Number(reps) || 0));
   if (!advance(s)) return finish(s, now);
   s.phase = 'rest';
+  delete s.restQuick;
   s.restTotal = s.repos;
   s.restEnd = now + s.repos * 1000;
   return s;
@@ -110,6 +111,15 @@ export function adjustRest(s, delta, now = Date.now()) {
 
 export function endRest(s) {
   if (s.phase === 'rest') { s.phase = 'work'; s.restEnd = null; }
+  delete s.restQuick;
+  return s;
+}
+
+// « Reprendre dans 3 s » : la récup est raccourcie à `seconds` (jamais rallongée), avec bips.
+export function quickRest(s, seconds = 3, now = Date.now()) {
+  if (s.phase !== 'rest' || restLeft(s, now) <= seconds) return s;
+  s.restEnd = now + seconds * 1000;
+  s.restQuick = true;
   return s;
 }
 

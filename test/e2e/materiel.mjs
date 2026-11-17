@@ -22,7 +22,7 @@ const base = `http://localhost:${server.address().port}/`;
 // un exercice chargé (case kg) ou à l'élastique (pas de kg), au poids du corps sinon.
 const data = {
   profile: { prenom: 'Rami', questionnaire: { v: 1, answeredAt: 1, sports: ['muscu'], joursMuscu: [2, 6], lieu: 'corps', objectifMuscu: 'tonus', niveauMuscu: 'reprise' } },
-  sessions: [], settings: { son: 'musique', annonces: 'signaux' },
+  sessions: [], settings: { son: 'musique', annonces: 'signaux', cardio: true },
   history: [{ id: 'm1', sport: 'muscu', date: '2026-11-14', seance: 'A', exercices: [{ slot: 0, id: 'squat-corps', reps: [14, 14] }] }],
 };
 const devices = {
@@ -55,8 +55,11 @@ for (const [name, dev] of Object.entries(devices)) {
   await page.screenshot({ path: `${out}/${name}-1-avant.png`, fullPage: true });
   const st = await page.evaluate(() => JSON.parse(localStorage.getItem('foulee.v1')).settings);
   if (st.materiel?.join() !== 'halteres,elastique' || st.muscuChoix['B:4'] !== 'curl-marteau') errors.push(`${name} : réglages ${JSON.stringify(st)}`);
+  if (!/Lance l'activité/.test(await page.textContent('.prep-list'))) errors.push(`${name} : pas de rappel montre`);
   await page.waitForSelector('[data-mstart]:not([disabled])');
   await page.click('[data-mstart]');
+  await page.waitForTimeout(100);
+  if (!(await page.$('.mwatch'))) errors.push(`${name} : pas de rappel montre au décompte`);
   await page.clock.runFor(3500);
   await page.waitForSelector('.mlive[data-phase="work"]');
   await page.clock.runFor(1600);
@@ -86,7 +89,13 @@ for (const [name, dev] of Object.entries(devices)) {
   const left = await page.textContent('#mrest');
   if (left !== '0:50') errors.push(`${name} : récup après pause ${left}`);
   await page.click('[data-mrestskip]');
+  await page.waitForTimeout(100);
+  if (await page.textContent('#mrest') !== '0:03') errors.push(`${name} : reprise sans décompte de 3 s (${await page.textContent('#mrest')})`);
+  await page.screenshot({ path: `${out}/${name}-5-reprise-3s.png` });
+  await page.clock.runFor(3500);
   await page.waitForSelector('.mlive[data-phase="work"]');
+  if (!/Exercice 1\/6 · 1\/12 séries · encore 5 exercices/.test(await page.textContent('.mprog-txt'))) errors.push(`${name} : avancement ${await page.textContent('.mprog-txt')}`);
+  await page.screenshot({ path: `${out}/${name}-6-avancement.png` });
   await page.close();
 }
 await browser.close();

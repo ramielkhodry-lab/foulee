@@ -78,6 +78,7 @@ for (const [name, dev] of Object.entries(devices)) {
   if (!/série 2\/2/i.test(await page.textContent('.mstep'))) errors.push(`${name} : ${await page.textContent('.mstep')}`);
   await page.click('[data-msetdone]');
   await page.click('[data-mrestskip]');
+  await page.clock.runFor(3500); // « Reprendre dans 3 s »
   await page.waitForSelector('.mlive[data-phase="work"]');
   // Reprise après fermeture de l'app
   await page.reload();
@@ -85,7 +86,7 @@ for (const [name, dev] of Object.entries(devices)) {
   if (!/Reprendre/.test(await page.textContent('[data-muscugo]'))) errors.push(`${name} : pas de reprise`);
   await page.click('.hero [data-muscugo], .day-card [data-muscugo]');
   await page.waitForSelector('.mlive');
-  if (!/Exercice 2\/6/.test(await page.textContent('.mstep'))) errors.push(`${name} : reprise ${await page.textContent('.mstep')}`);
+  if (!/Exercice 2\/6/.test(await page.textContent('.mprog-txt'))) errors.push(`${name} : reprise ${await page.textContent('.mprog-txt')}`);
   await page.clock.runFor(30 * 60 * 1000);
   await page.click('[data-mfinish]');
   await page.waitForSelector('[data-savemanual]');

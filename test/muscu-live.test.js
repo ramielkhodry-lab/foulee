@@ -179,3 +179,16 @@ test('pause : chrono, récup et minuteur figés, puis décalés à la reprise', 
   assert.equal(L.elapsedSec(s), 60);
   assert.equal(s.endedAt, 300_000);
 });
+
+test('« Reprendre dans 3 s » : récup raccourcie à 3 s, jamais rallongée', async () => {
+  const L = await import('../public/js/muscu-live.js');
+  const s = L.createGuided({ seance: 'A', sessionName: 'A', repos: 60, exercices: [{ id: 'a', reps: [null, null], min: 8, max: 12 }] }, 0);
+  L.setDone(s, 10, 0);
+  L.quickRest(s, 3, 10_000);
+  assert.equal(L.restLeft(s, 10_000), 3);
+  assert.equal(s.restQuick, true);
+  L.quickRest(s, 3, 11_000); // 2 s restantes : pas rallongée
+  assert.equal(L.restLeft(s, 11_000), 2);
+  L.endRest(s);
+  assert.equal(s.restQuick, undefined);
+});

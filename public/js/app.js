@@ -9,7 +9,7 @@ import { stepTimes, summarize, summarizeMontre, montreStale, MONTRE_V, mergeDist
 import { iaInput, pendingIA, failedIA, failureMessage } from './ia.js';
 import { tipsOf, tipsSource, hasIA } from './conseils.js';
 import { GOALS_MUSCU, LIEUX, MATERIEL_PLUS, NIVEAUX_MUSCU, MUSCLES, alternatives, byId, muscuPlan, nextSeance, nextLoad, sansCharge, tonnage } from './muscu.js';
-import { createGuided, currentExercise, suggestedReps, setDone, skipExercise, restLeft, adjustRest, endRest, finish, elapsedSec as guidedElapsed, setsDone, setsTotal, restTrack, startCountdown, countLeft, endCountdown, swapExercise, startHold, cancelHold, stopHold, holdLead, holdElapsed, holdOver, holdTrack, pause as pauseGuided, resume as resumeGuided } from './muscu-live.js';
+import { createGuided, currentExercise, suggestedReps, setDone, skipExercise, restLeft, adjustRest, endRest, quickRest, finish, elapsedSec as guidedElapsed, setsDone, setsTotal, restTrack, startCountdown, countLeft, endCountdown, swapExercise, startHold, cancelHold, stopHold, holdLead, holdElapsed, holdOver, holdTrack, pause as pauseGuided, resume as resumeGuided } from './muscu-live.js';
 import { replayRun, replayMuscu, canReplay } from './refaire.js';
 import { testSession, isTest } from './test-seance.js';
 import { upcoming, moveOptions, planOptions, nextRunLevel, runLevel, afterBilan, HORIZON, GOALS_RUN, START_RUN, GOALS_SWIM, START_SWIM, LEVELS } from './plan.js';
@@ -1728,6 +1728,7 @@ const screens = {
     const lieu = LIEUX[d.profile.questionnaire?.lieu] ? d.profile.questionnaire.lieu : 'salle';
     const a = mprepAudio;
     const besoins = [...new Set(p.exercices.map((x) => x.besoin).filter(Boolean))];
+    const watch = d.settings.cardio ? '<li class="prep-item wait"><b>⌚ Montre</b><span>Lance l\'activité « Renforcement musculaire » sur ta montre <strong>avant</strong> « C\'est parti », sinon le cardio ne couvre pas toute la séance.</span></li>' : '';
     const sound = a === 'erreur'
       ? '<li class="prep-item ko"><b>✕ Sons non chargés</b><span>Tu peux faire la séance, mais sans signal de fin de récup (le flash reste). Vérifie ta connexion.</span><button class="btn-ghost small-btn" data-msoundretry>Réessayer</button></li>'
       : a !== 'ok'
@@ -1749,7 +1750,7 @@ const screens = {
         </li>`;
       }).join('')}</ul>
       <p class="muted small">${p.refaite ? 'Un changement ici vaut pour cette fois seulement.' : 'Ton choix est gardé pour les prochaines séances. Coche ton matériel ci-dessus pour avoir plus d\'exercices dans les menus.'}</p>
-      <ul class="prep-list">${sound}</ul>
+      <ul class="prep-list">${watch}${sound}</ul>
       <div class="prep-go">
         <button class="cta muscu" data-mstart ${a === 'chargement' ? 'disabled' : ''}><span>C'est parti</span><i>›</i></button>
         <p class="muted small" style="text-align:center;margin:8px 0 0">${a === 'chargement' ? 'Le bouton s\'active quand les sons sont chargés.' : 'Décompte de 3 secondes, puis le premier exercice.'}</p>
@@ -1763,10 +1764,13 @@ const screens = {
     const n = s.exercices.length;
     const x = currentExercise(s);
     const unit = (e) => (e.unite === 's' ? 's' : 'répétitions');
-    const pct = Math.round((setsDone(s) / setsTotal(s)) * 100);
+    // Avancement : un segment par exercice, rempli selon les séries faites ; l'exercice en cours est cerclé.
+    const reste = n - s.ex - 1;
+    const prog = `<div class="mprog" aria-hidden="true">${s.exercices.map((e, i) => `<span class="${i === s.ex ? 'cur' : ''}"><i style="width:${Math.round((e.reps.filter((r) => r > 0).length / e.reps.length) * 100)}%"></i></span>`).join('')}</div>
+        <p class="mprog-txt">Exercice <b>${s.ex + 1}/${n}</b> · ${setsDone(s)}/${setsTotal(s)} séries · ${reste ? `encore ${reste} exercice${reste > 1 ? 's' : ''} après` : 'dernier exercice'}</p>`;
     const head = `
         <div class="live-top"><span>${esc(s.sessionName)}</span><span>${s.pausedAt ? '' : '<button class="mpause" data-mpause aria-label="Mettre en pause">❚❚ Pause</button>'}⏱ <b id="mtime">${mmss(guidedElapsed(s))}</b></span></div>
-        <div class="bar"><div style="width:${pct}%"></div></div>`;
+        ${prog}`;
     const end = '<button data-mfinish>Terminer la séance</button>';
     if (s.pausedAt) {
       // En pause : chrono, récup et minuteur figés, aucun signal.
@@ -1791,6 +1795,7 @@ const screens = {
         <p class="count" id="mcount">${Math.max(1, Math.ceil(countLeft(s)))}</p>
         <p class="next">Premier exercice : <b>${esc(x.nom)}</b></p>
         <p class="muted" style="margin:4px 0 0">${x.min} à ${x.max} ${unit(x)}</p>
+        ${load().settings.cardio ? '<p class="mwatch">⌚ Lance l\'activité sur ta montre maintenant.</p>' : ''}
       </div>`;
     }
     if (s.phase === 'rest') {
@@ -1806,7 +1811,7 @@ const screens = {
           <button data-mrest="15">+15 s</button>
         </div>
         <div class="live-extra">
-          <button class="mgo" data-mrestskip>Reprendre maintenant</button>
+          ${restLeft(s) > 3.5 ? '<button class="mgo" data-mrestskip>Reprendre dans 3 s</button>' : ''}
           ${end}
         </div>
       </div>`;
@@ -1816,7 +1821,7 @@ const screens = {
       const el = Math.floor(holdElapsed(s));
       return `
       <div class="live mlive" id="mlive" data-phase="hold">${head}
-        <p class="mstep">Exercice ${s.ex + 1}/${n} · série ${s.set + 1}/${x.reps.length}</p>
+        <p class="mstep">Série ${s.set + 1}/${x.reps.length}</p>
         <p class="mname">${esc(x.nom)}</p>
         <p class="now" id="mholdnow">${lead > 0 ? 'Mets-toi en place' : el >= s.hold.min ? 'Dans la tranche' : 'Tiens'}</p>
         <p class="count" id="mhold">${lead > 0 ? Math.max(1, Math.ceil(lead)) : el}</p>
@@ -1835,7 +1840,7 @@ const screens = {
     if (mDraft.key !== key) mDraft = { key, reps: suggestedReps(s) };
     return `
       <div class="live mlive" id="mlive" data-phase="work">${head}
-        <p class="mstep">Exercice ${s.ex + 1}/${n} · série ${s.set + 1}/${x.reps.length}</p>
+        <p class="mstep">Série ${s.set + 1}/${x.reps.length}</p>
         <p class="mname">${esc(x.nom)}</p>
         <p class="next">Objectif : ${x.min} à ${x.max} ${unit(x)}</p>
         <p class="muted small" style="margin:4px 0 0">${esc(x.reason || '')}</p>
@@ -2991,7 +2996,7 @@ function playRest() {
     const bytes = guided.hold ? holdTrack(guided, audioAssets.index, audioAssets.pack)
       : guided.phase === 'countdown'
       ? restTrack(countLeft(guided), audioAssets.index, audioAssets.pack, true)
-      : restTrack(restLeft(guided), audioAssets.index, audioAssets.pack);
+      : restTrack(restLeft(guided), audioAssets.index, audioAssets.pack, restLeft(guided) >= 6 || !!guided.restQuick);
     restUrl = URL.createObjectURL(new Blob([bytes], { type: 'audio/mpeg' }));
     applyAudioMode();
     restAudio.src = restUrl;
@@ -3227,10 +3232,11 @@ document.addEventListener('click', (e) => {
     render();
     playRest();
   } else if ('mrestskip' in ds) {
-    endRest(guided);
-    stopRestAudio();
+    // Pas d'enchaînement sec : 3 s de décompte (bips) avant la série.
+    quickRest(guided, 3);
     saveGuided();
     render();
+    playRest();
   } else if ('mskip' in ds) {
     if (!confirm('Passer les séries restantes de cet exercice ?')) return;
     skipExercise(guided);

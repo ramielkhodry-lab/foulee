@@ -664,6 +664,13 @@ body.flash-muscu { animation: flash-muscu 1.5s ease-out; }
 .mprep-ex > span { display: block; }
 .mprep-alt { display: block; margin-top: 10px; }
 .mlive .mpause { margin-right: 10px; padding: 6px 12px; border-radius: 999px; border: 1px solid var(--line); background: var(--surface-2); color: var(--ink); font: inherit; font-size: 14px; font-weight: 600; }
+.mprog { display: flex; gap: 4px; margin: 18px 0 6px; }
+.mprog span { flex: 1; height: 8px; border-radius: 99px; background: var(--surface-2); overflow: hidden; }
+.mprog span.cur { box-shadow: 0 0 0 2px var(--muscu); }
+.mprog i { display: block; height: 100%; background: var(--muscu); }
+.mprog-txt { margin: 0; font-size: 14px; color: var(--muted); }
+.mprog-txt b { color: var(--ink); }
+.mwatch { margin: 16px 0 0; padding: 10px 12px; border-radius: 12px; background: var(--surface-2); font-weight: 700; }
 .mprep-mat { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin: 0 0 12px; }
 .mprep-mat span { font-size: 13px; color: var(--muted); }
 .mprep-mat button { padding: 8px 14px; border-radius: 999px; border: 1px solid var(--line, #333); background: transparent; color: inherit; font: inherit; font-size: 14px; }
