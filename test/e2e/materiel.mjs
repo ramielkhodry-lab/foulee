@@ -71,6 +71,22 @@ for (const [name, dev] of Object.entries(devices)) {
   await page.waitForTimeout(100);
   if (await page.$('#mkg')) errors.push(`${name} : case kg sur élastique`);
   await page.screenshot({ path: `${out}/${name}-3-serie-elastique.png` });
+  // Pause pendant la récup : récup et chrono figés, reprise au même point.
+  await page.click('[data-msetdone]');
+  await page.waitForSelector('.mlive[data-phase="rest"]');
+  await page.clock.runFor(10_000);
+  await page.click('[data-mpause]');
+  await page.waitForSelector('.mlive[data-phase="pause"]');
+  const t1 = await page.textContent('#mtime');
+  await page.clock.runFor(120_000);
+  await page.screenshot({ path: `${out}/${name}-4-pause.png` });
+  if (await page.textContent('#mtime') !== t1) errors.push(`${name} : chrono tourne en pause`);
+  await page.click('[data-mresume]');
+  await page.waitForSelector('.mlive[data-phase="rest"]');
+  const left = await page.textContent('#mrest');
+  if (left !== '0:50') errors.push(`${name} : récup après pause ${left}`);
+  await page.click('[data-mrestskip]');
+  await page.waitForSelector('.mlive[data-phase="work"]');
   await page.close();
 }
 await browser.close();

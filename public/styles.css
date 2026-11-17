@@ -663,6 +663,7 @@ body.flash-muscu { animation: flash-muscu 1.5s ease-out; }
 .mprep-ex > b { display: block; margin-bottom: 2px; }
 .mprep-ex > span { display: block; }
 .mprep-alt { display: block; margin-top: 10px; }
+.mlive .mpause { margin-right: 10px; padding: 6px 12px; border-radius: 999px; border: 1px solid var(--line); background: var(--surface-2); color: var(--ink); font: inherit; font-size: 14px; font-weight: 600; }
 .mprep-mat { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin: 0 0 12px; }
 .mprep-mat span { font-size: 13px; color: var(--muted); }
 .mprep-mat button { padding: 8px 14px; border-radius: 999px; border: 1px solid var(--line, #333); background: transparent; color: inherit; font: inherit; font-size: 14px; }

@@ -26,7 +26,27 @@ export function startCountdown(s, seconds = 3, now = Date.now()) {
   s.startedAt = s.countEnd;
   return s;
 }
-export const countLeft = (s, now = Date.now()) => (s.phase === 'countdown' ? Math.max(0, (s.countEnd - now) / 1000) : 0);
+// Pause : l'heure est figée à pausedAt ; à la reprise, toutes les échéances sont décalées
+// de la durée de la pause (chrono, récup, décompte, minuteur). Champ optionnel : une ancienne
+// version qui relit la séance l'ignore simplement.
+const at = (s, now) => s.pausedAt || now;
+export function pause(s, now = Date.now()) {
+  if (s.phase === 'done' || s.pausedAt) return s;
+  s.pausedAt = now;
+  return s;
+}
+export function resume(s, now = Date.now()) {
+  if (!s.pausedAt) return s;
+  const d = Math.max(0, now - s.pausedAt);
+  s.startedAt += d;
+  if (s.restEnd) s.restEnd += d;
+  if (s.countEnd) s.countEnd += d;
+  if (s.hold) s.hold.start += d;
+  s.pauseSec = (s.pauseSec || 0) + Math.round(d / 1000);
+  delete s.pausedAt;
+  return s;
+}
+export const countLeft = (s, now = Date.now()) => (s.phase === 'countdown' ? Math.max(0, (s.countEnd - at(s, now)) / 1000) : 0);
 export function endCountdown(s) {
   if (s.phase === 'countdown') { s.phase = 'work'; s.countEnd = null; }
   return s;
@@ -77,7 +97,7 @@ export function skipExercise(s, now = Date.now()) {
   return s;
 }
 
-export const restLeft = (s, now = Date.now()) => (s.phase === 'rest' ? Math.max(0, (s.restEnd - now) / 1000) : 0);
+export const restLeft = (s, now = Date.now()) => (s.phase === 'rest' ? Math.max(0, (s.restEnd - at(s, now)) / 1000) : 0);
 
 // ±15 s pendant la récup.
 export function adjustRest(s, delta, now = Date.now()) {
@@ -94,13 +114,14 @@ export function endRest(s) {
 }
 
 export function finish(s, now = Date.now()) {
+  if (s.pausedAt) resume(s, now);
   s.phase = 'done';
   s.restEnd = null;
   s.endedAt = s.endedAt || now;
   return s;
 }
 
-export const elapsedSec = (s, now = Date.now()) => Math.max(0, Math.round(((s.endedAt || now) - s.startedAt) / 1000));
+export const elapsedSec = (s, now = Date.now()) => Math.max(0, Math.round(((s.endedAt || at(s, now)) - s.startedAt) / 1000));
 export const setsDone = (s) => s.exercices.reduce((a, x) => a + x.reps.filter((r) => r > 0).length, 0);
 export const setsTotal = (s) => s.exercices.reduce((a, x) => a + x.reps.length, 0);
 
@@ -150,8 +171,8 @@ export function startHold(s, now = Date.now()) {
   s.hold = { start: now + HOLD_LEAD * 1000, min: x.min, max: x.max };
   return s;
 }
-export const holdLead = (s, now = Date.now()) => (s.hold ? Math.max(0, (s.hold.start - now) / 1000) : 0);
-export const holdElapsed = (s, now = Date.now()) => (s.hold ? Math.max(0, (now - s.hold.start) / 1000) : 0);
+export const holdLead = (s, now = Date.now()) => (s.hold ? Math.max(0, (s.hold.start - at(s, now)) / 1000) : 0);
+export const holdElapsed = (s, now = Date.now()) => (s.hold ? Math.max(0, (at(s, now) - s.hold.start) / 1000) : 0);
 export const isLastSet = (s) => {
   const x = currentExercise(s);
   return !x || (s.set + 1 >= x.reps.length && s.ex + 1 >= s.exercices.length);
@@ -173,7 +194,7 @@ export function stopHold(s, now = Date.now()) {
   if (held <= 0) return s; // arrêté pendant la mise en place : rien de noté
   return setDone(s, held, end);
 }
-export const holdOver = (s, now = Date.now()) => !!s.hold && now >= s.hold.start + s.hold.max * 1000;
+export const holdOver = (s, now = Date.now()) => !!s.hold && !s.pausedAt && now >= s.hold.start + s.hold.max * 1000;
 
 // Piste du minuteur, depuis `now` : départ, minimum, maximum, puis la récup qui suit
 // (rien après la dernière série). Recalculée à la reprise de l'app.
