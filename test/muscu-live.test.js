@@ -160,3 +160,22 @@ test('piste du minuteur : bips de départ, signal au minimum, fin au maximum, pu
   assert.equal(mid[Math.round(5 / fs)], 4);
   assert.equal(mid[0], 0);
 });
+
+test('pause : chrono, récup et minuteur figés, puis décalés à la reprise', async () => {
+  const L = await import('../public/js/muscu-live.js');
+  const s = L.createGuided({ seance: 'A', sessionName: 'A', repos: 60, exercices: [{ id: 'a', reps: [null, null], min: 8, max: 12 }] }, 0);
+  L.setDone(s, 10, 30_000); // récup jusqu'à 90 s
+  L.pause(s, 40_000);
+  assert.equal(L.restLeft(s, 500_000), 50);
+  assert.equal(L.elapsedSec(s, 500_000), 40);
+  L.resume(s, 100_000); // 60 s de pause
+  assert.equal(L.restLeft(s, 100_000), 50);
+  assert.equal(L.elapsedSec(s, 110_000), 50);
+  assert.equal(s.pauseSec, 60);
+  assert.equal(s.pausedAt, undefined);
+  // Fin pendant une pause : la pause ne compte pas dans la durée.
+  L.pause(s, 120_000);
+  L.finish(s, 300_000);
+  assert.equal(L.elapsedSec(s), 60);
+  assert.equal(s.endedAt, 300_000);
+});

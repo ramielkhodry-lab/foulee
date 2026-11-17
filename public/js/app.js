@@ -9,7 +9,7 @@ import { stepTimes, summarize, summarizeMontre, montreStale, MONTRE_V, mergeDist
 import { iaInput, pendingIA, failedIA, failureMessage } from './ia.js';
 import { tipsOf, tipsSource, hasIA } from './conseils.js';
 import { GOALS_MUSCU, LIEUX, MATERIEL_PLUS, NIVEAUX_MUSCU, MUSCLES, alternatives, byId, muscuPlan, nextSeance, nextLoad, sansCharge, tonnage } from './muscu.js';
-import { createGuided, currentExercise, suggestedReps, setDone, skipExercise, restLeft, adjustRest, endRest, finish, elapsedSec as guidedElapsed, setsDone, setsTotal, restTrack, startCountdown, countLeft, endCountdown, swapExercise, startHold, cancelHold, stopHold, holdLead, holdElapsed, holdOver, holdTrack } from './muscu-live.js';
+import { createGuided, currentExercise, suggestedReps, setDone, skipExercise, restLeft, adjustRest, endRest, finish, elapsedSec as guidedElapsed, setsDone, setsTotal, restTrack, startCountdown, countLeft, endCountdown, swapExercise, startHold, cancelHold, stopHold, holdLead, holdElapsed, holdOver, holdTrack, pause as pauseGuided, resume as resumeGuided } from './muscu-live.js';
 import { replayRun, replayMuscu, canReplay } from './refaire.js';
 import { testSession, isTest } from './test-seance.js';
 import { upcoming, moveOptions, planOptions, nextRunLevel, runLevel, afterBilan, HORIZON, GOALS_RUN, START_RUN, GOALS_SWIM, START_SWIM, LEVELS } from './plan.js';
@@ -1765,9 +1765,25 @@ const screens = {
     const unit = (e) => (e.unite === 's' ? 's' : 'répétitions');
     const pct = Math.round((setsDone(s) / setsTotal(s)) * 100);
     const head = `
-        <div class="live-top"><span>${esc(s.sessionName)}</span><span>⏱ <b id="mtime">${mmss(guidedElapsed(s))}</b></span></div>
+        <div class="live-top"><span>${esc(s.sessionName)}</span><span>${s.pausedAt ? '' : '<button class="mpause" data-mpause aria-label="Mettre en pause">❚❚ Pause</button>'}⏱ <b id="mtime">${mmss(guidedElapsed(s))}</b></span></div>
         <div class="bar"><div style="width:${pct}%"></div></div>`;
     const end = '<button data-mfinish>Terminer la séance</button>';
+    if (s.pausedAt) {
+      // En pause : chrono, récup et minuteur figés, aucun signal.
+      return `
+      <div class="live mlive" id="mlive" data-phase="pause">${head}
+        <p class="now">En pause</p>
+        <p class="count">${mmss(s.phase === 'rest' ? Math.ceil(restLeft(s)) : guidedElapsed(s))}</p>
+        <p class="next">${s.phase === 'rest' ? `de récup restante, puis <b>${esc(x.nom)}</b>` : s.phase === 'countdown' ? `Premier exercice : <b>${esc(x.nom)}</b>` : `<b>${esc(x.nom)}</b> · série ${s.set + 1}/${x.reps.length}`}</p>
+        <p class="muted small" style="margin:6px 0 0">Le chrono de la séance est arrêté. Rien n'est perdu, même si tu fermes l'app.</p>
+        <div class="live-controls one">
+          <button class="mgo" data-mresume>Reprendre</button>
+        </div>
+        <div class="live-extra">
+          ${end}
+        </div>
+      </div>`;
+    }
     if (s.phase === 'countdown') {
       return `
       <div class="live mlive" id="mlive" data-phase="countdown">${head}
@@ -2969,7 +2985,7 @@ function stopRestAudio() {
 // et la session audio sont actifs dès le départ, pas seulement à la première récup.
 function playRest() {
   stopRestAudio();
-  if (!guided || (guided.phase !== 'rest' && guided.phase !== 'countdown' && !guided.hold)) return;
+  if (!guided || guided.pausedAt || (guided.phase !== 'rest' && guided.phase !== 'countdown' && !guided.hold)) return;
   if (!audioAssets) { loadAudio().catch(() => {}); return; }
   try {
     const bytes = guided.hold ? holdTrack(guided, audioAssets.index, audioAssets.pack)
@@ -3005,6 +3021,7 @@ function guidedLoop() {
   if (current !== 'muscu' || !guided) return;
   guidedTimer = setInterval(() => {
     if (current !== 'muscu' || !guided) return guidedLoop();
+    if (guided.pausedAt) return;
     const t = document.getElementById('mtime');
     if (t) t.textContent = mmss(guidedElapsed(guided));
     if (guided.phase === 'countdown') {
@@ -3097,7 +3114,7 @@ function startGuided() {
   saveGuided();
   keepAwake();
   go('muscu');
-  if (guided.phase === 'rest' || guided.phase === 'countdown' || guided.hold) playRest();
+  if (!guided.pausedAt && (guided.phase === 'rest' || guided.phase === 'countdown' || guided.hold)) playRest();
 }
 
 function finishGuided() {
@@ -3178,6 +3195,17 @@ document.addEventListener('click', (e) => {
     saveGuided();
     render();
     if (guided.phase === 'rest') playRest(); else stopRestAudio();
+  } else if ('mpause' in ds) {
+    pauseGuided(guided);
+    stopRestAudio();
+    saveGuided();
+    render();
+  } else if ('mresume' in ds) {
+    resumeGuided(guided);
+    saveGuided();
+    render();
+    playRest(); // dans le geste : la piste (récup, décompte, minuteur) est recalculée depuis maintenant
+    keepAwake();
   } else if (ds.mreps) {
     const x = currentExercise(guided);
     const step = x.unite === 's' ? 5 : 1;
