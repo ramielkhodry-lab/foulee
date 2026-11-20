@@ -52,7 +52,7 @@ for (const [name, dev] of [['iphone', 'iPhone 13'], ['android', 'Pixel 7']]) {
   await page.screenshot({ path: `${out}/${name}-1-avant-de-partir.png`, fullPage: true });
   await page.click('[data-ready]');
   await page.waitForSelector('#librebtn');
-  const st = () => page.evaluate(() => ({ now: document.getElementById('now').textContent, stepno: document.getElementById('stepno').textContent, btn: document.getElementById('librebtn').hidden ? null : document.getElementById('librebtn').textContent, count: document.getElementById('count').textContent }));
+  const st = () => page.evaluate(() => ({ now: document.getElementById('now').textContent, stepno: document.getElementById('stepno').textContent, btn: document.getElementById('librebtn').hidden ? null : document.getElementById('librebtn').textContent, count: document.getElementById('count').textContent, next: document.getElementById('next').textContent }));
   const seek = (t) => page.evaluate((x) => { document.getElementById('player').currentTime = x; }, t);
   const pos = () => page.evaluate(() => document.getElementById('player').currentTime);
   await page.waitForTimeout(1500);
@@ -110,6 +110,20 @@ for (const [name, dev] of [['iphone', 'iPhone 13'], ['android', 'Pixel 7']]) {
       log.push({ during });
     }
   }
+  await page.waitForFunction(() => document.getElementById('stepno').textContent === 'Retour au calme', null, { timeout: 8000 });
+  const recup = await st();
+  await page.screenshot({ path: `${out}/${name}-5b-retour-au-calme.png` });
+  await seek((await pos()) + 60);
+  await page.waitForTimeout(500);
+  await page.click('#librebtn'); // « Finir la marche » après ~1 min
+  // Fin du programme : le « + » démarre tout de suite et continue sans à-coup après la fin de la piste.
+  await page.waitForFunction(() => document.getElementById('stepno').textContent === 'Fin', null, { timeout: 8000 });
+  await page.waitForTimeout(1500);
+  const plusA = await st();
+  const elA = await page.textContent('#elapsed');
+  await page.waitForTimeout(9000);
+  const plusB = await st();
+  const elB = await page.textContent('#elapsed');
   await page.waitForSelector('#livedone:not([hidden])', { timeout: 15000 }).catch(async (e) => { console.log(await st(), await pos(), await page.evaluate(() => JSON.parse(localStorage.getItem('foulee.live')).session.steps)); throw e; });
   const fin = await st();
   await page.screenshot({ path: `${out}/${name}-5-fin.png` });
@@ -138,14 +152,20 @@ for (const [name, dev] of [['iphone', 'iPhone 13'], ['android', 'Pixel 7']]) {
     'pas de bouton « Étape suivante »': noSkip,
     'bloc 1 : « Je marche »': b1.btn === 'Je marche' && b1.stepno.startsWith('Bloc 1/5'),
     'bloc 5 : « J\'arrête »': log[4].during.btn?.startsWith('J\'arrête'),
-    'marche : 2 min et bloc suivant annoncé': log[0].walk.stepno === 'Bloc 2/5 · marche 2 min' && /^[12]:\d\d$/.test(log[0].walk.count),
+    'marche : 2 min et bloc suivant annoncé': log[0].walk.stepno === 'Bloc 2/5 · marche 2 min' && /reste [12]:\d\d/.test(log[0].walk.next),
     'séance : 5 courses, 4 marches': session.steps.filter((x) => x.kind === 'course').length === 5 && session.steps.filter((x) => x.kind === 'marche').length === 4,
     'marche coupée par « Je recours »': session.steps.filter((x) => x.kind === 'marche')[3].duration < 60,
     'distance du bloc en grand pendant la course': log.every((x) => /^\d,\d\dkm$/.test(x.during.count)),
     'remise à zéro au départ du bloc': log.slice(0, 4).every((x) => parseFloat(x.restart.replace(',', '.')) <= 0.01 && parseFloat(x.restart.replace(',', '.')) < parseFloat(x.during.count.replace(',', '.')) + 0.001),
-    'bilan : total de la séance + distance en courant': bilanText.includes('Distance totale de la séance') && bilanText.includes('Distance en courant'),
+
+        'retour au calme 5 min après le 5e bloc': recup.btn === 'Finir la marche' && /reste [45]:\d\d/.test(recup.next) && session.steps.at(-1).kind === 'recuperation' && session.steps.at(-1).duration < 120,
+        'temps en plus : démarre tout de suite': /\+0:0[1-3] en plus/.test(plusA.next),
+    'temps en plus : continu après la fin de la piste': /\+0:1[0-3] en plus/.test(plusB.next) && (() => { const sec = (x) => x.split(':').reduce((m, v) => m * 60 + Number(v), 0); return Math.abs(sec(elB) - sec(elA) - 9) <= 1; })(),
         'fin : « Test fini »': fin.now === 'Test fini' || fin.now === 'Programme fini',
-    'bilan : blocs affichés': bilanText.includes('Plus longue course continue') && bilanText.includes('Bloc 5'),
+    'bilan : blocs affichés': bilanText.includes('Plus longue course continue') && bilanText.includes('Course 5'),
+    'bilan : détail segment par segment': ['Échauffement', 'Course 1', 'Marche 1', 'Marche 4', 'Retour au calme', 'Marche en plus', 'En courant', 'En marchant', 'Séance entière'].every((x) => bilanText.includes(x)),
+    'enregistré : 11 segments + marche en plus': h.segments?.length === 12 && h.segments.at(-1).kind === 'plus',
+    'direct : distance du segment aussi en marche': /^\d,\d\dkm$/.test(log[0].walk.count) && /^\d,\d\dkm$/.test(recup.count),
     'enregistrée hors palier': h.libre === true && h.level === null && h.blocsPrevus === 5,
     'blocs : durées justes (+3 s max)': close,
     'plus longue = bloc 2': bilanText.includes('(bloc 2)'),
@@ -154,7 +174,7 @@ for (const [name, dev] of [['iphone', 'iPhone 13'], ['android', 'Pixel 7']]) {
     'palier inchangé': JSON.stringify(afterData.settings.palierChoix ?? null) === JSON.stringify(before.settings.palierChoix ?? null),
     'aucune erreur': errors.length === 0,
   };
-  console.log(name, JSON.stringify({ secs, km: h.blocs?.map((b) => b.km), fin, counts: log.map((x) => [x.during.count, x.restart]) }));
+  console.log(name, JSON.stringify({ secs, km: h.blocs?.map((b) => b.km), fin, counts: log.map((x) => [x.during.count, x.restart]), plus: [plusA.next, plusB.next, elA, elB] }));
   for (const [k, v] of Object.entries(checks)) {
     console.log(`${v ? 'ok ' : 'ÉCHEC'} ${name} : ${k}`);
     if (!v) failures.push(`${name} : ${k}`);

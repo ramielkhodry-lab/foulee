@@ -18,6 +18,7 @@ export const BLOCS = 5;
 export const MARCHE = 120; // 2 min de marche après chaque arrêt, toujours
 export const OPEN = 1200; // durée provisoire d'un bloc de course, rallongée au besoin
 export const WARMUP = 300;
+export const RECUP = 300; // 5 min de marche de retour au calme après le 5e bloc
 const MAX_STEP = 4 * 3600;
 const RALLONGE_SOUS = 300; // s restantes sur l'étape ouverte : on rallonge
 
@@ -47,6 +48,7 @@ export function libreState(session, i) {
   const s = steps[i];
   if (s.kind === 'echauffement') return { phase: 'echauffement', bloc: 1, blocs, action: 'Je commence à courir' };
   const n = runsUpTo(steps, i);
+  if (s.kind === 'recuperation') return { phase: 'recup', bloc: blocs, blocs, action: 'Finir la marche' };
   if (s.kind === 'course') return { phase: 'course', bloc: n, blocs, action: n < blocs ? 'Je marche' : 'J\'arrête : dernier bloc fini' };
   return { phase: 'marche', bloc: n + 1, blocs, action: 'Je recours' };
 }
@@ -63,6 +65,9 @@ export function libreAction(session, i, offset) {
   steps.push({ ...cut, duration: cutAt(offset), libre: true });
   if (st.phase === 'course') {
     if (st.bloc < st.blocs) steps.push({ kind: 'marche', duration: MARCHE }, openRun());
+    else steps.push({ kind: 'recuperation', duration: RECUP }); // retour au calme, puis signal de fin
+  } else if (st.phase === 'recup') {
+    // Retour au calme écourté : la séance s'arrête ici (signal de fin).
   } else {
     steps.push(openRun()); // fin d'échauffement ou reprise avant les 2 min
   }
@@ -140,4 +145,38 @@ export function libreResume(h) {
   b.forEach((x, k) => { if (x.sec > b[best].sec) best = k; });
   const course = b.reduce((a, x) => a + x.sec, 0);
   return { plusLongue: b[best].sec, blocMax: best + 1, pauses: Math.max(0, b.length - 1), courseSec: course, n: b.length };
+}
+
+// Détail segment par segment, dans l'ordre : échauffement, course 1, marche 1, course 2…,
+// retour au calme, puis la marche faite après la fin du programme (jusqu'à « Terminer »).
+// Chaque segment : type, numéro (course n, et la marche qui la suit), durée (s), distance
+// (km, GPS) et précision moyenne (m) si connue. null sans heure des étapes.
+export function libreSegments(steps, stepMs, points, raw = [], finMs = null) {
+  if (!stepMs?.length) return null;
+  const out = [];
+  let n = 0;
+  steps.forEach((s, k) => {
+    const a = stepMs[k];
+    const b = stepMs[k + 1];
+    if (!Number.isFinite(a) || !Number.isFinite(b)) return;
+    if (s.kind === 'course') n++;
+    const acc = accBetween(raw, a, b);
+    out.push({ kind: s.kind, ...(s.kind === 'course' || s.kind === 'marche' ? { n } : {}), sec: s.duration, km: points?.length ? kmBetween(points, a, b) : 0, ...(acc ? { accM: acc } : {}) });
+  });
+  const end = stepMs[steps.length];
+  if (Number.isFinite(end) && finMs && finMs - end >= 5000) {
+    const acc = accBetween(raw, end, finMs);
+    out.push({ kind: 'plus', sec: Math.round((finMs - end) / 1000), km: points?.length ? kmBetween(points, end, finMs) : 0, ...(acc ? { accM: acc } : {}) });
+  }
+  return out;
+}
+
+// Totaux des segments : en courant, en marchant (échauffement, marches, retour au calme et
+// marche en plus), et la séance entière.
+export function segmentTotals(segs) {
+  const r = (x) => Math.round(x * 100) / 100;
+  let course = 0;
+  let marche = 0;
+  for (const g of segs || []) if (g.kind === 'course') course += g.km || 0; else marche += g.km || 0;
+  return { course: r(course), marche: r(marche), seance: r(course + marche) };
 }

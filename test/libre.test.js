@@ -21,8 +21,12 @@ test('déroulé : échauffement, 5 blocs, 4 marches de 2 min, puis fin', () => {
       assert.equal(libreState(s, i + 2).bloc, b + 1);
       i += 2;
     } else {
-      assert.equal(s.steps.length, i + 1, 'plus rien après le 5e bloc');
-      assert.equal(libreState(s, i + 1).phase, 'fin');
+      assert.deepEqual(s.steps[i + 1], { kind: 'recuperation', duration: 300 }, '5 min de retour au calme');
+      assert.equal(libreState(s, i + 1).phase, 'recup');
+      assert.equal(libreState(s, i + 2).phase, 'fin');
+      const court = libreAction(s, i + 1, 90); // retour au calme écourté
+      assert.equal(court.steps.length, i + 2);
+      assert.equal(court.steps.at(-1).duration, 91);
     }
   }
   assert.equal(s.steps.filter((x) => x.kind === 'course').length, 5);
@@ -62,6 +66,7 @@ test('bloc ouvert rallongé seulement près de sa fin', () => {
   let f = libreSession();
   let i = 1;
   for (let b = 1; b <= 5; b++) { f = libreAction(f, i, 60); i += 2; }
+  assert.equal(libreRallonge(f, f.steps.length - 2, 60), null);
   assert.equal(libreRallonge(f, f.steps.length - 1, 60), null);
 });
 
@@ -151,4 +156,25 @@ test('distance en courant : marche exclue', () => {
   assert.ok(Math.abs(r.km - 0.48) < 0.03, String(r.km));
   assert.equal(r.accM, 18); // moyenne des deux courses : ≈ 10 m puis 25 m
   assert.equal(enCourse(steps, null, points), null);
+});
+
+import { libreSegments, segmentTotals } from '../public/js/libre.js';
+
+test('segments : échauffement, courses, marches, retour au calme, marche en plus', () => {
+  const steps = [{ kind: 'echauffement', duration: 300 }, { kind: 'course', duration: 100 }, { kind: 'marche', duration: 120 }, { kind: 'course', duration: 80 }, { kind: 'recuperation', duration: 300 }];
+  const t0 = 1e12;
+  const stepMs = [t0];
+  for (const s of steps) stepMs.push(stepMs.at(-1) + s.duration * 1000);
+  const finMs = stepMs.at(-1) + 60000;
+  const points = [];
+  for (let k = 0; k <= (finMs - t0) / 10000; k++) points.push([48 + (k * 10) / 111195, 2, t0 + k * 10000]); // 1 m/s
+  const segs = libreSegments(steps, stepMs, points, [], finMs);
+  assert.deepEqual(segs.map((g) => [g.kind, g.n, g.sec]), [['echauffement', undefined, 300], ['course', 1, 100], ['marche', 1, 120], ['course', 2, 80], ['recuperation', undefined, 300], ['plus', undefined, 60]]);
+  const tot = segmentTotals(segs);
+  assert.ok(Math.abs(tot.course - 0.18) < 0.01, String(tot.course));
+  assert.ok(Math.abs(tot.marche - 0.78) < 0.01, String(tot.marche));
+  assert.equal(tot.seance, Math.round((tot.course + tot.marche) * 100) / 100);
+  assert.equal(libreSegments(steps, null, points), null);
+  // Terminer juste à la fin : pas de « marche en plus ».
+  assert.equal(libreSegments(steps, stepMs, points, [], stepMs.at(-1) + 2000).at(-1).kind, 'recuperation');
 });
