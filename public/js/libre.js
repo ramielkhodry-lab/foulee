@@ -146,3 +146,37 @@ export function libreResume(h) {
   const course = b.reduce((a, x) => a + x.sec, 0);
   return { plusLongue: b[best].sec, blocMax: best + 1, pauses: Math.max(0, b.length - 1), courseSec: course, n: b.length };
 }
+
+// Détail segment par segment, dans l'ordre : échauffement, course 1, marche 1, course 2…,
+// retour au calme, puis la marche faite après la fin du programme (jusqu'à « Terminer »).
+// Chaque segment : type, numéro (course n, et la marche qui la suit), durée (s), distance
+// (km, GPS) et précision moyenne (m) si connue. null sans heure des étapes.
+export function libreSegments(steps, stepMs, points, raw = [], finMs = null) {
+  if (!stepMs?.length) return null;
+  const out = [];
+  let n = 0;
+  steps.forEach((s, k) => {
+    const a = stepMs[k];
+    const b = stepMs[k + 1];
+    if (!Number.isFinite(a) || !Number.isFinite(b)) return;
+    if (s.kind === 'course') n++;
+    const acc = accBetween(raw, a, b);
+    out.push({ kind: s.kind, ...(s.kind === 'course' || s.kind === 'marche' ? { n } : {}), sec: s.duration, km: points?.length ? kmBetween(points, a, b) : 0, ...(acc ? { accM: acc } : {}) });
+  });
+  const end = stepMs[steps.length];
+  if (Number.isFinite(end) && finMs && finMs - end >= 5000) {
+    const acc = accBetween(raw, end, finMs);
+    out.push({ kind: 'plus', sec: Math.round((finMs - end) / 1000), km: points?.length ? kmBetween(points, end, finMs) : 0, ...(acc ? { accM: acc } : {}) });
+  }
+  return out;
+}
+
+// Totaux des segments : en courant, en marchant (échauffement, marches, retour au calme et
+// marche en plus), et la séance entière.
+export function segmentTotals(segs) {
+  const r = (x) => Math.round(x * 100) / 100;
+  let course = 0;
+  let marche = 0;
+  for (const g of segs || []) if (g.kind === 'course') course += g.km || 0; else marche += g.km || 0;
+  return { course: r(course), marche: r(marche), seance: r(course + marche) };
+}

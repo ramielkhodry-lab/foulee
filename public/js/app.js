@@ -12,7 +12,7 @@ import { GOALS_MUSCU, LIEUX, MATERIEL_PLUS, NIVEAUX_MUSCU, MUSCLES, alternatives
 import { createGuided, currentExercise, suggestedReps, setDone, skipExercise, restLeft, adjustRest, endRest, quickRest, finish, elapsedSec as guidedElapsed, setsDone, setsTotal, restTrack, startCountdown, countLeft, endCountdown, swapExercise, startHold, cancelHold, stopHold, holdLead, holdElapsed, holdOver, holdTrack, pause as pauseGuided, resume as resumeGuided } from './muscu-live.js';
 import { replayRun, replayMuscu, canReplay } from './refaire.js';
 import { testSession, isTest } from './test-seance.js';
-import { libreSession, isLibre, libreState, libreAction, libreRallonge, libreDone, libreBlocs, libreResume, enCourse, GPS_FLOU } from './libre.js';
+import { libreSession, isLibre, libreState, libreAction, libreRallonge, libreDone, libreBlocs, libreResume, enCourse, GPS_FLOU, libreSegments, segmentTotals } from './libre.js';
 import { upcoming, moveOptions, planOptions, nextRunLevel, runLevel, afterBilan, palierDesTests, HORIZON, GOALS_RUN, START_RUN, GOALS_SWIM, START_SWIM, LEVELS } from './plan.js';
 
 const app = document.getElementById('app');
@@ -444,6 +444,30 @@ function palierTestBlock(h) {
     <button class="btn-dark" data-setpalier="${t.level}|${esc(h.id)}" style="width:100%;margin-top:8px">Passer au palier ${t.level}</button></div>`;
 }
 
+// Détail du test segment par segment, puis les totaux en courant, en marchant et de la séance.
+const SEG_LABEL = { echauffement: () => 'Échauffement', course: (g) => `Course ${g.n}`, marche: (g) => `Marche ${g.n}`, recuperation: () => 'Retour au calme', plus: () => 'Marche en plus' };
+function segmentsTable(h, r, mk) {
+  const segs = h.segments.map((g) => (g.kind === 'course' && mk?.[g.n - 1] != null ? { ...g, km: mk[g.n - 1], montre: true } : g));
+  // Séance entière = la distance de la séance (tout le tracé, ou la montre / ta correction) ;
+  // en marchant = le reste. Ainsi les trois chiffres s'additionnent toujours.
+  const seg = segmentTotals(segs);
+  const seance = h.distanceKm || seg.seance;
+  const tot = { course: seg.course, marche: Math.max(0, Math.round((seance - seg.course) * 100) / 100), seance };
+  const flou = segs.some((g) => !g.montre && g.accM > GPS_FLOU);
+  return `<ol class="steps libre-list segs">${segs.map((g) => {
+    const best = g.kind === 'course' && g.n === r.blocMax;
+    const approx = !g.montre && g.accM > GPS_FLOU ? '≈ ' : '';
+    return `<li class="seg-${g.kind}${best ? ' best' : ''}"><span>${(SEG_LABEL[g.kind] || (() => g.kind))(g)}</span><span class="small"><b>${mmss(g.sec)}</b> · ${approx}${kmFr(g.km || 0)} km${g.kind === 'course' && g.km >= 0.1 ? ` · ${allure(g.sec / g.km)}` : ''}</span></li>`;
+  }).join('')}</ol>
+    <ul class="seg-totals">
+      <li><span>En courant</span><b>${kmFr(tot.course)} km</b></li>
+      <li><span>En marchant</span><b>${kmFr(tot.marche)} km</b></li>
+      <li class="all"><span>Séance entière</span><b>${kmFr(tot.seance)} km</b></li>
+    </ul>
+    <p class="muted small" style="margin:0">${mk ? 'Courses : distance de ta montre.' : 'Distances du GPS du téléphone.'} « En marchant » = séance entière moins les courses (échauffement, marches, retour au calme, marche en plus).${h.distanceSource === 'manuelle' ? ' Séance corrigée à la main.' : h.distanceSource && h.distanceSource !== 'gps' ? ' Séance entière : distance de ta montre.' : ''}</p>
+    ${flou ? '<p class="alert small gps-flou">GPS imprécis sur les segments marqués ≈ : distances à prendre avec prudence.</p>' : ''}`;
+}
+
 // Test « 5 courses au max » : chaque bloc de course, la plus longue, les pauses.
 function libreBlock(h) {
   const r = libreResume(h);
@@ -453,13 +477,13 @@ function libreBlock(h) {
   const total = mk ? mk.reduce((a, x) => a + x, 0) : h.blocs.reduce((a, x) => a + (x.km || 0), 0);
   return `<div class="libre-sum">
     <p class="small" style="margin:0">Plus longue course continue : <b>${mmss(r.plusLongue)}</b> (bloc ${r.blocMax}) · ${r.n} bloc${r.n > 1 ? 's' : ''} sur ${h.blocsPrevus || 5} · ${r.pauses} pause${r.pauses > 1 ? 's' : ''} marchée${r.pauses > 1 ? 's' : ''} · ${mmss(r.courseSec)} de course en tout</p>
-    <ol class="steps libre-list">${h.blocs.map((x, k) => {
+    ${h.segments?.length ? segmentsTable(h, r, mk) : `<ol class="steps libre-list">${h.blocs.map((x, k) => {
       const km = mk?.[k] ?? x.km;
       const flou = !mk && x.accM > GPS_FLOU;
       return `<li class="${k + 1 === r.blocMax ? 'best' : ''}"><span>Bloc ${k + 1}</span><span class="small"><b>${mmss(x.sec)}</b>${km ? ` · ${flou ? '≈ ' : ''}${kmFr(km)} km` : ''}${km >= 0.1 && x.sec ? ` · ${allure(x.sec / km)}` : ''}</span></li>`;
     }).join('')}</ol>
-    ${total >= 0.01 ? `<p class="small" style="margin:0">Distance en courant : <b>${kmFr(Math.round(total * 100) / 100)} km</b> <span class="muted">(${mk ? 'montre' : 'GPS'}, somme des blocs, marche exclue)</span></p>` : ''}
-    ${totalSeance}
+    ${total >= 0.01 ? `<p class="small" style="margin:0">Distance en courant : <b>${kmFr(Math.round(total * 100) / 100)} km</b> <span class="muted">(${mk ? 'montre' : 'GPS'}, somme des blocs, marche exclue)</span></p>` : ''}`}
+    ${h.segments?.length ? '' : totalSeance}
     ${!mk && h.blocs.some((x) => x.accM > GPS_FLOU) ? `<p class="alert small gps-flou">GPS imprécis sur les blocs marqués ≈ (±${Math.max(...h.blocs.map((x) => x.accM || 0))} m au pire) : distances à prendre avec prudence.</p>` : ''}
     <p class="muted small" style="margin:6px 0 0">Test hors programme : il ne change pas ton palier tout seul.</p>
     ${palierTestBlock(h)}</div>`;
@@ -1350,7 +1374,7 @@ audio.addEventListener('timeupdate', () => {
 // (fin de la marche, retour) jusqu'à l'appui sur « Terminer ».
 audio.addEventListener('ended', () => {
   if (!live || live.done || live.overAt) return;
-  live.overBase ??= Math.max(0, live.maxTime - live.track.starts[0]);
+  live.overBase ??= Math.max(0, Math.max(live.maxTime, audio.currentTime || 0) - live.track.starts[0]);
   live.overAt = Date.now();
   saveLive();
   if (current === 'live') render();
@@ -1402,27 +1426,32 @@ function tickLibre(i, t) {
   const el = (id) => document.getElementById(id);
   const st = libreState(live.session, i);
   const since = i >= 0 && i < steps.length ? t - starts[i] : 0;
-  if (st.phase === 'echauffement') {
-    el('next').innerHTML = `<span class="muted">Ensuite</span> Bloc 1/${st.blocs} : cours le plus longtemps possible`;
-  } else if (st.phase === 'course') {
-    // Chiffre dominant : la distance du bloc, remise à zéro à chaque départ de bloc. Le temps
-    // du bloc est dans sa pastille, la distance de toute la séance en bas (km).
-    // Heure de départ du bloc : notée à sa première image (une pause ne la décale pas).
-    if (live.blocKm?.i !== i) live.blocKm = { i, t0: Date.now() - since * 1000, n: -1, km: 0 };
-    if (live.blocKm.n !== live.gps.points.length) {
-      live.blocKm.n = live.gps.points.length;
-      live.blocKm.km = metersSince(live.gps, live.blocKm.t0) / 1000;
+  const left = i >= 0 && i < steps.length ? Math.max(0, starts[i] + steps[i].duration - t) : 0;
+  // Chiffre dominant : la distance du segment en cours (échauffement, bloc, marche, retour au
+  // calme, marche en plus), remise à zéro à chaque changement. Le temps passe sur la ligne du
+  // dessous, la distance de toute la séance en bas (km séance).
+  if (st.phase !== 'intro') {
+    // Heure de départ du segment : notée à sa première image (une pause ne la décale pas).
+    if (live.segKm?.i !== i) live.segKm = { i, t0: Date.now() - since * 1000, n: -1, km: 0 };
+    if (live.segKm.n !== live.gps.points.length) {
+      live.segKm.n = live.gps.points.length;
+      live.segKm.km = metersSince(live.gps, live.segKm.t0) / 1000;
     }
-    el('count').innerHTML = `${live.blocKm.km.toLocaleString('fr-FR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}<small>km</small>`;
-    el('next').innerHTML = `<span class="muted">Bloc ${st.bloc} · ${mmss(since)} ·</span> ${st.bloc < st.blocs ? 'dès que tu t\'arrêtes, touche « Je marche »' : 'dernier bloc : touche quand tu t\'arrêtes'}`;
+    el('count').innerHTML = `${live.segKm.km.toLocaleString('fr-FR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}<small>km</small>`;
+  }
+  const m = (txt) => `<span class="muted">${txt}</span>`;
+  if (st.phase === 'echauffement') {
+    el('next').innerHTML = `${m(`Échauffement · reste ${mmss(left)} ·`)} ensuite bloc 1/${st.blocs}, le plus longtemps possible`;
+  } else if (st.phase === 'course') {
+    el('next').innerHTML = `${m(`Bloc ${st.bloc} · ${mmss(since)} ·`)} ${st.bloc < st.blocs ? 'dès que tu t\'arrêtes, touche « Je marche »' : 'dernier bloc : touche quand tu t\'arrêtes'}`;
   } else if (st.phase === 'marche') {
-    el('next').innerHTML = `<span class="muted">Ensuite</span> Bloc ${st.bloc}/${st.blocs}, au signal`;
+    el('next').innerHTML = `${m(`Marche · reste ${mmss(left)} ·`)} ensuite bloc ${st.bloc}/${st.blocs}, au signal`;
   } else if (st.phase === 'recup') {
     el('now').textContent = 'Marche';
-    el('next').innerHTML = '<span class="muted">Retour au calme ·</span> 5 min, puis le signal de fin';
+    el('next').innerHTML = `${m(`Retour au calme · reste ${mmss(left)} ·`)} puis le signal de fin`;
   } else if (st.phase === 'fin') {
     el('now').textContent = 'Test fini';
-    el('next').textContent = 'Marche pour récupérer. Le chrono et le GPS continuent jusqu\'à « Terminer ».';
+    el('next').innerHTML = `${m(`+${mmss(Math.max(0, liveElapsed() - (live.track.end - starts[0])))} en plus ·`)} continue à marcher si tu veux, puis « Terminer »`;
   }
   el('stepno').textContent = st.phase === 'intro' ? 'Départ' : st.phase === 'echauffement' ? 'Échauffement'
     : st.phase === 'fin' ? 'Fin' : st.phase === 'recup' ? 'Retour au calme' : `Bloc ${st.bloc}/${st.blocs} · ${st.phase === 'course' ? 'course' : 'marche 2 min'}`;
@@ -1483,8 +1512,10 @@ function tick() {
     el('next').innerHTML = `<span class="muted">Ensuite</span> ${esc(KINDS[steps[0].kind].label)}`;
   } else if (i >= steps.length) {
     el('now').textContent = 'Programme fini';
-    el('count').textContent = live.overAt ? `+${mmss((Date.now() - live.overAt) / 1000)}` : '0:00';
-    el('count').classList.toggle('over', Boolean(live.overAt));
+    // Temps en plus compté dès la fin de la dernière étape, pas à la fin de la piste : la piste
+    // garde quelques secondes après la fin pour le signal de fin, qui retardaient le « + ».
+    el('count').textContent = `+${mmss(Math.max(0, liveElapsed() - (end - starts[0])))}`;
+    el('count').classList.add('over');
     el('next').textContent = 'Le chrono et le GPS continuent jusqu\'à « Terminer ».';
   } else {
     el('now').textContent = effort === 'course' ? 'Cours' : 'Marche';
@@ -2457,7 +2488,7 @@ function runBilan({ session, starts, end, reached, elapsedSec, prolongSec = 0, t
     sessionName: session.name,
     level: session.level ?? null,
     ...(session.refaite ? { refaite: session.refaite } : {}),
-    ...(libre ? { libre: true, blocsPrevus: session.blocs || 5, blocs: libreBlocs(steps, stepMs, gps.points, track.points) } : {}),
+    ...(libre ? { libre: true, blocsPrevus: session.blocs || 5, blocs: libreBlocs(steps, stepMs, gps.points, track.points), segments: libreSegments(steps, stepMs, gps.points, track.points, finMs) || undefined } : {}),
     ...(courseDist ? { enCourse: courseDist } : {}),
     steps,
     plannedSec: total(steps),

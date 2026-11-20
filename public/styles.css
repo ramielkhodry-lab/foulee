@@ -713,4 +713,8 @@ body.flash-muscu { animation: flash-muscu 1.5s ease-out; }
 .course-dist { margin: 6px 0; }
 .gps-flou { margin: 6px 0; }
 .live.is-libre .count small { font-size: 0.3em; letter-spacing: 0; margin-left: 0.15em; }
-.live.is-libre[data-effort="course"] .count { font-size: clamp(80px, 25vw, 150px); white-space: nowrap; }
+.live.is-libre .count { font-size: clamp(80px, 25vw, 150px); white-space: nowrap; }
+.seg-totals { list-style: none; margin: 8px 0; padding: 0; display: grid; gap: 4px; }
+.seg-totals li { display: flex; justify-content: space-between; font-size: 15px; }
+.seg-totals li.all { font-size: 17px; font-weight: 800; border-top: 1px solid var(--surface-2); padding-top: 6px; }
+.segs li.seg-course span:first-child { color: var(--run); font-weight: 700; }
