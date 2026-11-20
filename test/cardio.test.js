@@ -187,7 +187,7 @@ test('montre : distance, calories, puissance et cadence de la séance seulement'
     pas: [[at(100), 1000], [at(600), 800], [at(5000), 3000]],
   };
   const m = summarizeMontre(h, autres);
-  assert.deepEqual({ ...m, splits: undefined }, { distKm: 2.8, kcal: 150, puissance: 120, cadence: 120, splits: undefined, v: MONTRE_V });
+  assert.deepEqual({ ...m, splits: undefined }, { distKm: 2.8, enCourseKm: 1.3, kcal: 150, puissance: 120, cadence: 120, splits: undefined, v: MONTRE_V });
   // Résumé d'avant la correction du 2/11 (sans version) : à recalculer ; résumé actuel : non.
   assert.equal(montreStale({ distKm: 6.93 }), true);
   assert.equal(montreStale(m), false);

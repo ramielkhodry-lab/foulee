@@ -700,3 +700,16 @@ body.flash-muscu { animation: flash-muscu 1.5s ease-out; }
 .libre-list li.best b { color: var(--run); }
 .libre-how { margin: 10px 0; padding-left: 20px; text-align: left; }
 .libre-how li { margin: 4px 0; }
+
+/* Palier choisi par le coureur */
+.palier-list { display: grid; gap: 6px; }
+.palier-opt { display: grid; grid-template-columns: 34px 1fr auto; align-items: center; gap: 10px; text-align: left; padding: 10px 12px; border-radius: 14px; min-height: 0; }
+.palier-opt b { font-size: 20px; }
+.palier-opt span { font-size: 14px; font-weight: 600; }
+.palier-opt em { font-style: normal; font-size: 12px; font-weight: 800; color: var(--run); text-transform: uppercase; }
+.palier-opt.on { border-color: var(--run); color: var(--run); }
+.palier-test { margin-top: 10px; padding-top: 10px; border-top: 1px solid var(--surface-2); }
+.course-dist { margin: 6px 0; }
+.gps-flou { margin: 6px 0; }
+.live.is-libre .count small { font-size: 0.3em; letter-spacing: 0; margin-left: 0.15em; }
+.live.is-libre[data-effort="course"] .count { font-size: clamp(80px, 25vw, 150px); white-space: nowrap; }

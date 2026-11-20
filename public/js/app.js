@@ -3,7 +3,7 @@ import { assemble, stepAt, sample, stepStarts } from './track.js';
 import { MAX_EXTRA, extendState, canExtend, canRetract, extend, retract, extraSummary } from './extend.js';
 import { load, update, uid, PRESETS, onSave, replace, empty } from './store.js';
 import * as account from './account.js';
-import { createTrack, addPoint, addAltitude, markGap, summary, currentPace, encodeTrace, decodeTrace, packTrack, restoreTrack } from './gps.js';
+import { createTrack, addPoint, addAltitude, markGap, summary, currentPace, encodeTrace, decodeTrace, packTrack, restoreTrack, metersSince } from './gps.js';
 import { drawTrace } from './map.js';
 import { stepTimes, summarize, summarizeMontre, montreStale, MONTRE_V, mergeDistance, recovery, recoveryAt, zoneLimits, zoneOf, zoneTimes, cardioLine, curveSvg, windowOf, swimWindow, dayRange, applySwim } from './cardio.js';
 import { iaInput, pendingIA, failedIA, failureMessage } from './ia.js';
@@ -12,8 +12,8 @@ import { GOALS_MUSCU, LIEUX, MATERIEL_PLUS, NIVEAUX_MUSCU, MUSCLES, alternatives
 import { createGuided, currentExercise, suggestedReps, setDone, skipExercise, restLeft, adjustRest, endRest, quickRest, finish, elapsedSec as guidedElapsed, setsDone, setsTotal, restTrack, startCountdown, countLeft, endCountdown, swapExercise, startHold, cancelHold, stopHold, holdLead, holdElapsed, holdOver, holdTrack, pause as pauseGuided, resume as resumeGuided } from './muscu-live.js';
 import { replayRun, replayMuscu, canReplay } from './refaire.js';
 import { testSession, isTest } from './test-seance.js';
-import { libreSession, isLibre, libreState, libreAction, libreRallonge, libreDone, libreBlocs, libreResume } from './libre.js';
-import { upcoming, moveOptions, planOptions, nextRunLevel, runLevel, afterBilan, HORIZON, GOALS_RUN, START_RUN, GOALS_SWIM, START_SWIM, LEVELS } from './plan.js';
+import { libreSession, isLibre, libreState, libreAction, libreRallonge, libreDone, libreBlocs, libreResume, enCourse, GPS_FLOU } from './libre.js';
+import { upcoming, moveOptions, planOptions, nextRunLevel, runLevel, afterBilan, palierDesTests, HORIZON, GOALS_RUN, START_RUN, GOALS_SWIM, START_SWIM, LEVELS } from './plan.js';
 
 const app = document.getElementById('app');
 const audio = document.getElementById('player');
@@ -412,14 +412,57 @@ function extraLine(h) {
   return `<b>${prevues + done} répétitions au lieu de ${prevues}</b> : +${done} ajoutée${done > 1 ? 's' : ''} en direct${done < h.extra ? ` (${h.extra - done} lancée${h.extra - done > 1 ? 's' : ''} sans être finie${h.extra - done > 1 ? 's' : ''})` : ''}.`;
 }
 
+const kmFr = (km) => km.toLocaleString('fr-FR');
+
+// Distance parcourue en courant seulement (marche exclue) : la montre si elle l'a mesurée,
+// sinon le GPS, avec un avertissement si le GPS était imprécis.
+function courseDistBlock(h) {
+  const m = h.montre?.enCourseKm;
+  const g = h.enCourse;
+  const km = m || g?.km;
+  if (!km) return '';
+  const flou = !m && (g.accM > GPS_FLOU || h.gpsIncomplet);
+  const pace = km >= 0.1 && g?.sec ? ` · ${allure(g.sec / km)}` : '';
+  return `<p class="small course-dist">Distance en courant : <b>${kmFr(km)} km</b> <span class="muted">(${m ? 'montre' : 'GPS'}, marche exclue${g?.sec ? `, ${mmss(g.sec)} de course` : ''})</span>${pace}${m && g?.km ? ` <span class="muted">· GPS ${kmFr(g.km)} km</span>` : ''}</p>
+    ${flou ? `<p class="alert small gps-flou">GPS imprécis${g.accM > GPS_FLOU ? ` (±${g.accM} m en moyenne)` : ''}${h.gpsIncomplet ? ', coupé un moment' : ''} : distance à prendre avec prudence.${cardioOn() ? ' Le Raccourci de ta montre la remplacera par la sienne.' : ''}</p>` : ''}`;
+}
+
+// Palier qui correspond aux tests : proposé seulement sur le dernier test, et s'il y en a 2.
+function palierTestBlock(h) {
+  const d = load();
+  if (!d.history.some((x) => x.id === h.id)) return '<p class="muted small" style="margin:6px 0 0">Après l\'enregistrement : le palier qui correspond à ce test.</p>';
+  const max = planOptions(d.profile.questionnaire, d.settings).maxLevel;
+  const t = palierDesTests(d.history, max);
+  if (!t || t.lastId !== h.id) return '';
+  const cur = planFor(d).find((p) => p.sport === 'course')?.level;
+  const lbl = `palier ${t.level} · ${esc(LEVELS[t.level - 1].label)}`;
+  const base = '<p class="muted small" style="margin:4px 0 0">Calcul : la course que tu as tenue sur au moins 3 blocs, et le plus haut palier dont la course ne dépasse pas cette durée.</p>';
+  if (!t.confirme) return `<div class="palier-test"><p class="small" style="margin:0">Ce test correspond au <b>${lbl}</b>. Refais-le une fois : si les deux tests concordent, tu pourras passer à ce palier.</p>${base}</div>`;
+  if (d.settings.palierManuel?.test === h.id) return `<div class="palier-test"><p class="small" style="margin:0">✓ Palier ${t.level} choisi : ta prochaine course le suit.</p></div>`;
+  if (cur === t.level) return `<div class="palier-test"><p class="small" style="margin:0">Tes 2 derniers tests correspondent à ton palier actuel (${cur}).</p></div>`;
+  return `<div class="palier-test"><p class="small" style="margin:0">Tes 2 derniers tests (paliers ${t.levels.join(' et ')}) : le <b>${lbl}</b> te correspond, on garde le plus bas des deux. Ton palier actuel : ${cur ?? '–'}.</p>${base}
+    <button class="btn-dark" data-setpalier="${t.level}|${esc(h.id)}" style="width:100%;margin-top:8px">Passer au palier ${t.level}</button></div>`;
+}
+
 // Test « 5 courses au max » : chaque bloc de course, la plus longue, les pauses.
 function libreBlock(h) {
   const r = libreResume(h);
   if (!r) return '';
+  const totalSeance = h.distanceKm ? `<p class="small" style="margin:0">Distance totale de la séance : <b>${kmFr(h.distanceKm)} km</b> <span class="muted">(échauffement et marches compris)</span></p>` : '';
+  const mk = h.montre?.blocsKm;
+  const total = mk ? mk.reduce((a, x) => a + x, 0) : h.blocs.reduce((a, x) => a + (x.km || 0), 0);
   return `<div class="libre-sum">
     <p class="small" style="margin:0">Plus longue course continue : <b>${mmss(r.plusLongue)}</b> (bloc ${r.blocMax}) · ${r.n} bloc${r.n > 1 ? 's' : ''} sur ${h.blocsPrevus || 5} · ${r.pauses} pause${r.pauses > 1 ? 's' : ''} marchée${r.pauses > 1 ? 's' : ''} · ${mmss(r.courseSec)} de course en tout</p>
-    <ol class="steps libre-list">${h.blocs.map((x, k) => `<li class="${k + 1 === r.blocMax ? 'best' : ''}"><span>Bloc ${k + 1}</span><span class="small"><b>${mmss(x.sec)}</b>${x.km ? ` · ${x.km.toLocaleString('fr-FR')} km` : ''}${x.km >= 0.1 && x.sec ? ` · ${allure(x.sec / x.km)}` : ''}</span></li>`).join('')}</ol>
-    <p class="muted small" style="margin:0">Test hors programme : il ne change pas ton palier.</p></div>`;
+    <ol class="steps libre-list">${h.blocs.map((x, k) => {
+      const km = mk?.[k] ?? x.km;
+      const flou = !mk && x.accM > GPS_FLOU;
+      return `<li class="${k + 1 === r.blocMax ? 'best' : ''}"><span>Bloc ${k + 1}</span><span class="small"><b>${mmss(x.sec)}</b>${km ? ` · ${flou ? '≈ ' : ''}${kmFr(km)} km` : ''}${km >= 0.1 && x.sec ? ` · ${allure(x.sec / km)}` : ''}</span></li>`;
+    }).join('')}</ol>
+    ${total >= 0.01 ? `<p class="small" style="margin:0">Distance en courant : <b>${kmFr(Math.round(total * 100) / 100)} km</b> <span class="muted">(${mk ? 'montre' : 'GPS'}, somme des blocs, marche exclue)</span></p>` : ''}
+    ${totalSeance}
+    ${!mk && h.blocs.some((x) => x.accM > GPS_FLOU) ? `<p class="alert small gps-flou">GPS imprécis sur les blocs marqués ≈ (±${Math.max(...h.blocs.map((x) => x.accM || 0))} m au pire) : distances à prendre avec prudence.</p>` : ''}
+    <p class="muted small" style="margin:6px 0 0">Test hors programme : il ne change pas ton palier tout seul.</p>
+    ${palierTestBlock(h)}</div>`;
 }
 const refOf = (h) => load().history.find((x) => x.id === h.refaite) || null;
 
@@ -452,14 +495,14 @@ function historyRow(h, open = false) {
     ? (swimMeters(h) ? `${swimMeters(h)}<small>m</small>` : '')
     : h.distanceKm ? `${h.distanceKm.toLocaleString('fr-FR')}<small>km</small>` : h.elapsedSec ? `${Math.round(h.elapsedSec / 60)}<small>min</small>` : '';
   return `
-    <details class="hist"${open || h.id === fixedRun ? ' open' : ''}>
+    <details class="hist"${open || h.id === fixedRun || h.id === keepOpen ? ' open' : ''}>
       <summary class="li">${icon(sport)}<div class="li-main"><b>${dateLabel(h.date)}</b><span>${parts.length ? parts.join(' · ') : esc(h.structure || h.sessionName || SPORT_LABEL[sport])}</span></div><span class="li-side ${sport}">${side}</span></summary>
       <div class="li-more">
         ${traceOf(h).length ? `<div class="map" data-map="${esc(h.id)}"></div>` : ''}
         ${cardioBlock(h.cardio, h.id)}
         ${montreBlock(h)}
         ${h.deniveleM != null ? `<p class="muted small">Dénivelé : +${h.deniveleM} m, mesuré par le téléphone.</p>` : ''}
-        ${libreBlock(h)}
+        ${h.libre ? libreBlock(h) : sport === 'course' ? courseDistBlock(h) : ''}
         ${h.source === 'guidee' && (h.distanceSource === 'manuelle' || h.dureeSource === 'manuelle') ? `<p class="muted small">Corrigé à la main${h.distanceSource === 'manuelle' ? ` : ${h.distanceKm.toLocaleString('fr-FR')} km` : ''}${h.dureeSource === 'manuelle' ? `${h.distanceSource === 'manuelle' ? ',' : ' :'} ${Math.round(h.elapsedSec / 60)} min` : ''}. C'est ce qui compte.</p>` : ''}
         ${sport === 'muscu' && h.exercices?.length ? `<ul class="steps">${h.exercices.map((x) => `<li><span>${esc(x.nom)}</span><span class="muted small">${x.poids ? `${kgLabel(x.poids)} · ` : ''}${(x.reps || []).filter((r) => r > 0).join(' / ')}${x.unite === 's' ? ' s' : ''}</span></li>`).join('')}</ul>${tonnage(h) ? '<p class="muted small">Total soulevé : charge × répétitions, hors poids du corps.</p>' : ''}` : ''}
         ${sport === 'natation' && h.swim?.nages?.length ? `<p class="small">${esc(h.swim.nages.join(', '))}${h.swim.detail ? ` · ${esc(h.swim.detail)}` : ''}</p>` : ''}
@@ -1362,8 +1405,16 @@ function tickLibre(i, t) {
   if (st.phase === 'echauffement') {
     el('next').innerHTML = `<span class="muted">Ensuite</span> Bloc 1/${st.blocs} : cours le plus longtemps possible`;
   } else if (st.phase === 'course') {
-    el('count').textContent = mmss(since); // le bloc n'a pas de fin : on compte vers le haut
-    el('next').textContent = st.bloc < st.blocs ? 'Dès que tu t\'arrêtes, touche « Je marche »' : 'Dernier bloc : touche quand tu t\'arrêtes';
+    // Chiffre dominant : la distance du bloc, remise à zéro à chaque départ de bloc. Le temps
+    // du bloc est dans sa pastille, la distance de toute la séance en bas (km).
+    // Heure de départ du bloc : notée à sa première image (une pause ne la décale pas).
+    if (live.blocKm?.i !== i) live.blocKm = { i, t0: Date.now() - since * 1000, n: -1, km: 0 };
+    if (live.blocKm.n !== live.gps.points.length) {
+      live.blocKm.n = live.gps.points.length;
+      live.blocKm.km = metersSince(live.gps, live.blocKm.t0) / 1000;
+    }
+    el('count').innerHTML = `${live.blocKm.km.toLocaleString('fr-FR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}<small>km</small>`;
+    el('next').innerHTML = `<span class="muted">Bloc ${st.bloc} · ${mmss(since)} ·</span> ${st.bloc < st.blocs ? 'dès que tu t\'arrêtes, touche « Je marche »' : 'dernier bloc : touche quand tu t\'arrêtes'}`;
   } else if (st.phase === 'marche') {
     el('next').innerHTML = `<span class="muted">Ensuite</span> Bloc ${st.bloc}/${st.blocs}, au signal`;
   } else if (st.phase === 'fin') {
@@ -1594,6 +1645,20 @@ let editing = null; // séance en cours d'édition (copie)
 let bilan = null; // formulaire de bilan en cours
 let suite = null; // ce que change le bilan qu'on vient d'enregistrer
 let progDays = 14; // jours affichés dans la liste du programme
+let palierPick = false; // liste des paliers ouverte (Programme)
+let keepOpen = null; // séance de l'historique gardée ouverte après un choix de palier
+
+// Changer de palier soi-même : il vaut pour la prochaine course, puis les règles reprennent.
+function palierPicker(d, run) {
+  const opts = planOptions(d.profile.questionnaire, d.settings);
+  const manuel = nextRunLevel(d.history, opts).manuel;
+  const t = palierDesTests(d.history, run.max);
+  const head = `<div class="row" style="margin-top:10px"><button class="btn-ghost small-btn" data-palierpick>${palierPick ? 'Fermer' : 'Changer de palier moi-même'}</button>${manuel ? '<button class="btn-ghost small-btn" data-palierauto>Revenir au calcul automatique</button>' : ''}</div>`;
+  if (!palierPick) return head;
+  return `${head}
+    <p class="muted small" style="margin:10px 0 6px">Le palier choisi vaut pour ta prochaine course. Après son bilan, le programme repart de là, avec les règles habituelles.</p>
+    <div class="palier-list">${Array.from({ length: run.max }, (_, k) => k + 1).map((id) => `<button class="palier-opt${id === run.level ? ' on' : ''}" data-setpalier="${id}|"><b>${id}</b><span>${esc(LEVELS[id - 1].label)}</span>${t?.confirme && t.level === id ? '<em>tes tests</em>' : t && !t.confirme && t.level === id ? '<em>ton test</em>' : ''}</button>`).join('')}</div>`;
+}
 
 const screens = {
   accueil() {
@@ -1640,6 +1705,7 @@ const screens = {
         <p class="level-num">${run.level}<small>/${run.max}</small></p>
         <div class="level-track" style="grid-template-columns:repeat(${run.max},1fr)">${Array.from({ length: run.max }, (_, i) => `<i class="${i < run.level ? 'on' : ''}"></i>`).join('')}</div>
         <p class="muted small" style="margin:8px 0 0">Palier ${run.max} = ${esc(LEVELS[run.max - 1].label.replace(' de course continue', ''))} de course sans marcher. Recalculé après chaque bilan selon ta difficulté, ta fatigue et tes douleurs : des règles fixes, pas un coach humain.</p>
+        ${palierPicker(d, run)}
       </section>` : ''}
       ${todayItem ? todayHero(todayItem) : ''}
       <h3>Les ${progDays / 7} prochaines semaines</h3>
@@ -1793,7 +1859,7 @@ const screens = {
         ${libre ? '<button class="libre-btn" id="librebtn" data-libre hidden></button><div class="libre-blocs" id="libreblocs"></div>' : segmentsBar()}
         <p class="halfway" id="halfway" hidden>Moitié de la séance faite</p>
         <div class="live-stats">
-          <div><b id="dist">0,00</b><span>km</span></div>
+          <div><b id="dist">0,00</b><span>${libre ? 'km séance' : 'km'}</span></div>
           <div><b id="pace">–</b><span>allure /km</span><small id="paceavg">moy. –</small></div>
           <div><b id="elapsed">0:00</b><span>temps</span></div>
         </div>
@@ -1961,7 +2027,7 @@ const screens = {
       <div class="card">
         <p><strong>${esc(b.sessionName)}</strong></p>
         <p class="muted">${mmss(b.elapsedSec)} de séance${b.prolongSec ? `, dont ${mmss(b.prolongSec)} après le programme` : ''}${b.libre ? '' : ` · ${b.completedSteps} étape(s) sur ${b.steps.length}${b.skipped.length ? ` · ${b.skipped.length} passée(s)` : ''}`}</p>
-        ${libreBlock(b)}
+        ${b.libre ? libreBlock(b) : courseDistBlock(b)}
         ${b.extra ? `<p class="small">${extraLine(b)}</p>` : ''}
         ${b.trace ? `<div class="map" data-map="bilan"></div>${b.gpsIncomplet ? '<p class="muted small">En pointillés : écran verrouillé, le GPS ne suivait plus.</p>' : ''}` : ''}
         ${b.distanceSource === 'gps' ? `<p class="small">GPS : ${b.distanceKm.toLocaleString('fr-FR')} km${b.allureSecKm ? ` · ${allure(b.allureSecKm)}` : ''}${b.gpsIncomplet ? ' · <strong>incomplet</strong> (écran verrouillé un moment)' : ''}</p>` : ''}
@@ -2000,6 +2066,7 @@ const screens = {
         <p class="hero-sub" style="font-size:26px;margin:8px 0 6px">${esc(r.titre)}</p>
         <p class="muted small" style="margin:0">${esc(r.detail)}</p>
       </section>
+      ${r.libreId && load().history.find((h) => h.id === r.libreId) ? `<h3>Ton test</h3><div class="card">${libreBlock(load().history.find((h) => h.id === r.libreId))}</div>` : ''}
       <h3>Pour la prochaine séance</h3>
       ${r.ia === 'loading' ? '<p class="ia-wait">L’IA lit ton ressenti… En attendant, les conseils des règles :</p>' : ''}
       ${r.ia?.code ? `<div class="alert ia-fail"><strong>Conseils de secours (règles).</strong> ${esc(failureMessage(r.ia))}</div>` : ''}
@@ -2376,7 +2443,9 @@ function runBilan({ session, starts, end, reached, elapsedSec, prolongSec = 0, t
   const lastIdx = stepAt(starts, end, reached);
   const completed = libre ? steps.length : lastIdx >= steps.length ? steps.length : Math.max(0, lastIdx);
   const gps = summary(track, elapsedSec);
-  const stepMs = stepTimes(anchors || [], starts, end, reached);
+  const stepMsAll = stepTimes(anchors || [], starts, end, reached);
+  const stepMs = libre && stepMsAll ? stepMsAll.slice(0, steps.length + 1) : stepMsAll;
+  const courseDist = enCourse(steps, stepMs, gps.points, track.points);
   return {
     id: uid(),
     sport: 'course',
@@ -2385,7 +2454,8 @@ function runBilan({ session, starts, end, reached, elapsedSec, prolongSec = 0, t
     sessionName: session.name,
     level: session.level ?? null,
     ...(session.refaite ? { refaite: session.refaite } : {}),
-    ...(libre ? { libre: true, blocsPrevus: session.blocs || 5, blocs: libreBlocs(steps, stepMs, gps.points) } : {}),
+    ...(libre ? { libre: true, blocsPrevus: session.blocs || 5, blocs: libreBlocs(steps, stepMs, gps.points, track.points) } : {}),
+    ...(courseDist ? { enCourse: courseDist } : {}),
     steps,
     plannedSec: total(steps),
     elapsedSec,
@@ -2400,7 +2470,7 @@ function runBilan({ session, starts, end, reached, elapsedSec, prolongSec = 0, t
     gpsIncomplet: gps.gpsIncomplet,
     deniveleM: gps.deniveleM,
     trace: encodeTrace(gps.points),
-    stepMs: libre && stepMs ? stepMs.slice(0, steps.length + 1) : stepMs,
+    stepMs,
     endedAt,
     finMs,
     difficulte: null,
@@ -2461,6 +2531,7 @@ function replaySession(id) {
 function showSuite(entry) {
   const d = load();
   suite = afterBilan(d.history, entry, d.settings, today(), d.profile.questionnaire);
+  if (entry.libre) suite.libreId = entry.id;
   go('suite');
   askIA(entry.id);
 }
@@ -2737,6 +2808,18 @@ document.addEventListener('click', (e) => {
   } else if (ds.startplan) {
     const p = planFor(load()).find((x) => x.date === ds.startplan && x.sport === 'course');
     if (p) openPrepare(planSession(p));
+  } else if ('palierpick' in ds) {
+    palierPick = !palierPick;
+    render();
+  } else if ('palierauto' in ds) {
+    update((d) => { delete d.settings.palierManuel; });
+    render();
+  } else if (ds.setpalier) {
+    const [lvl, test] = ds.setpalier.split('|');
+    keepOpen = test || null;
+    update((d) => { d.settings.palierManuel = { level: Number(lvl), at: localNow(), ...(test ? { test } : {}) }; });
+    palierPick = false;
+    render();
   } else if (ds.palier) {
     const [choix, key] = ds.palier.split('|');
     update((d) => { d.settings.palierChoix = { key, choix, at: new Date().toISOString() }; });

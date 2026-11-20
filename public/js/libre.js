@@ -10,7 +10,8 @@
 // Hors programme : enregistrée comme une course (carte, distance, allure), sans palier
 // (level null), donc ignorée par nextRunLevel. Elle sert d'indicateur.
 
-import { haversine } from './gps.js';
+import { kmBetween, accBetween } from './gps.js';
+import { KINDS } from './phrases.js';
 
 export const LIBRE_ID = 'libre-5-blocs';
 export const BLOCS = 5;
@@ -90,30 +91,46 @@ export function libreDone(steps, starts, reached) {
   return out;
 }
 
-// Distance (km) entre deux instants (ms), sur les points du GPS [lat, lon, t].
-function kmBetween(points, a, b) {
-  let m = 0;
-  for (let k = 1; k < points.length; k++) {
-    const p = points[k - 1];
-    const q = points[k];
-    if (p[2] >= a && q[2] <= b) m += haversine({ lat: p[0], lon: p[1] }, { lat: q[0], lon: q[1] });
-  }
-  return Math.round(m / 10) / 100;
-}
-
-// Blocs de course : durée (s) et distance (km, null sans GPS). stepMs = heure de début de
-// chaque étape puis heure de fin (cardio.stepTimes).
-export function libreBlocs(steps, stepMs, points) {
+// Blocs de course : durée (s), distance (km, null sans GPS) et précision moyenne du GPS (m,
+// si connue). stepMs = heure de début de chaque étape puis heure de fin (cardio.stepTimes).
+// raw = points mesurés en direct, avec leur précision.
+export function libreBlocs(steps, stepMs, points, raw = []) {
   const out = [];
   steps.forEach((s, k) => {
     if (s.kind !== 'course') return;
     const a = stepMs?.[k];
     const b = stepMs?.[k + 1];
-    const km = points?.length && Number.isFinite(a) && Number.isFinite(b) ? kmBetween(points, a, b) : 0;
-    out.push({ sec: s.duration, km: km > 0 ? km : null });
+    const ok = Number.isFinite(a) && Number.isFinite(b);
+    const km = points?.length && ok ? kmBetween(points, a, b) : 0;
+    const acc = ok ? accBetween(raw, a, b) : null;
+    out.push({ sec: s.duration, km: km > 0 ? km : null, ...(acc ? { accM: acc } : {}) });
   });
   return out;
 }
+
+// Toute course guidée : distance parcourue en courant seulement (marche exclue), d'après le
+// GPS. null si on ne connaît pas l'heure des étapes.
+export function enCourse(steps, stepMs, points, raw = []) {
+  if (!stepMs?.length) return null;
+  let km = 0;
+  let sec = 0;
+  const accs = [];
+  steps.forEach((s, k) => {
+    if (KINDS[s.kind]?.effort !== 'course') return;
+    const a = stepMs[k];
+    const b = stepMs[k + 1];
+    if (!Number.isFinite(a) || !Number.isFinite(b) || b <= a) return;
+    sec += (b - a) / 1000;
+    if (points?.length) km += kmBetween(points, a, b);
+    const acc = accBetween(raw, a, b);
+    if (acc) accs.push(acc);
+  });
+  if (!sec) return null;
+  return { km: Math.round(km * 100) / 100 || null, sec: Math.round(sec), ...(accs.length ? { accM: Math.round(accs.reduce((x, y) => x + y, 0) / accs.length) } : {}) };
+}
+
+// Précision du GPS jugée mauvaise au-delà (m, moyenne des points retenus).
+export const GPS_FLOU = 15;
 
 // Résumé : plus longue course continue (et son bloc), nombre de pauses marchées entre les blocs.
 export function libreResume(h) {
