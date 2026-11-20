@@ -12,6 +12,7 @@ import { tipsOf, tipsSource, hasIA } from './conseils.js';
 import { GOALS_MUSCU, LIEUX, MATERIEL_PLUS, NIVEAUX_MUSCU, MUSCLES, alternatives, byId, muscuPlan, nextSeance, nextLoad, sansCharge, tonnage } from './muscu.js';
 import { createGuided, currentExercise, suggestedReps, setDone, skipExercise, restLeft, adjustRest, endRest, quickRest, finish, elapsedSec as guidedElapsed, setsDone, setsTotal, restTrack, startCountdown, countLeft, endCountdown, swapExercise, startHold, cancelHold, stopHold, holdLead, holdElapsed, holdOver, holdTrack, pause as pauseGuided, resume as resumeGuided } from './muscu-live.js';
 import { replayRun, replayMuscu, canReplay } from './refaire.js';
+import { drawCard, canvasBlob, fileName } from './share.js';
 import { testSession, isTest } from './test-seance.js';
 import { libreSession, isLibre, libreState, libreAction, libreRallonge, libreDone, libreBlocs, libreResume, enCourse, GPS_FLOU, libreSegments, segmentTotals, libreFinir } from './libre.js';
 import { upcoming, moveOptions, planOptions, nextRunLevel, runLevel, afterBilan, palierDesTests, HORIZON, GOALS_RUN, START_RUN, GOALS_SWIM, START_SWIM, LEVELS } from './plan.js';
@@ -541,6 +542,7 @@ function historyRow(h, open = false) {
         ${coachTips(h)}
         ${h.refaite ? `<p class="muted small">Séance refaite${refOf(h) ? ` : la même que ${esc(dateLabel(refOf(h).date))}` : ''}.</p>` : ''}
         ${canReplay(h) && !live && !guided ? `<button class="btn-ghost replay ${sport}" data-replay="${esc(h.id)}">↻ Refaire cette séance</button>` : ''}
+        ${!live || live.done ? `<button class="btn-ghost partage ${sport}" data-partage="${esc(h.id)}">Partager</button>` : ''}
         ${sport === 'course' ? `<div class="fixrun" data-fixbox="${esc(h.id)}"><button class="day-link" data-fixrun="${esc(h.id)}">Corriger avec les chiffres de ma montre</button></div>` : ''}
       </div>
     </details>`;
@@ -674,7 +676,7 @@ function installNotice() {
 function manualButtons(d, cls, date = null, style = '', courseSuffix = '') {
   const b = (sport, label, color) => (practiced(d, sport) ? `<button data-manual="${sport}"${date ? ` data-mdate="${date}"` : ''} class="${cls}" style="color:var(${color})">+ ${label}</button>` : '');
   const autre = `<button data-manual="autre"${date ? ` data-mdate="${date}"` : ''} class="${cls}" style="color:var(--ink)">+ Autre</button>`;
-  return `<div class="row"${style ? ` style="${style}"` : ''}>${b('natation', 'Natation', '--swim')}${b('course', `Course${courseSuffix}`, '--run')}${b('muscu', 'Muscu', '--muscu')}${autre}</div>`;
+  return `<div class="row manual-row"${style ? ` style="${style}"` : ''}>${b('natation', 'Natation', '--swim')}${b('course', `Course${courseSuffix}`, '--run')}${b('muscu', 'Muscu', '--muscu')}${autre}</div>`;
 }
 
 // Ce que montre le jour choisi : la séance faite, la séance prévue, ou rien.
@@ -1223,6 +1225,77 @@ function closeFinishSheet() {
   document.querySelector('.finish-sheet')?.remove();
   if (!document.querySelector('.hr-sheet')) document.body.classList.remove('sheet-open');
 }
+
+// --- Partager une séance avec ses proches ----------------------------------------
+// Image + texte faits dans le téléphone, envoyés par la feuille de partage (Messages, WhatsApp).
+// L'image est prête AVANT le bouton « Envoyer » : iOS refuse navigator.share s'il n'est pas
+// appelé tout de suite après le toucher.
+let partage = null; // { file, text, url }
+async function openPartage(id) {
+  if (id === 'bilan' && current === 'bilan') readBilan();
+  const h = id === 'bilan' ? bilan : load().history.find((x) => x.id === id);
+  if (!h) return;
+  closePartage();
+  document.body.insertAdjacentHTML('beforeend', `
+    <div class="hr-sheet partage-sheet" role="dialog" aria-label="Partager la séance">
+      <div class="hr-sheet-in">
+        <div class="hr-sheet-top"><h2>Partager</h2><button class="btn-ghost" data-partageclose aria-label="Fermer">✕</button></div>
+        <div class="partage-img"><p class="muted small">Préparation de l'image…</p></div>
+        <div class="partage-go"></div>
+        <p class="muted small" style="margin:10px 0 0">Seulement les chiffres mesurés${traceOf(h).length ? ' et le tracé complet (départ et arrivée visibles)' : ''}. Ni douleur ni ressenti. Aucun lien public : tu choisis à qui tu l'envoies.</p>
+      </div>
+    </div>`);
+  document.body.classList.add('sheet-open');
+  try {
+    const { canvas, recap } = await drawCard(h, traceOf(h));
+    const blob = await canvasBlob(canvas);
+    if (!document.querySelector('.partage-sheet')) return;
+    const file = new File([blob], fileName(h), { type: 'image/png' });
+    partage = { file, text: recap.text, url: URL.createObjectURL(blob) };
+    const canFile = !!navigator.canShare?.({ files: [file] });
+    document.querySelector('.partage-img').innerHTML = `<img src="${partage.url}" alt="Récap de la séance">`;
+    document.querySelector('.partage-go').innerHTML = `
+      ${canFile || navigator.share ? '<button class="btn-primary" data-partageok>Envoyer…</button>' : ''}
+      <button class="${canFile || navigator.share ? 'btn-ghost' : 'btn-primary'}" data-partageimg style="width:100%;margin-top:10px">Enregistrer l'image</button>
+      <p class="small partage-text">${esc(recap.text).replace('\n', '<br>')}</p>
+      ${canFile ? '' : '<p class="muted small" style="margin:6px 0 0">Ce téléphone ne peut pas joindre l\'image directement : enregistre-la, puis ajoute-la à ton message.</p>'}`;
+  } catch (err) {
+    const box = document.querySelector('.partage-img');
+    if (box) box.innerHTML = `<p class="alert small">Image impossible : ${esc(err.message)}</p>`;
+  }
+}
+function closePartage() {
+  document.querySelector('.partage-sheet')?.remove();
+  if (partage?.url) URL.revokeObjectURL(partage.url);
+  partage = null;
+  if (!document.querySelector('.hr-sheet')) document.body.classList.remove('sheet-open');
+}
+function saveImage() {
+  const a = document.createElement('a');
+  a.href = partage.url;
+  a.download = partage.file.name;
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+}
+function sendPartage() {
+  if (!partage) return;
+  const { file, text } = partage;
+  const withFile = navigator.canShare?.({ files: [file] });
+  // Repli sans fichier : le texte part par la feuille de partage, l'image est enregistrée.
+  const p = withFile ? navigator.share({ files: [file], text }) : navigator.share({ text });
+  if (!withFile) saveImage();
+  p.catch((err) => { if (err?.name !== 'AbortError') alert(`Partage impossible : ${err.message}. Enregistre l'image puis envoie-la.`); });
+}
+document.addEventListener('click', (e) => {
+  const t = e.target.closest('button');
+  if (!t) return;
+  if (t.dataset.partage) openPartage(t.dataset.partage);
+  else if ('partageclose' in t.dataset) closePartage();
+  else if ('partageok' in t.dataset) sendPartage();
+  else if ('partageimg' in t.dataset && partage) saveImage();
+});
+document.addEventListener('click', (e) => { if (e.target.classList?.contains('partage-sheet')) closePartage(); });
 
 // --- Séance en cours ----------------------------------------------------------
 
@@ -2254,7 +2327,8 @@ const screens = {
         <textarea id="comm" placeholder="Ex. : assez essoufflé à la fin, mais j'aurais pu continuer deux minutes.">${esc(b.commentaire)}</textarea>
       </div>
       <button class="btn-primary" data-savebilan>Enregistrer</button>
-      <p class="muted small" style="margin-top:10px">La douleur et ton ressenti restent privés.</p>`;
+      <button class="btn-ghost partage course" data-partage="bilan">Partager avec mes proches</button>
+      <p class="muted small" style="margin-top:10px">La douleur et ton ressenti restent privés : ils ne sont jamais partagés.</p>`;
   },
 
   // Juste après un bilan : ce qui change pour la suite, et pourquoi.
@@ -2281,6 +2355,7 @@ const screens = {
         : r.source === 'ia'
         ? 'La suite du programme est décidée par les règles de Foulée. Les conseils sont écrits par une IA gratuite (Llama, via Cloudflare) : elle peut se tromper, ce n’est pas un coach ni un médecin.'
         : 'Règles fixes de Foulée, pas un coach : difficulté, essoufflement, fatigue, douleur et les mots de ton ressenti décident.'}${r.sport === 'autre' ? '' : ' Tes conseils restent affichés sur la carte de la prochaine séance.'}</p>
+      ${r.entryId && load().history.some((h) => h.id === r.entryId) ? `<button class="btn-ghost partage ${r.sport === 'repos' ? 'course' : sportOf(load().history.find((h) => h.id === r.entryId))}" data-partage="${esc(r.entryId)}">Partager cette séance</button>` : ''}
       <div class="row" style="margin-top:14px"><button data-tab="progression">Mon historique</button><button class="btn-dark" data-tab="programme">Mon programme</button></div>`;
   },
 
@@ -2738,6 +2813,7 @@ function showSuite(entry) {
   const d = load();
   suite = afterBilan(d.history, entry, d.settings, today(), d.profile.questionnaire);
   if (entry.libre) suite.libreId = entry.id;
+  suite.entryId = entry.id;
   go('suite');
   askIA(entry.id);
 }

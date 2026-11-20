@@ -719,6 +719,19 @@ body.flash-muscu { animation: flash-muscu 1.5s ease-out; }
 .seg-totals li.all { font-size: 17px; font-weight: 800; border-top: 1px solid var(--surface-2); padding-top: 6px; }
 .segs li.seg-course span:first-child { color: var(--run); font-weight: 700; }
 
+/* Partage d'une séance */
+.partage { display: block; width: 100%; margin-top: 12px; font-weight: 700; }
+.partage.course { color: var(--run); border-color: var(--run); }
+.partage.natation { color: var(--swim); border-color: var(--swim); }
+.partage.muscu { color: var(--muscu); border-color: var(--muscu); }
+.partage-sheet h2 { margin: 4px 0 8px; font-size: 26px; }
+.partage-img { margin: 6px 0 12px; min-height: 120px; text-align: center; }
+.partage-img img { display: block; margin: 0 auto; width: auto; height: auto; max-width: 100%; max-height: 52vh; border-radius: 14px; border: 1px solid var(--line); }
+.partage-text { margin: 12px 0 0; padding: 10px 12px; border-radius: 12px; background: var(--surface-2); }
+.partage-sheet .hr-sheet-in { box-sizing: border-box; }
+/* « + Natation / + Course / + Muscu / + Autre » : à 4 boutons, ils débordaient de l'écran (390 px). */
+.manual-row { flex-wrap: wrap; }
+.manual-row > * { flex: 1 1 40%; min-width: 0; }
 /* Parcours proposé : boucle autour de toi avant de partir, rappel pendant la séance */
 .parcours { background: var(--surface); border-radius: var(--radius); padding: 14px 16px; margin-bottom: 14px; }
 .parcours .btn-ghost:disabled { opacity: 0.5; }
