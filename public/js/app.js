@@ -12,7 +12,7 @@ import { GOALS_MUSCU, LIEUX, MATERIEL_PLUS, NIVEAUX_MUSCU, MUSCLES, alternatives
 import { createGuided, currentExercise, suggestedReps, setDone, skipExercise, restLeft, adjustRest, endRest, quickRest, finish, elapsedSec as guidedElapsed, setsDone, setsTotal, restTrack, startCountdown, countLeft, endCountdown, swapExercise, startHold, cancelHold, stopHold, holdLead, holdElapsed, holdOver, holdTrack, pause as pauseGuided, resume as resumeGuided } from './muscu-live.js';
 import { replayRun, replayMuscu, canReplay } from './refaire.js';
 import { testSession, isTest } from './test-seance.js';
-import { libreSession, isLibre, libreState, libreAction, libreRallonge, libreDone, libreBlocs, libreResume, enCourse, GPS_FLOU, libreSegments, segmentTotals } from './libre.js';
+import { libreSession, isLibre, libreState, libreAction, libreRallonge, libreDone, libreBlocs, libreResume, enCourse, GPS_FLOU, libreSegments, segmentTotals, libreFinir } from './libre.js';
 import { upcoming, moveOptions, planOptions, nextRunLevel, runLevel, afterBilan, palierDesTests, HORIZON, GOALS_RUN, START_RUN, GOALS_SWIM, START_SWIM, LEVELS } from './plan.js';
 
 const app = document.getElementById('app');
@@ -596,11 +596,16 @@ const UNIT_LABEL = { km: 'km', m: 'm', kg: 'kg', reps: 'rép.' };
 const fmtKm = (km) => (Math.round(km * 10) / 10).toLocaleString('fr-FR');
 
 // Totaux d'une semaine (lundi → dimanche) : km de course, mètres nagés, nombre de séances.
+// Distance d'une course : la distance enregistrée ; à défaut (test sans distance retenue),
+// la somme de ses segments ou sa distance en courant.
+const runKm = (h) => h.distanceKm || (h.segments?.length ? segmentTotals(h.segments).seance : 0) || h.enCourse?.km || 0;
+
 function weekTotals(history, monday) {
   const end = addDays(monday, 7);
   const inWeek = history.filter((h) => { const d = String(h.date).slice(0, 10); return d >= monday && d < end; });
   return {
-    km: inWeek.filter((h) => sportOf(h) === 'course').reduce((a, h) => a + (h.distanceKm || 0), 0),
+    km: inWeek.filter((h) => sportOf(h) === 'course').reduce((a, h) => a + runKm(h), 0),
+    tests: inWeek.filter((h) => h.libre).length,
     m: inWeek.filter((h) => sportOf(h) === 'natation').reduce((a, h) => a + swimMeters(h), 0),
     kg: inWeek.filter((h) => sportOf(h) === 'muscu').reduce((a, h) => a + tonnage(h), 0),
     reps: inWeek.filter((h) => sportOf(h) === 'muscu').reduce((a, h) => a + repsOf(h), 0),
@@ -808,12 +813,36 @@ function indicators(history) {
     </div>`;
 }
 
+// Tests « 5 courses au max », du plus ancien au plus récent : plus longue course continue
+// (barre), et distance en courant. Hors programme : un repère, pas un palier.
+function testsChart(history) {
+  const tests = history.filter((h) => h.libre && libreResume(h)).sort((a, b) => String(a.date).localeCompare(String(b.date))).slice(-8);
+  if (!tests.length) return '';
+  const vals = tests.map((h) => libreResume(h));
+  const max = Math.max(...vals.map((r) => r.plusLongue)) || 1;
+  const last = vals.at(-1);
+  const prev = vals.at(-2);
+  const diff = prev ? last.plusLongue - prev.plusLongue : null;
+  return `<h3>Mes tests</h3>
+    <section class="tests-chart">
+      <p class="eyebrow" style="margin:0">Plus longue course continue</p>
+      <p class="hero-num">${mmss(last.plusLongue)}</p>
+      ${diff === null ? '<p class="muted small" style="margin:0">Premier test : refais-le dans quelques semaines pour comparer.</p>' : `<p class="delta ${diff > 0 ? 'up' : diff < 0 ? 'down' : ''}">${diff > 0 ? '▲' : diff < 0 ? '▼' : '='} ${mmss(Math.abs(diff))} par rapport au test précédent</p>`}
+      <div class="tbars">${tests.map((h, k) => {
+        const tot = h.segments?.length ? segmentTotals(h.segments).course : h.enCourse?.km;
+        return `<div class="tbar"><span class="tbar-v">${mmss(vals[k].plusLongue)}</span><i style="height:${Math.max(6, Math.round((vals[k].plusLongue / max) * 100))}%"></i><span class="tbar-d">${shortDate(h.date)}</span>${tot ? `<span class="tbar-km">${fmtKm(tot)} km</span>` : ''}</div>`;
+      }).join('')}</div>
+      <p class="muted small" style="margin:8px 0 0">Sous chaque barre : la distance en courant. Les tests comptent dans tes km de la semaine (cercle sur la courbe), jamais dans le calcul du palier.</p>
+    </section>`;
+}
+
 // Courbe des 8 dernières semaines (km de course ou mètres nagés).
 function weekCurve(history, kind, unitKey) {
   const monday = mondayOf(today());
   const weeks = Array.from({ length: 8 }, (_, i) => addDays(monday, (i - 7) * 7));
   const unit = unitKey || { course: 'km', natation: 'm', muscu: 'kg' }[kind];
   const vals = weeks.map((w) => weekTotals(history, w)[unit]);
+  const tests = weeks.map((w) => weekTotals(history, w).tests);
   const max = Math.max(...vals) || 1;
   const W = 320;
   const H = 130;
@@ -843,9 +872,10 @@ function weekCurve(history, kind, unitKey) {
       <path d="${d} L${lx},${H} L${pts[0][0]},${H} Z" fill="url(#area-${kind})"/>
       <path d="${d}" fill="none" stroke="${color}" stroke-width="3" stroke-linecap="round"/>
       ${pts.map(([x, y], i) => (vals[i] ? `<circle cx="${x}" cy="${y}" r="3.5" fill="${color}"/>` : '')).join('')}
+      ${kind === 'course' ? pts.map(([x, y], i) => (tests[i] ? `<circle cx="${x}" cy="${y}" r="7" fill="none" stroke="${color}" stroke-width="2"/>` : '')).join('') : ''}
       <circle cx="${lx}" cy="${ly}" r="9" fill="${color}" opacity="0.25"/>
     </svg>
-    <div class="curve-x">${weeks.map((w, i) => `<span>${vals[i] ? `<b>${kind === 'course' ? fmtKm(vals[i]) : unit === 'kg' && vals[i] >= 1000 ? `${fmtKm(vals[i] / 1000)}t` : Math.round(vals[i])}</b>` : '<b>·</b>'}${Number(w.slice(8))}/${Number(w.slice(5, 7))}</span>`).join('')}</div>
+    <div class="curve-x">${weeks.map((w, i) => `<span>${vals[i] ? `<b>${kind === 'course' ? fmtKm(vals[i]) : unit === 'kg' && vals[i] >= 1000 ? `${fmtKm(vals[i] / 1000)}t` : Math.round(vals[i])}</b>` : '<b>·</b>'}${Number(w.slice(8))}/${Number(w.slice(5, 7))}${kind === 'course' && tests[i] ? '<i class="test-tag">test</i>' : ''}</span>`).join('')}</div>
     </div>`;
 }
 
@@ -871,7 +901,9 @@ function curveTip(history, monday, kind) {
     }
     lines.push(`${m.toLocaleString('fr-FR')} m`);
   } else if (kind === 'course') {
-    lines.push(`${fmtKm(list.reduce((a, h) => a + (h.distanceKm || 0), 0))} km`);
+    lines.push(`${fmtKm(list.reduce((a, h) => a + runKm(h), 0))} km`);
+    const tests = list.filter((h) => h.libre && libreResume(h));
+    for (const t of tests) lines.push(`Test : ${mmss(libreResume(t).plusLongue)} de course continue max`);
   } else {
     const reps = list.reduce((a, h) => a + repsOf(h), 0);
     const kg = list.reduce((a, h) => a + tonnage(h), 0);
@@ -1043,13 +1075,28 @@ function openFinishSheet() {
   const stepsLeft = steps.length - Math.max(0, i);
   const ls = isLibre(live.session) ? libreState(live.session, i) : null;
   closeFinishSheet();
+  // Test : « Terminer » avant le retour au calme propose d'abord les 5 min de marche de fin.
+  if (ls && ['echauffement', 'course', 'marche'].includes(ls.phase)) {
+    document.body.insertAdjacentHTML('beforeend', `
+      <div class="hr-sheet finish-sheet" role="dialog" aria-label="Finir le test">
+        <div class="hr-sheet-in">
+          <h2>Finir le test ?</h2>
+          <p>Tu en es au <b>bloc ${ls.bloc} sur ${ls.blocs}</b>. Ce que tu as fait est gardé : on termine par 5 min de marche, puis « C'est fini ».</p>
+          <button class="btn-primary" data-librefinir>Finir par 5 min de marche</button>
+          <button class="btn-ghost" data-finishno style="width:100%;margin:8px 0">Continuer le test</button>
+          <button class="btn-stop" data-finishok>Arrêter sans marcher, faire le bilan</button>
+        </div>
+      </div>`);
+    document.body.classList.add('sheet-open');
+    return;
+  }
   document.body.insertAdjacentHTML('beforeend', `
     <div class="hr-sheet finish-sheet" role="dialog" aria-label="Terminer la séance">
       <div class="hr-sheet-in">
         <h2>Terminer maintenant ?</h2>
         <p>${ls ? `Tu en es au <b>bloc ${ls.bloc} sur ${ls.blocs}</b>.` : `Il reste <b>${mmss(left)}</b> et ${stepsLeft} étape${stepsLeft > 1 ? 's' : ''}.`} Ce que tu as déjà fait est gardé pour le bilan.</p>
         <button class="btn-primary" data-finishno>Continuer la séance</button>
-        <button class="btn-stop" data-finishok>${isTest(live.session) ? 'Arrêter le test' : 'Terminer et faire le bilan'}</button>
+        <button class="btn-stop" data-finishok>${isTest(live.session) ? 'Arrêter le test' : ls ? 'C\'est fini : faire le bilan' : 'Terminer et faire le bilan'}</button>
       </div>
     </div>`);
   document.body.classList.add('sheet-open');
@@ -1323,6 +1370,8 @@ function retractLive() {
 function libreLive(back = 0) {
   const i = liveStep();
   if (!live || live.swapping || !isLibre(live.session) || i < 0 || i >= live.session.steps.length) return;
+  // Retour au calme : « C'est fini » l'écourte et va au bilan.
+  if (libreState(live.session, i).phase === 'recup') { closeFinishSheet(); go('bilan'); return; }
   reshapeSession(libreAction(live.session, i, Math.max(0, audio.currentTime - live.track.starts[i] - back)));
 }
 
@@ -1448,7 +1497,7 @@ function tickLibre(i, t) {
     el('next').innerHTML = `${m(`Marche · reste ${mmss(left)} ·`)} ensuite bloc ${st.bloc}/${st.blocs}, au signal`;
   } else if (st.phase === 'recup') {
     el('now').textContent = 'Marche';
-    el('next').innerHTML = `${m(`Retour au calme · reste ${mmss(left)} ·`)} puis le signal de fin`;
+    el('next').innerHTML = `${m(`Retour au calme · reste ${mmss(left)} ·`)} « C'est fini » pour arrêter avant`;
   } else if (st.phase === 'fin') {
     el('now').textContent = 'Test fini';
     el('next').innerHTML = `${m(`+${mmss(Math.max(0, liveElapsed() - (live.track.end - starts[0])))} en plus ·`)} continue à marcher si tu veux, puis « Terminer »`;
@@ -1850,7 +1899,7 @@ const screens = {
           <li>5 min de marche d'échauffement (« Je commence à courir » pour l'écourter).</li>
           <li>Cours aussi longtemps que tu peux. Dès que tu t'arrêtes, touche <b>« Je marche »</b>.</li>
           <li>2 min de marche, puis le signal de course : repars. <b>« Je recours »</b> si tu repars avant.</li>
-          <li>Après le 5e bloc, 5 min de marche pour revenir au calme (« Finir la marche » pour l'écourter), puis « Terminer ».</li>
+          <li>Après le 5e bloc, ou si tu touches « Terminer » avant : 5 min de marche de retour au calme. « C'est fini » pour arrêter avant, ou continue à marcher : le chrono tourne jusqu'à « C'est fini ».</li>
         </ol>
         <p class="muted small" style="margin:0">Signaux seulement, pas de voix. Écran bloqué : appui long 2 s sur « Je marche ». Hors programme : enregistrée comme une course, sans effet sur ton palier.</p>
       </section>` : `<section class="prep-sum">
@@ -1899,7 +1948,7 @@ const screens = {
         </div>
         <div class="gpsline" id="gps"></div>
         ${IOS && load().settings.son !== 'exclusif' ? '<p class="muted small" style="margin:0">Mode musique : iPhone hors silencieux, sinon pas de signaux.</p>' : ''}
-        <button class="btn-primary live-done" id="livedone" data-finishok hidden>${isTest(live?.session) ? 'Terminer le test' : 'Terminer et faire le bilan'}</button>
+        <button class="btn-primary live-done" id="livedone" data-finishok hidden>${isTest(live?.session) ? 'Terminer le test' : libre ? 'C\'est fini : faire le bilan' : 'Terminer et faire le bilan'}</button>
         ${live?.overAt ? '' : `<div class="live-controls${libre ? ' one' : ''}">
           <button class="toggle${playing ? '' : ' paused'}" data-toggle>${playing ? 'Pause' : 'Reprendre'}</button>
           ${libre ? '' : '<button data-skip>Étape suivante</button>'}
@@ -2120,7 +2169,7 @@ const screens = {
     const sorted = [...d.history].sort((a, b) => String(b.date).localeCompare(String(a.date)));
     const runs = d.history.filter((h) => sportOf(h) === 'course');
     const swims = d.history.filter((h) => sportOf(h) === 'natation');
-    const longest = Math.max(0, ...runs.map((h) => h.distanceKm || 0));
+    const longest = Math.max(0, ...runs.map(runKm));
     const paces = runs.map((h) => h.allureSecKm || (h.distanceKm && h.elapsedSec && !h.distanceEstimee ? h.elapsedSec / h.distanceKm : 0)).filter(Boolean);
     const bestSwim = Math.max(0, ...swims.map(swimMeters));
     const progSports = ['course', 'natation', 'muscu'].filter((x) => practiced(d, x) || d.history.some((h) => sportOf(h) === x));
@@ -2153,6 +2202,7 @@ const screens = {
           <p class="delta ${diff > 0 ? 'up' : diff < 0 ? 'down' : ''}">${diff > 0 ? '▲' : diff < 0 ? '▼' : '='} ${fmt(Math.abs(diff))} ${UNIT_LABEL[key]} par rapport à la semaine dernière</p>
           ${weekCurve(d.history, sp, key)}
         </section>
+        ${sp === 'course' ? testsChart(d.history) : ''}
         ${sp === 'muscu' ? `<p class="muted small" style="margin-top:4px">${key === 'kg' ? 'Total soulevé = charge × répétitions de la semaine, hors poids du corps.' : 'Répétitions faites dans la semaine, toutes séries comprises (gainage non compté). Passe en kg dès que tu notes une charge.'}</p>` : ''}
         <h3>Records</h3>
         ${sp === 'muscu' && key === 'reps' ? `<div class="records">${topSets.length ? topSets.map((x) => `<div class="muscu"><b>${x.r}<small>rép.</small></b><span>${esc(x.nom.split(" (")[0])} · en une série</span></div>`).join('') : '<div class="muscu"><b>–</b><span>aucune série notée</span></div>'}</div>` : sp === 'muscu' ? `<div class="records">${topLifts.length ? topLifts.map((x) => `<div class="muscu"><b>${String(x.poids).replace('.', ',')}<small>kg</small></b><span>${esc(x.nom.split(' (')[0])}</span></div>`).join('') : '<div class="muscu"><b>–</b><span>aucune charge notée</span></div>'}</div>` : `<div class="records">
@@ -2813,6 +2863,11 @@ document.addEventListener('click', (e) => {
     testAudio.onended = () => { if (prep) { prep.testing = false; if (current === 'prepare') render(); } };
     testAudio.play().catch((err) => { if (prep) prep.testing = false; alert(`Lecture impossible : ${err.message}`); });
     render();
+  } else if ('librefinir' in ds) {
+    closeFinishSheet();
+    const i = liveStep();
+    const next = live && !live.swapping ? libreFinir(live.session, i, audio.currentTime - live.track.starts[i]) : null;
+    if (next) reshapeSession(next);
   } else if ('finishno' in ds) {
     closeFinishSheet();
   } else if ('finishok' in ds) {

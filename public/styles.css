@@ -718,3 +718,12 @@ body.flash-muscu { animation: flash-muscu 1.5s ease-out; }
 .seg-totals li { display: flex; justify-content: space-between; font-size: 15px; }
 .seg-totals li.all { font-size: 17px; font-weight: 800; border-top: 1px solid var(--surface-2); padding-top: 6px; }
 .segs li.seg-course span:first-child { color: var(--run); font-weight: 700; }
+.curve-x .test-tag { display: block; font-style: normal; font-size: 9px; font-weight: 800; color: var(--run); text-transform: uppercase; }
+.tests-chart { background: var(--surface); border-radius: 22px; padding: 16px; }
+.tbars { display: flex; align-items: flex-end; gap: 8px; height: 160px; margin-top: 12px; }
+.tbar { flex: 1; display: flex; flex-direction: column; align-items: center; justify-content: flex-end; height: 100%; min-width: 0; }
+.tbar i { width: 100%; max-width: 44px; background: var(--run); border-radius: 8px 8px 3px 3px; }
+.tbar:last-child i { box-shadow: 0 0 0 2px var(--bg), 0 0 0 4px var(--run); }
+.tbar-v { font-size: 12px; font-weight: 800; margin-bottom: 4px; font-variant-numeric: tabular-nums; }
+.tbar-d { font-size: 10px; color: var(--muted); margin-top: 4px; white-space: nowrap; }
+.tbar-km { font-size: 10px; color: var(--ink); font-weight: 700; }
