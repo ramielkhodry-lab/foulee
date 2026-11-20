@@ -12,6 +12,7 @@ import { GOALS_MUSCU, LIEUX, MATERIEL_PLUS, NIVEAUX_MUSCU, MUSCLES, alternatives
 import { createGuided, currentExercise, suggestedReps, setDone, skipExercise, restLeft, adjustRest, endRest, quickRest, finish, elapsedSec as guidedElapsed, setsDone, setsTotal, restTrack, startCountdown, countLeft, endCountdown, swapExercise, startHold, cancelHold, stopHold, holdLead, holdElapsed, holdOver, holdTrack, pause as pauseGuided, resume as resumeGuided } from './muscu-live.js';
 import { replayRun, replayMuscu, canReplay } from './refaire.js';
 import { testSession, isTest } from './test-seance.js';
+import { libreSession, isLibre, libreState, libreAction, libreRallonge, libreDone, libreBlocs, libreResume } from './libre.js';
 import { upcoming, moveOptions, planOptions, nextRunLevel, runLevel, afterBilan, HORIZON, GOALS_RUN, START_RUN, GOALS_SWIM, START_SWIM, LEVELS } from './plan.js';
 
 const app = document.getElementById('app');
@@ -411,6 +412,15 @@ function extraLine(h) {
   return `<b>${prevues + done} répétitions au lieu de ${prevues}</b> : +${done} ajoutée${done > 1 ? 's' : ''} en direct${done < h.extra ? ` (${h.extra - done} lancée${h.extra - done > 1 ? 's' : ''} sans être finie${h.extra - done > 1 ? 's' : ''})` : ''}.`;
 }
 
+// Test « 5 courses au max » : chaque bloc de course, la plus longue, les pauses.
+function libreBlock(h) {
+  const r = libreResume(h);
+  if (!r) return '';
+  return `<div class="libre-sum">
+    <p class="small" style="margin:0">Plus longue course continue : <b>${mmss(r.plusLongue)}</b> (bloc ${r.blocMax}) · ${r.n} bloc${r.n > 1 ? 's' : ''} sur ${h.blocsPrevus || 5} · ${r.pauses} pause${r.pauses > 1 ? 's' : ''} marchée${r.pauses > 1 ? 's' : ''} · ${mmss(r.courseSec)} de course en tout</p>
+    <ol class="steps libre-list">${h.blocs.map((x, k) => `<li class="${k + 1 === r.blocMax ? 'best' : ''}"><span>Bloc ${k + 1}</span><span class="small"><b>${mmss(x.sec)}</b>${x.km ? ` · ${x.km.toLocaleString('fr-FR')} km` : ''}${x.km >= 0.1 && x.sec ? ` · ${allure(x.sec / x.km)}` : ''}</span></li>`).join('')}</ol>
+    <p class="muted small" style="margin:0">Test hors programme : il ne change pas ton palier.</p></div>`;
+}
 const refOf = (h) => load().history.find((x) => x.id === h.refaite) || null;
 
 // Séance passée : ligne dépliable, le détail reste à un toucher.
@@ -422,7 +432,8 @@ function historyRow(h, open = false) {
   if (h.distanceKm && sport !== 'natation') parts.push(`${h.distanceKm.toLocaleString('fr-FR')} km${h.distanceEstimee ? ' (estimé)' : ''}`);
   if (h.allureSecKm) parts.push(`allure ${allure(h.allureSecKm)}`);
   if (h.gpsIncomplet) parts.push('GPS incomplet');
-  if (h.steps && h.source === 'guidee') parts.push(`${h.completedSteps}/${h.steps.length} étapes`);
+  if (h.libre && libreResume(h)) parts.push(`test 5 courses · max ${mmss(libreResume(h).plusLongue)}`);
+  else if (h.steps && h.source === 'guidee') parts.push(`${h.completedSteps}/${h.steps.length} étapes`);
   if (h.extra) parts.push(`+${h.extraFaites ?? h.extra} répétition${(h.extraFaites ?? h.extra) > 1 ? 's' : ''}`);
   if (h.cardio) parts.push(`♥ ${h.cardio.avg} bpm`);
   if (h.montre?.kcal) parts.push(`${h.montre.kcal} kcal`);
@@ -448,6 +459,7 @@ function historyRow(h, open = false) {
         ${cardioBlock(h.cardio, h.id)}
         ${montreBlock(h)}
         ${h.deniveleM != null ? `<p class="muted small">Dénivelé : +${h.deniveleM} m, mesuré par le téléphone.</p>` : ''}
+        ${libreBlock(h)}
         ${h.source === 'guidee' && (h.distanceSource === 'manuelle' || h.dureeSource === 'manuelle') ? `<p class="muted small">Corrigé à la main${h.distanceSource === 'manuelle' ? ` : ${h.distanceKm.toLocaleString('fr-FR')} km` : ''}${h.dureeSource === 'manuelle' ? `${h.distanceSource === 'manuelle' ? ',' : ' :'} ${Math.round(h.elapsedSec / 60)} min` : ''}. C'est ce qui compte.</p>` : ''}
         ${sport === 'muscu' && h.exercices?.length ? `<ul class="steps">${h.exercices.map((x) => `<li><span>${esc(x.nom)}</span><span class="muted small">${x.poids ? `${kgLabel(x.poids)} · ` : ''}${(x.reps || []).filter((r) => r > 0).join(' / ')}${x.unite === 's' ? ' s' : ''}</span></li>`).join('')}</ul>${tonnage(h) ? '<p class="muted small">Total soulevé : charge × répétitions, hors poids du corps.</p>' : ''}` : ''}
         ${sport === 'natation' && h.swim?.nages?.length ? `<p class="small">${esc(h.swim.nages.join(', '))}${h.swim.detail ? ` · ${esc(h.swim.detail)}` : ''}</p>` : ''}
@@ -962,12 +974,13 @@ function openFinishSheet() {
   if (i >= steps.length) { go('bilan'); return; }
   const left = Math.max(0, Math.round(end - Math.max(audio.currentTime, starts[0])));
   const stepsLeft = steps.length - Math.max(0, i);
+  const ls = isLibre(live.session) ? libreState(live.session, i) : null;
   closeFinishSheet();
   document.body.insertAdjacentHTML('beforeend', `
     <div class="hr-sheet finish-sheet" role="dialog" aria-label="Terminer la séance">
       <div class="hr-sheet-in">
         <h2>Terminer maintenant ?</h2>
-        <p>Il reste <b>${mmss(left)}</b> et ${stepsLeft} étape${stepsLeft > 1 ? 's' : ''}. Ce que tu as déjà fait est gardé pour le bilan.</p>
+        <p>${ls ? `Tu en es au <b>bloc ${ls.bloc} sur ${ls.blocs}</b>.` : `Il reste <b>${mmss(left)}</b> et ${stepsLeft} étape${stepsLeft > 1 ? 's' : ''}.`} Ce que tu as déjà fait est gardé pour le bilan.</p>
         <button class="btn-primary" data-finishno>Continuer la séance</button>
         <button class="btn-stop" data-finishok>${isTest(live.session) ? 'Arrêter le test' : 'Terminer et faire le bilan'}</button>
       </div>
@@ -986,6 +999,10 @@ let testDone = null; // fin de la séance test : ce qui a été joué (rien n'es
 
 const localNow = () => new Date().toLocaleString('sv-SE').replace(' ', 'T'); // AAAA-MM-JJTHH:MM:SS, heure locale
 
+// Test « 5 courses au max » : signaux seuls (une annonce dirait une durée qui n'existe pas)
+// et pas de mi-séance (la durée totale n'est pas connue).
+const trackOpts = (session) => ({ voice: load().settings.annonces === 'voix' && !isLibre(session), leadIn: session.leadIn, half: !isLibre(session) });
+
 function startSession(session, resume = null) {
   if (!audioAssets) {
     alert('Les sons ne sont pas encore chargés. Vérifie ta connexion et réessaie dans quelques secondes.');
@@ -996,7 +1013,7 @@ function startSession(session, resume = null) {
   // iOS refuse de lancer l'audio sinon.
   let track;
   try {
-    track = assemble(session.steps, audioAssets.index, audioAssets.pack, { voice: load().settings.annonces === 'voix', leadIn: session.leadIn });
+    track = assemble(session.steps, audioAssets.index, audioAssets.pack, trackOpts(session));
   } catch (e) {
     alert(`Impossible de préparer la séance : ${e.message}. Ferme et rouvre Foulée pour la mettre à jour.`);
     return;
@@ -1128,6 +1145,7 @@ function renderTouchLock() {
   el.id = 'touchlock';
   el.innerHTML = `
     <button class="lock-extend" type="button" hidden><i></i><span>+1 répétition</span><small></small><em>Maintiens 2 secondes</em></button>
+    <button class="lock-libre" type="button" hidden><i></i><span></span><em>Maintiens 2 secondes</em></button>
     <div class="lock-zone">
       <div class="lock-badge">Touches bloquées</div>
       <button class="lock-btn" type="button" aria-label="Maintenir 2 secondes pour débloquer"><svg viewBox="0 0 100 100" aria-hidden="true"><circle class="lock-ring" cx="50" cy="50" r="46"/></svg><span>🔒</span></button>
@@ -1137,6 +1155,7 @@ function renderTouchLock() {
   const holdable = [
     [el.querySelector('.lock-btn'), () => { touchLocked = false; renderTouchLock(); }],
     [el.querySelector('.lock-extend'), () => { extendLive(); if (live) updateExtend(liveStep()); }],
+    [el.querySelector('.lock-libre'), () => libreLive(UNLOCK_MS / 1000)],
   ];
   const pointers = new Set();
   let hold = null; // { id, x0, y0, timer, btn }
@@ -1190,9 +1209,9 @@ function reshapeSession(next) {
   if (!live || next === live.session) return;
   let track;
   try {
-    track = assemble(next.steps, audioAssets.index, audioAssets.pack, { voice: load().settings.annonces === 'voix', leadIn: next.leadIn });
+    track = assemble(next.steps, audioAssets.index, audioAssets.pack, trackOpts(next));
   } catch (e) {
-    alert(`Impossible d'ajouter la répétition : ${e.message}`);
+    alert(`${isLibre(next) ? 'Impossible de changer d\'étape' : 'Impossible d\'ajouter la répétition'} : ${e.message}`);
     return;
   }
   const pos = audio.currentTime;
@@ -1230,6 +1249,14 @@ function extendLive() {
 function retractLive() {
   const i = liveStep();
   if (live && canRetract(live.session, i)) reshapeSession(retract(live.session, i));
+}
+
+// Test « 5 courses au max » : « Je marche » / « Je recours » coupe l'étape en cours maintenant.
+// back : secondes à retirer (appui long de 2 s sur l'écran bloqué : l'arrêt date du début de l'appui).
+function libreLive(back = 0) {
+  const i = liveStep();
+  if (!live || live.swapping || !isLibre(live.session) || i < 0 || i >= live.session.steps.length) return;
+  reshapeSession(libreAction(live.session, i, Math.max(0, audio.currentTime - live.track.starts[i] - back)));
 }
 
 function setupMediaSession() {
@@ -1325,6 +1352,56 @@ function updateExtend(i) {
   }
 }
 
+// Test « 5 courses au max » : textes, gros bouton, blocs faits, rallonge du bloc ouvert.
+function tickLibre(i, t) {
+  const { starts } = live.track;
+  const steps = live.session.steps;
+  const el = (id) => document.getElementById(id);
+  const st = libreState(live.session, i);
+  const since = i >= 0 && i < steps.length ? t - starts[i] : 0;
+  if (st.phase === 'echauffement') {
+    el('next').innerHTML = `<span class="muted">Ensuite</span> Bloc 1/${st.blocs} : cours le plus longtemps possible`;
+  } else if (st.phase === 'course') {
+    el('count').textContent = mmss(since); // le bloc n'a pas de fin : on compte vers le haut
+    el('next').textContent = st.bloc < st.blocs ? 'Dès que tu t\'arrêtes, touche « Je marche »' : 'Dernier bloc : touche quand tu t\'arrêtes';
+  } else if (st.phase === 'marche') {
+    el('next').innerHTML = `<span class="muted">Ensuite</span> Bloc ${st.bloc}/${st.blocs}, au signal`;
+  } else if (st.phase === 'fin') {
+    el('now').textContent = 'Test fini';
+    el('next').textContent = 'Marche pour récupérer. Le chrono et le GPS continuent jusqu\'à « Terminer ».';
+  }
+  el('stepno').textContent = st.phase === 'intro' ? 'Départ' : st.phase === 'echauffement' ? 'Échauffement'
+    : st.phase === 'fin' ? 'Fin' : `Bloc ${st.bloc}/${st.blocs} · ${st.phase === 'course' ? 'course' : 'marche 2 min'}`;
+  const btn = el('librebtn');
+  if (btn) {
+    btn.hidden = !st.action || touchLocked;
+    if (btn.textContent !== (st.action || '')) btn.textContent = st.action || '';
+    btn.dataset.phase = st.phase;
+  }
+  const lockBtn = document.querySelector('#touchlock .lock-libre');
+  if (lockBtn) {
+    lockBtn.hidden = !st.action;
+    const label = lockBtn.querySelector('span');
+    if (label.textContent !== (st.action || '')) label.textContent = st.action || '';
+  }
+  // Blocs déjà courus (le bloc en cours compte en direct).
+  const blocs = el('libreblocs');
+  if (blocs) {
+    const done = [];
+    steps.forEach((s, k) => {
+      if (s.kind !== 'course' || k > i || i < 0) return;
+      done.push(k === i ? since : s.duration);
+    });
+    const html = done.length ? done.map((sec, k) => `<span class="${k === done.length - 1 && st.phase === 'course' ? 'on' : ''}"><small>${k + 1}</small>${mmss(sec)}</span>`).join('') : '';
+    if (blocs.innerHTML !== html) blocs.innerHTML = html;
+  }
+  // Toujours en course à l'approche de la fin provisoire du bloc : on le rallonge.
+  if (!live.swapping && !audio.paused && i >= 0 && i < steps.length) {
+    const next = libreRallonge(live.session, i, since);
+    if (next) reshapeSession(next);
+  }
+}
+
 // Affichage du lecteur : relu à chaque image depuis la position de la piste, donc sans dérive.
 function tick() {
   if (current !== 'live' || !live) return;
@@ -1363,6 +1440,7 @@ function tick() {
   }
   updateExtend(i);
   el('stepno').textContent = i < 0 ? 'Départ' : i >= steps.length ? 'Fin' : `Étape ${i + 1}/${steps.length} · ${KINDS[steps[i].kind].label}`;
+  if (isLibre(live.session)) tickLibre(i, t);
   // Barre : chaque étape à sa couleur (vert = course, blanc = marche), passé plein, futur estompé.
   const segs = el('bar')?.querySelectorAll('.seg > i') || [];
   segs.forEach((f, k) => { f.style.width = `${Math.max(0, Math.min(1, (t - starts[k]) / steps[k].duration)) * 100}%`; });
@@ -1592,6 +1670,8 @@ const screens = {
         <button class="option muscu" data-logplan="muscu"><span><span>La noter sans guidage</span><span class="muted">Séance déjà faite : charges et répétitions à la main.</span></span><span class="go">+</span></button>` : ''}
       <h3>Course guidée</h3>
       ${d.sessions.map((x) => `<button class="option" data-start="${esc(x.id)}"><span><span>${esc(x.name)}</span><span class="muted">${minutesLabel(total(x.steps))} · ${x.steps.length} étapes</span></span><span class="go">▶</span></button>`).join('')}
+      <h3>Me tester</h3>
+      <button class="option" data-startlibre><span><span>Test : 5 courses au max</span><span class="muted">Cours le plus longtemps possible, 2 min de marche dès que tu t'arrêtes, 5 fois. Hors programme.</span></span><span class="go">▶</span></button>
       <h3>Noter une séance faite</h3>
       ${manualButtons(d, '')}
       <h3>Vérifier les signaux</h3>
@@ -1664,12 +1744,21 @@ const screens = {
       ${s.ask && !s.ask.choix ? `<section class="why-tips course">${palierAsk(s.ask)}</section>` : ''}
       ${isTest(s) ? `<p class="notice small replay-note"><strong>Séance test, elle ne compte nulle part</strong> : pas d'historique, pas de bilan, aucun effet sur ton programme. Le vrai moteur de séance : signaux, 3 bips avant chaque changement, flash, barre, mi-séance, verrou.</p>${IOS && load().settings.son !== 'exclusif' ? '<p class="alert"><strong>Mode silencieux coupé et volume monté, sinon aucun son.</strong> En mode « Avec ma musique », l\'iPhone en silencieux ne joue aucun signal.</p>' : ''}` : ''}
       ${s.refaite ? `<p class="notice small replay-note"><strong>La même séance que ${esc(dateLabel(s.refaiteDate))}</strong>, étape par étape. Elle compte comme une course de plus : ${s.refaiteNote}</p>` : ''}
-      <section class="prep-sum">
+      ${isLibre(s) ? `<section class="prep-sum libre-prep">
+        <p class="hero-num">${s.blocs || 5}<small>courses au max</small></p>
+        <ol class="small libre-how">
+          <li>5 min de marche d'échauffement (« Je commence à courir » pour l'écourter).</li>
+          <li>Cours aussi longtemps que tu peux. Dès que tu t'arrêtes, touche <b>« Je marche »</b>.</li>
+          <li>2 min de marche, puis le signal de course : repars. <b>« Je recours »</b> si tu repars avant.</li>
+          <li>5 blocs de course, puis « Terminer » quand tu as fini de marcher.</li>
+        </ol>
+        <p class="muted small" style="margin:0">Signaux seulement, pas de voix. Écran bloqué : appui long 2 s sur « Je marche ». Hors programme : enregistrée comme une course, sans effet sur ton palier.</p>
+      </section>` : `<section class="prep-sum">
         ${total(s.steps) < 120 ? `<p class="hero-num">${total(s.steps)}<small>s</small></p>` : `<p class="hero-num">${Math.round(total(s.steps) / 60)}<small>min</small></p>`}
         <p class="muted" style="margin:0">${s.steps.length} étapes · ${runs.length} en course</p>
         <div class="effort-bar">${s.steps.map((x) => `<i class="${KINDS[x.kind].effort}" style="flex:${x.duration}"></i>`).join('')}</div>
         <p class="small" style="margin:8px 0 0">${esc(stepsSummary(s.steps))}</p>
-      </section>
+      </section>`}
       <ul class="prep-list">
         ${prepGpsBlock()}
         ${prepSoundBlock()}
@@ -1692,15 +1781,16 @@ const screens = {
     };
     const playing = !audio.paused;
     const interrupted = !playing && live && !live.userPaused && !live.swapping && audio.currentTime < live.track.end;
+    const libre = isLibre(live?.session);
     return `
-      <div class="live" id="live" data-effort="marche">
+      <div class="live${libre ? ' is-libre' : ''}" id="live" data-effort="marche">
         <div class="live-top"><span id="stepno"></span><span><span class="gpsdot" id="gpsdot"></span><span id="gpsstate"></span></span></div>
         ${interrupted ? '<div class="alert">Séance interrompue (appel, Siri ou autre app). Touche « Reprendre ».</div>' : ''}
         <p class="now" id="now"></p>
         <p class="count" id="count"></p>
         <p class="next" id="next"></p>
         <div class="extend" id="extend" hidden></div>
-        ${segmentsBar()}
+        ${libre ? '<button class="libre-btn" id="librebtn" data-libre hidden></button><div class="libre-blocs" id="libreblocs"></div>' : segmentsBar()}
         <p class="halfway" id="halfway" hidden>Moitié de la séance faite</p>
         <div class="live-stats">
           <div><b id="dist">0,00</b><span>km</span></div>
@@ -1710,9 +1800,9 @@ const screens = {
         <div class="gpsline" id="gps"></div>
         ${IOS && load().settings.son !== 'exclusif' ? '<p class="muted small" style="margin:0">Mode musique : iPhone hors silencieux, sinon pas de signaux.</p>' : ''}
         <button class="btn-primary live-done" id="livedone" data-finishok hidden>${isTest(live?.session) ? 'Terminer le test' : 'Terminer et faire le bilan'}</button>
-        ${live?.overAt ? '' : `<div class="live-controls">
+        ${live?.overAt ? '' : `<div class="live-controls${libre ? ' one' : ''}">
           <button class="toggle${playing ? '' : ' paused'}" data-toggle>${playing ? 'Pause' : 'Reprendre'}</button>
-          <button data-skip>Étape suivante</button>
+          ${libre ? '' : '<button data-skip>Étape suivante</button>'}
         </div>`}
         <div class="live-extra">
           <button class="lockbtn" data-touchlock>🔒 Bloquer l'écran</button>
@@ -1870,7 +1960,8 @@ const screens = {
       <h1>Bilan de la séance</h1>
       <div class="card">
         <p><strong>${esc(b.sessionName)}</strong></p>
-        <p class="muted">${mmss(b.elapsedSec)} de séance${b.prolongSec ? `, dont ${mmss(b.prolongSec)} après le programme` : ''} · ${b.completedSteps} étape(s) sur ${b.steps.length}${b.skipped.length ? ` · ${b.skipped.length} passée(s)` : ''}</p>
+        <p class="muted">${mmss(b.elapsedSec)} de séance${b.prolongSec ? `, dont ${mmss(b.prolongSec)} après le programme` : ''}${b.libre ? '' : ` · ${b.completedSteps} étape(s) sur ${b.steps.length}${b.skipped.length ? ` · ${b.skipped.length} passée(s)` : ''}`}</p>
+        ${libreBlock(b)}
         ${b.extra ? `<p class="small">${extraLine(b)}</p>` : ''}
         ${b.trace ? `<div class="map" data-map="bilan"></div>${b.gpsIncomplet ? '<p class="muted small">En pointillés : écran verrouillé, le GPS ne suivait plus.</p>' : ''}` : ''}
         ${b.distanceSource === 'gps' ? `<p class="small">GPS : ${b.distanceKm.toLocaleString('fr-FR')} km${b.allureSecKm ? ` · ${allure(b.allureSecKm)}` : ''}${b.gpsIncomplet ? ' · <strong>incomplet</strong> (écran verrouillé un moment)' : ''}</p>` : ''}
@@ -2279,10 +2370,13 @@ function go(screen) {
 
 // Bilan d'une course guidée, à partir de ce qui a été mesuré (séance en cours ou séance sauvegardée).
 function runBilan({ session, starts, end, reached, elapsedSec, prolongSec = 0, track, skipped, startedAt, anchors, endedAt, finMs }) {
-  const steps = session.steps;
+  const libre = isLibre(session);
+  // Test libre : on garde les étapes réellement faites (la dernière coupée à l'arrêt).
+  const steps = libre ? libreDone(session.steps, starts, reached) : session.steps;
   const lastIdx = stepAt(starts, end, reached);
-  const completed = lastIdx >= steps.length ? steps.length : Math.max(0, lastIdx);
+  const completed = libre ? steps.length : lastIdx >= steps.length ? steps.length : Math.max(0, lastIdx);
   const gps = summary(track, elapsedSec);
+  const stepMs = stepTimes(anchors || [], starts, end, reached);
   return {
     id: uid(),
     sport: 'course',
@@ -2291,6 +2385,7 @@ function runBilan({ session, starts, end, reached, elapsedSec, prolongSec = 0, t
     sessionName: session.name,
     level: session.level ?? null,
     ...(session.refaite ? { refaite: session.refaite } : {}),
+    ...(libre ? { libre: true, blocsPrevus: session.blocs || 5, blocs: libreBlocs(steps, stepMs, gps.points) } : {}),
     steps,
     plannedSec: total(steps),
     elapsedSec,
@@ -2305,7 +2400,7 @@ function runBilan({ session, starts, end, reached, elapsedSec, prolongSec = 0, t
     gpsIncomplet: gps.gpsIncomplet,
     deniveleM: gps.deniveleM,
     trace: encodeTrace(gps.points),
-    stepMs: stepTimes(anchors || [], starts, end, reached),
+    stepMs: libre && stepMs ? stepMs.slice(0, steps.length + 1) : stepMs,
     endedAt,
     finMs,
     difficulte: null,
@@ -2349,6 +2444,7 @@ function replaySession(id) {
     openMuscuPrep();
     return;
   }
+  if (h.libre) { openPrepare(libreSession()); return; }
   const r = replayRun(h);
   if (!r) return;
   const plan = planFor(d);
@@ -2572,6 +2668,11 @@ document.addEventListener('click', (e) => {
     go(ds.tab === 'demarrer' && live && !live.done ? 'live' : ds.tab);
   } else if (ds.start) {
     openPrepare(findSession(ds.start));
+  } else if ('startlibre' in ds) {
+    if (live && !live.done) return;
+    openPrepare(libreSession());
+  } else if ('libre' in ds) {
+    libreLive();
   } else if ('starttest' in ds) {
     if (live && !live.done) return;
     openPrepare(testSession());

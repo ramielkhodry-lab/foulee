@@ -36,7 +36,7 @@ export function validateSteps(steps) {
 
 // Liste des sons à jouer : [{ at: secondes, clip: id }], triée.
 // voice=false : signaux seuls (montée = course, descente = marche), sans annonce parlée.
-export function buildEvents(steps, { voice = true, leadIn = LEAD_IN } = {}) {
+export function buildEvents(steps, { voice = true, leadIn = LEAD_IN, half: withHalf = true } = {}) {
   validateSteps(steps);
   const { starts, end } = stepStarts(steps, leadIn);
   const events = voice ? [{ at: 0.3, clip: 'intro' }] : [];
@@ -51,9 +51,10 @@ export function buildEvents(steps, { voice = true, leadIn = LEAD_IN } = {}) {
     const stepEnd = starts[i] + s.duration;
     if (voice && next && s.duration >= MIN_STEP_FOR_PRE) events.push({ at: stepEnd - PRE_ANNOUNCE, clip: preClipId(next.kind) });
     // 3 bips avant chaque changement. Une étape de 5 s les a aussi (signal à 0 s, bips à 2, 3, 4 s).
-    if (s.duration >= 5) for (const d of [3, 2, 1]) events.push({ at: stepEnd - d, clip: 'bip' });
+    // Étape « libre » (test 5 courses au max) : sa fin n'est pas connue d'avance, pas de bips.
+    if (s.duration >= 5 && !s.libre) for (const d of [3, 2, 1]) events.push({ at: stepEnd - d, clip: 'bip' });
   });
-  const half = halfwayAt(starts, end, events, voice);
+  const half = withHalf ? halfwayAt(starts, end, events, voice) : null;
   if (half !== null) events.push({ at: half, clip: 'signal_moitie' });
   if (voice) {
     events.push({ at: end, clip: 'bip_long' });

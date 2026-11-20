@@ -8,7 +8,7 @@ import { byId, nextLoad } from './muscu.js';
 // Course : les étapes faites ce jour-là. Répétitions ajoutées en direct : seules les
 // répétitions finies sont gardées, suivies de la récupération.
 export function replayRun(h) {
-  if (!h || (h.sport || 'course') !== 'course') return null;
+  if (!h || (h.sport || 'course') !== 'course' || h.libre) return null; // test libre : relancé tel quel, pas rejoué
   const level = runLevel(h);
   let steps = null;
   if (Array.isArray(h.steps) && h.steps.length) {
@@ -41,4 +41,4 @@ export function replayMuscu(h, history, goal) {
   return { seance: h.seance || null, title: h.sessionName || 'Musculation', exercices, repos: goal.repos, refaite: h.id };
 }
 
-export const canReplay = (h) => Boolean(replayRun(h) || (h?.sport === 'muscu' && h.exercices?.some((x) => byId(x.id))));
+export const canReplay = (h) => Boolean(h?.libre || replayRun(h) || (h?.sport === 'muscu' && h.exercices?.some((x) => byId(x.id))));
