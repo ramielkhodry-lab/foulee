@@ -1231,40 +1231,68 @@ function closeFinishSheet() {
 // L'image est prête AVANT le bouton « Envoyer » : iOS refuse navigator.share s'il n'est pas
 // appelé tout de suite après le toucher.
 let partage = null; // { file, text, url }
+let partageH = null; // la séance affichée dans la feuille
+let partageGen = 0; // une seule image à la fois : la dernière demandée gagne
+const carteNote = (h) => (!traceOf(h).length ? '' : load().settings.partageCarte ? ' et le tracé sur la carte (on voit où tu es passé, départ compris)' : ' et le tracé complet, sans carte (départ et arrivée visibles)');
 async function openPartage(id) {
   if (id === 'bilan' && current === 'bilan') readBilan();
   const h = id === 'bilan' ? bilan : load().history.find((x) => x.id === id);
   if (!h) return;
   closePartage();
+  partageH = h;
   document.body.insertAdjacentHTML('beforeend', `
     <div class="hr-sheet partage-sheet" role="dialog" aria-label="Partager la séance">
       <div class="hr-sheet-in">
         <div class="hr-sheet-top"><h2>Partager</h2><button class="btn-ghost" data-partageclose aria-label="Fermer">✕</button></div>
         <div class="partage-img"><p class="muted small">Préparation de l'image…</p></div>
+        ${traceOf(h).length ? `<label class="partage-carte"><input type="checkbox" data-partagecarte ${load().settings.partageCarte ? 'checked' : ''}> Afficher la carte</label>` : ''}
         <div class="partage-go"></div>
-        <p class="muted small" style="margin:10px 0 0">Seulement les chiffres mesurés${traceOf(h).length ? ' et le tracé complet (départ et arrivée visibles)' : ''}. Ni douleur ni ressenti. Aucun lien public : tu choisis à qui tu l'envoies.</p>
+        <p class="muted small partage-note" style="margin:10px 0 0">Seulement les chiffres mesurés${carteNote(h)}. Ni douleur ni ressenti. Aucun lien public : tu choisis à qui tu l'envoies.</p>
       </div>
     </div>`);
   document.body.classList.add('sheet-open');
+  await buildPartage();
+}
+async function buildPartage() {
+  const h = partageH;
+  const gen = ++partageGen;
+  const carte = !!load().settings.partageCarte && traceOf(h).length > 0;
+  const box = document.querySelector('.partage-img');
+  const go = document.querySelector('.partage-go');
+  if (!box) return;
+  if (partage?.url) URL.revokeObjectURL(partage.url);
+  partage = null;
+  go.innerHTML = '';
+  box.innerHTML = `<p class="muted small">${carte ? 'Chargement de la carte…' : 'Préparation de l\'image…'}</p>`;
   try {
-    const { canvas, recap } = await drawCard(h, traceOf(h));
+    const { canvas, recap, carteErr } = await drawCard(h, traceOf(h), { carte });
     const blob = await canvasBlob(canvas);
-    if (!document.querySelector('.partage-sheet')) return;
+    if (gen !== partageGen || !document.querySelector('.partage-sheet')) return;
     const file = new File([blob], fileName(h), { type: 'image/png' });
     partage = { file, text: recap.text, url: URL.createObjectURL(blob) };
     const canFile = !!navigator.canShare?.({ files: [file] });
-    document.querySelector('.partage-img').innerHTML = `<img src="${partage.url}" alt="Récap de la séance">`;
-    document.querySelector('.partage-go').innerHTML = `
+    box.innerHTML = `<img src="${partage.url}" alt="Récap de la séance">`;
+    go.innerHTML = `
+      ${carteErr ? `<p class="alert small">Carte non ajoutée (${esc(carteErr)}) : l'image montre le tracé seul.</p>` : ''}
       ${canFile || navigator.share ? '<button class="btn-primary" data-partageok>Envoyer…</button>' : ''}
       <button class="${canFile || navigator.share ? 'btn-ghost' : 'btn-primary'}" data-partageimg style="width:100%;margin-top:10px">Enregistrer l'image</button>
       <p class="small partage-text">${esc(recap.text).replace('\n', '<br>')}</p>
       ${canFile ? '' : '<p class="muted small" style="margin:6px 0 0">Ce téléphone ne peut pas joindre l\'image directement : enregistre-la, puis ajoute-la à ton message.</p>'}`;
   } catch (err) {
-    const box = document.querySelector('.partage-img');
-    if (box) box.innerHTML = `<p class="alert small">Image impossible : ${esc(err.message)}</p>`;
+    if (gen === partageGen) box.innerHTML = `<p class="alert small">Image impossible : ${esc(err.message)}</p>`;
   }
 }
+document.addEventListener('change', (e) => {
+  if (!('partagecarte' in (e.target.dataset || {}))) return;
+  const on = e.target.checked;
+  update((d) => { d.settings.partageCarte = on; });
+  const note = document.querySelector('.partage-note');
+  if (note && partageH) note.textContent = `Seulement les chiffres mesurés${carteNote(partageH)}. Ni douleur ni ressenti. Aucun lien public : tu choisis à qui tu l'envoies.`;
+  buildPartage();
+});
 function closePartage() {
+  partageGen++;
+  partageH = null;
   document.querySelector('.partage-sheet')?.remove();
   if (partage?.url) URL.revokeObjectURL(partage.url);
   partage = null;
