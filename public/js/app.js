@@ -12,7 +12,7 @@ import { GOALS_MUSCU, LIEUX, MATERIEL_PLUS, NIVEAUX_MUSCU, MUSCLES, alternatives
 import { createGuided, currentExercise, suggestedReps, setDone, skipExercise, restLeft, adjustRest, endRest, quickRest, finish, elapsedSec as guidedElapsed, setsDone, setsTotal, restTrack, startCountdown, countLeft, endCountdown, swapExercise, startHold, cancelHold, stopHold, holdLead, holdElapsed, holdOver, holdTrack, pause as pauseGuided, resume as resumeGuided } from './muscu-live.js';
 import { replayRun, replayMuscu, canReplay } from './refaire.js';
 import { testSession, isTest } from './test-seance.js';
-import { libreSession, isLibre, libreState, libreAction, libreRallonge, libreDone, libreBlocs, libreResume, enCourse, GPS_FLOU, libreSegments, segmentTotals } from './libre.js';
+import { libreSession, isLibre, libreState, libreAction, libreRallonge, libreDone, libreBlocs, libreResume, enCourse, GPS_FLOU, libreSegments, segmentTotals, libreFinir } from './libre.js';
 import { upcoming, moveOptions, planOptions, nextRunLevel, runLevel, afterBilan, palierDesTests, HORIZON, GOALS_RUN, START_RUN, GOALS_SWIM, START_SWIM, LEVELS } from './plan.js';
 
 const app = document.getElementById('app');
@@ -1043,13 +1043,28 @@ function openFinishSheet() {
   const stepsLeft = steps.length - Math.max(0, i);
   const ls = isLibre(live.session) ? libreState(live.session, i) : null;
   closeFinishSheet();
+  // Test : « Terminer » avant le retour au calme propose d'abord les 5 min de marche de fin.
+  if (ls && ['echauffement', 'course', 'marche'].includes(ls.phase)) {
+    document.body.insertAdjacentHTML('beforeend', `
+      <div class="hr-sheet finish-sheet" role="dialog" aria-label="Finir le test">
+        <div class="hr-sheet-in">
+          <h2>Finir le test ?</h2>
+          <p>Tu en es au <b>bloc ${ls.bloc} sur ${ls.blocs}</b>. Ce que tu as fait est gardé : on termine par 5 min de marche, puis « C'est fini ».</p>
+          <button class="btn-primary" data-librefinir>Finir par 5 min de marche</button>
+          <button class="btn-ghost" data-finishno style="width:100%;margin:8px 0">Continuer le test</button>
+          <button class="btn-stop" data-finishok>Arrêter sans marcher, faire le bilan</button>
+        </div>
+      </div>`);
+    document.body.classList.add('sheet-open');
+    return;
+  }
   document.body.insertAdjacentHTML('beforeend', `
     <div class="hr-sheet finish-sheet" role="dialog" aria-label="Terminer la séance">
       <div class="hr-sheet-in">
         <h2>Terminer maintenant ?</h2>
         <p>${ls ? `Tu en es au <b>bloc ${ls.bloc} sur ${ls.blocs}</b>.` : `Il reste <b>${mmss(left)}</b> et ${stepsLeft} étape${stepsLeft > 1 ? 's' : ''}.`} Ce que tu as déjà fait est gardé pour le bilan.</p>
         <button class="btn-primary" data-finishno>Continuer la séance</button>
-        <button class="btn-stop" data-finishok>${isTest(live.session) ? 'Arrêter le test' : 'Terminer et faire le bilan'}</button>
+        <button class="btn-stop" data-finishok>${isTest(live.session) ? 'Arrêter le test' : ls ? 'C\'est fini : faire le bilan' : 'Terminer et faire le bilan'}</button>
       </div>
     </div>`);
   document.body.classList.add('sheet-open');
@@ -1323,6 +1338,8 @@ function retractLive() {
 function libreLive(back = 0) {
   const i = liveStep();
   if (!live || live.swapping || !isLibre(live.session) || i < 0 || i >= live.session.steps.length) return;
+  // Retour au calme : « C'est fini » l'écourte et va au bilan.
+  if (libreState(live.session, i).phase === 'recup') { closeFinishSheet(); go('bilan'); return; }
   reshapeSession(libreAction(live.session, i, Math.max(0, audio.currentTime - live.track.starts[i] - back)));
 }
 
@@ -1448,7 +1465,7 @@ function tickLibre(i, t) {
     el('next').innerHTML = `${m(`Marche · reste ${mmss(left)} ·`)} ensuite bloc ${st.bloc}/${st.blocs}, au signal`;
   } else if (st.phase === 'recup') {
     el('now').textContent = 'Marche';
-    el('next').innerHTML = `${m(`Retour au calme · reste ${mmss(left)} ·`)} puis le signal de fin`;
+    el('next').innerHTML = `${m(`Retour au calme · reste ${mmss(left)} ·`)} « C'est fini » pour arrêter avant`;
   } else if (st.phase === 'fin') {
     el('now').textContent = 'Test fini';
     el('next').innerHTML = `${m(`+${mmss(Math.max(0, liveElapsed() - (live.track.end - starts[0])))} en plus ·`)} continue à marcher si tu veux, puis « Terminer »`;
@@ -1850,7 +1867,7 @@ const screens = {
           <li>5 min de marche d'échauffement (« Je commence à courir » pour l'écourter).</li>
           <li>Cours aussi longtemps que tu peux. Dès que tu t'arrêtes, touche <b>« Je marche »</b>.</li>
           <li>2 min de marche, puis le signal de course : repars. <b>« Je recours »</b> si tu repars avant.</li>
-          <li>Après le 5e bloc, 5 min de marche pour revenir au calme (« Finir la marche » pour l'écourter), puis « Terminer ».</li>
+          <li>Après le 5e bloc, ou si tu touches « Terminer » avant : 5 min de marche de retour au calme. « C'est fini » pour arrêter avant, ou continue à marcher : le chrono tourne jusqu'à « C'est fini ».</li>
         </ol>
         <p class="muted small" style="margin:0">Signaux seulement, pas de voix. Écran bloqué : appui long 2 s sur « Je marche ». Hors programme : enregistrée comme une course, sans effet sur ton palier.</p>
       </section>` : `<section class="prep-sum">
@@ -1899,7 +1916,7 @@ const screens = {
         </div>
         <div class="gpsline" id="gps"></div>
         ${IOS && load().settings.son !== 'exclusif' ? '<p class="muted small" style="margin:0">Mode musique : iPhone hors silencieux, sinon pas de signaux.</p>' : ''}
-        <button class="btn-primary live-done" id="livedone" data-finishok hidden>${isTest(live?.session) ? 'Terminer le test' : 'Terminer et faire le bilan'}</button>
+        <button class="btn-primary live-done" id="livedone" data-finishok hidden>${isTest(live?.session) ? 'Terminer le test' : libre ? 'C\'est fini : faire le bilan' : 'Terminer et faire le bilan'}</button>
         ${live?.overAt ? '' : `<div class="live-controls${libre ? ' one' : ''}">
           <button class="toggle${playing ? '' : ' paused'}" data-toggle>${playing ? 'Pause' : 'Reprendre'}</button>
           ${libre ? '' : '<button data-skip>Étape suivante</button>'}
@@ -2813,6 +2830,11 @@ document.addEventListener('click', (e) => {
     testAudio.onended = () => { if (prep) { prep.testing = false; if (current === 'prepare') render(); } };
     testAudio.play().catch((err) => { if (prep) prep.testing = false; alert(`Lecture impossible : ${err.message}`); });
     render();
+  } else if ('librefinir' in ds) {
+    closeFinishSheet();
+    const i = liveStep();
+    const next = live && !live.swapping ? libreFinir(live.session, i, audio.currentTime - live.track.starts[i]) : null;
+    if (next) reshapeSession(next);
   } else if ('finishno' in ds) {
     closeFinishSheet();
   } else if ('finishok' in ds) {

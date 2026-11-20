@@ -178,3 +178,15 @@ test('segments : échauffement, courses, marches, retour au calme, marche en plu
   // Terminer juste à la fin : pas de « marche en plus ».
   assert.equal(libreSegments(steps, stepMs, points, [], stepMs.at(-1) + 2000).at(-1).kind, 'recuperation');
 });
+
+import { libreFinir } from '../public/js/libre.js';
+
+test('« Terminer » avant la fin : 5 min de marche tout de suite', () => {
+  const s = libreFinir(libreSession(), 1, 80);
+  assert.deepEqual(s.steps.map((x) => [x.kind, x.duration]), [['echauffement', 300], ['course', 81], ['recuperation', 300]]);
+  assert.equal(libreState(s, 2).phase, 'recup');
+  assert.equal(libreState(s, 2).action, 'C\'est fini');
+  assert.equal(libreFinir(s, 2, 10), null); // déjà au retour au calme
+  const m = libreFinir(libreAction(libreSession(), 1, 60), 2, 30); // pendant une marche de 2 min
+  assert.deepEqual(m.steps.slice(2).map((x) => [x.kind, x.duration]), [['marche', 31], ['recuperation', 300]]);
+});
