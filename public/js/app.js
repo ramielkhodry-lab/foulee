@@ -4,7 +4,8 @@ import { MAX_EXTRA, extendState, canExtend, canRetract, extend, retract, extraSu
 import { load, update, uid, PRESETS, onSave, replace, empty } from './store.js';
 import * as account from './account.js';
 import { createTrack, addPoint, addAltitude, markGap, summary, currentPace, encodeTrace, decodeTrace, packTrack, restoreTrack, metersSince } from './gps.js';
-import { drawTrace } from './map.js';
+import { drawTrace, drawParcours, liveParcoursMap } from './map.js';
+import { planLoop, reroute, decodePolyline, targetKm, kmLabel } from './parcours.js';
 import { stepTimes, summarize, summarizeMontre, montreStale, MONTRE_V, mergeDistance, recovery, recoveryAt, zoneLimits, zoneOf, zoneTimes, cardioLine, curveSvg, windowOf, swimWindow, dayRange, applySwim } from './cardio.js';
 import { iaInput, pendingIA, failedIA, failureMessage } from './ia.js';
 import { tipsOf, tipsSource, hasIA } from './conseils.js';
@@ -13,7 +14,7 @@ import { createGuided, currentExercise, suggestedReps, setDone, skipExercise, re
 import { replayRun, replayMuscu, canReplay } from './refaire.js';
 import { drawCard, canvasBlob, fileName } from './share.js';
 import { testSession, isTest } from './test-seance.js';
-import { libreSession, isLibre, libreState, libreAction, libreRallonge, libreDone, libreBlocs, libreResume, enCourse, GPS_FLOU, libreSegments, segmentTotals } from './libre.js';
+import { libreSession, isLibre, libreState, libreAction, libreRallonge, libreDone, libreBlocs, libreResume, enCourse, GPS_FLOU, libreSegments, segmentTotals, libreFinir } from './libre.js';
 import { upcoming, moveOptions, planOptions, nextRunLevel, runLevel, afterBilan, palierDesTests, HORIZON, GOALS_RUN, START_RUN, GOALS_SWIM, START_SWIM, LEVELS } from './plan.js';
 
 const app = document.getElementById('app');
@@ -178,7 +179,10 @@ function mountMaps() {
     drawTrace(el, traceOf(id === 'bilan' ? bilan : load().history.find((h) => h.id === id)));
   }
 }
-document.addEventListener('toggle', (e) => { if (e.target.open) mountMaps(); }, true);
+document.addEventListener('toggle', (e) => {
+  if (e.target.matches?.('[data-livepar]') && live) live.parOpen = e.target.open;
+  if (e.target.open) { mountMaps(); mountLiveParcours(); }
+}, true);
 
 // Conseils du coach sur une séance faite : ceux de l'IA s'ils existent, sinon ceux des règles.
 function coachTips(h) {
@@ -598,11 +602,16 @@ const UNIT_LABEL = { km: 'km', m: 'm', kg: 'kg', reps: 'rép.' };
 const fmtKm = (km) => (Math.round(km * 10) / 10).toLocaleString('fr-FR');
 
 // Totaux d'une semaine (lundi → dimanche) : km de course, mètres nagés, nombre de séances.
+// Distance d'une course : la distance enregistrée ; à défaut (test sans distance retenue),
+// la somme de ses segments ou sa distance en courant.
+const runKm = (h) => h.distanceKm || (h.segments?.length ? segmentTotals(h.segments).seance : 0) || h.enCourse?.km || 0;
+
 function weekTotals(history, monday) {
   const end = addDays(monday, 7);
   const inWeek = history.filter((h) => { const d = String(h.date).slice(0, 10); return d >= monday && d < end; });
   return {
-    km: inWeek.filter((h) => sportOf(h) === 'course').reduce((a, h) => a + (h.distanceKm || 0), 0),
+    km: inWeek.filter((h) => sportOf(h) === 'course').reduce((a, h) => a + runKm(h), 0),
+    tests: inWeek.filter((h) => h.libre).length,
     m: inWeek.filter((h) => sportOf(h) === 'natation').reduce((a, h) => a + swimMeters(h), 0),
     kg: inWeek.filter((h) => sportOf(h) === 'muscu').reduce((a, h) => a + tonnage(h), 0),
     reps: inWeek.filter((h) => sportOf(h) === 'muscu').reduce((a, h) => a + repsOf(h), 0),
@@ -810,12 +819,36 @@ function indicators(history) {
     </div>`;
 }
 
+// Tests « 5 courses au max », du plus ancien au plus récent : plus longue course continue
+// (barre), et distance en courant. Hors programme : un repère, pas un palier.
+function testsChart(history) {
+  const tests = history.filter((h) => h.libre && libreResume(h)).sort((a, b) => String(a.date).localeCompare(String(b.date))).slice(-8);
+  if (!tests.length) return '';
+  const vals = tests.map((h) => libreResume(h));
+  const max = Math.max(...vals.map((r) => r.plusLongue)) || 1;
+  const last = vals.at(-1);
+  const prev = vals.at(-2);
+  const diff = prev ? last.plusLongue - prev.plusLongue : null;
+  return `<h3>Mes tests</h3>
+    <section class="tests-chart">
+      <p class="eyebrow" style="margin:0">Plus longue course continue</p>
+      <p class="hero-num">${mmss(last.plusLongue)}</p>
+      ${diff === null ? '<p class="muted small" style="margin:0">Premier test : refais-le dans quelques semaines pour comparer.</p>' : `<p class="delta ${diff > 0 ? 'up' : diff < 0 ? 'down' : ''}">${diff > 0 ? '▲' : diff < 0 ? '▼' : '='} ${mmss(Math.abs(diff))} par rapport au test précédent</p>`}
+      <div class="tbars">${tests.map((h, k) => {
+        const tot = h.segments?.length ? segmentTotals(h.segments).course : h.enCourse?.km;
+        return `<div class="tbar"><span class="tbar-v">${mmss(vals[k].plusLongue)}</span><i style="height:${Math.max(6, Math.round((vals[k].plusLongue / max) * 100))}%"></i><span class="tbar-d">${shortDate(h.date)}</span>${tot ? `<span class="tbar-km">${fmtKm(tot)} km</span>` : ''}</div>`;
+      }).join('')}</div>
+      <p class="muted small" style="margin:8px 0 0">Sous chaque barre : la distance en courant. Les tests comptent dans tes km de la semaine (cercle sur la courbe), jamais dans le calcul du palier.</p>
+    </section>`;
+}
+
 // Courbe des 8 dernières semaines (km de course ou mètres nagés).
 function weekCurve(history, kind, unitKey) {
   const monday = mondayOf(today());
   const weeks = Array.from({ length: 8 }, (_, i) => addDays(monday, (i - 7) * 7));
   const unit = unitKey || { course: 'km', natation: 'm', muscu: 'kg' }[kind];
   const vals = weeks.map((w) => weekTotals(history, w)[unit]);
+  const tests = weeks.map((w) => weekTotals(history, w).tests);
   const max = Math.max(...vals) || 1;
   const W = 320;
   const H = 130;
@@ -845,9 +878,10 @@ function weekCurve(history, kind, unitKey) {
       <path d="${d} L${lx},${H} L${pts[0][0]},${H} Z" fill="url(#area-${kind})"/>
       <path d="${d}" fill="none" stroke="${color}" stroke-width="3" stroke-linecap="round"/>
       ${pts.map(([x, y], i) => (vals[i] ? `<circle cx="${x}" cy="${y}" r="3.5" fill="${color}"/>` : '')).join('')}
+      ${kind === 'course' ? pts.map(([x, y], i) => (tests[i] ? `<circle cx="${x}" cy="${y}" r="7" fill="none" stroke="${color}" stroke-width="2"/>` : '')).join('') : ''}
       <circle cx="${lx}" cy="${ly}" r="9" fill="${color}" opacity="0.25"/>
     </svg>
-    <div class="curve-x">${weeks.map((w, i) => `<span>${vals[i] ? `<b>${kind === 'course' ? fmtKm(vals[i]) : unit === 'kg' && vals[i] >= 1000 ? `${fmtKm(vals[i] / 1000)}t` : Math.round(vals[i])}</b>` : '<b>·</b>'}${Number(w.slice(8))}/${Number(w.slice(5, 7))}</span>`).join('')}</div>
+    <div class="curve-x">${weeks.map((w, i) => `<span>${vals[i] ? `<b>${kind === 'course' ? fmtKm(vals[i]) : unit === 'kg' && vals[i] >= 1000 ? `${fmtKm(vals[i] / 1000)}t` : Math.round(vals[i])}</b>` : '<b>·</b>'}${Number(w.slice(8))}/${Number(w.slice(5, 7))}${kind === 'course' && tests[i] ? '<i class="test-tag">test</i>' : ''}</span>`).join('')}</div>
     </div>`;
 }
 
@@ -873,7 +907,9 @@ function curveTip(history, monday, kind) {
     }
     lines.push(`${m.toLocaleString('fr-FR')} m`);
   } else if (kind === 'course') {
-    lines.push(`${fmtKm(list.reduce((a, h) => a + (h.distanceKm || 0), 0))} km`);
+    lines.push(`${fmtKm(list.reduce((a, h) => a + runKm(h), 0))} km`);
+    const tests = list.filter((h) => h.libre && libreResume(h));
+    for (const t of tests) lines.push(`Test : ${mmss(libreResume(t).plusLongue)} de course continue max`);
   } else {
     const reps = list.reduce((a, h) => a + repsOf(h), 0);
     const kg = list.reduce((a, h) => a + tonnage(h), 0);
@@ -945,6 +981,7 @@ function startPrepGps() {
       if (!prep) return;
       prep.acc = Math.round(pos.coords.accuracy);
       prep.gps = pos.coords.accuracy <= 30 ? 'ok' : 'faible';
+      if (pos.coords.accuracy <= 100) prep.pos = [pos.coords.latitude, pos.coords.longitude];
       updatePrepGps();
     },
     (err) => {
@@ -962,6 +999,119 @@ function stopPrepGps() {
 function updatePrepGps() {
   const el = document.getElementById('prepgps');
   if (el && current === 'prepare') el.outerHTML = prepGpsBlock();
+  const btn = document.querySelector('[data-parfind][disabled]');
+  if (btn && prep?.pos) refreshParcours();
+}
+
+// --- Parcours proposé ------------------------------------------------------------
+// Une boucle qui part de ta position et y revient, de la longueur de la séance. Facultatif :
+// rien n'est demandé tant que « Me proposer un parcours » n'est pas touché.
+
+const parcoursAvailable = (s) => !isTest(s) && account.serverEnabled();
+function parcoursTarget(s) {
+  // Test 5 courses : durée inconnue d'avance, on part sur 35 min.
+  const sec = isLibre(s) ? 2100 : total(s.steps);
+  return targetKm(load().history, sec);
+}
+
+function prepParcoursBlock() {
+  const s = prep?.session;
+  if (!s || !parcoursAvailable(s)) return '';
+  const par = prep.par;
+  const wrap = (inner) => `<section class="parcours" id="prepparcours"><p class="eyebrow" style="margin:0 0 6px">Parcours</p>${inner}</section>`;
+  if (!account.session()) return wrap('<p class="small" style="margin:0">Connecte ton compte (Profil) pour que Foulée te propose une boucle autour de toi.</p>');
+  const t = par?.target || parcoursTarget(s);
+  const why = t.from
+    ? `${isLibre(s) ? '35 min' : `${Math.round(total(s.steps) / 60)} min`} à ${kmLabel(t.kmh)} km/h, ton allure de séance (marche comprise) sur ${t.from > 1 ? `tes ${t.from} dernières courses` : 'ta dernière course'}`
+    : `${isLibre(s) ? '35 min' : `${Math.round(total(s.steps) / 60)} min`} à ${kmLabel(t.kmh)} km/h, une valeur par défaut : aucune course mesurée pour l'instant`;
+  if (!par || par.status === 'idle') {
+    return wrap(`<p class="small" style="margin:0 0 10px">Une boucle d'environ <b>${kmLabel(t.km)} km</b> qui part d'ici et y revient (${why}).</p>
+      <button class="btn-ghost" data-parfind ${prep.pos ? '' : 'disabled'} style="width:100%">${prep.pos ? 'Me proposer un parcours' : 'En attente de ta position…'}</button>`);
+  }
+  if (par.status === 'loading') return wrap(`<div class="map par-map par-wait">Calcul d'une boucle de ${kmLabel(par.target.km)} km…</div>`);
+  if (par.status === 'error') {
+    return wrap(`<p class="small" style="margin:0 0 10px">✕ ${esc(par.msg)}</p><div class="row"><button class="btn-ghost small-btn" data-parfind>Réessayer</button><button class="btn-ghost small-btn" data-parremove>Laisser tomber</button></div>`);
+  }
+  const p = par.plan;
+  const gap = Math.abs(p.km - par.target.km) / par.target.km > 0.15;
+  return wrap(`<div class="map par-map" id="parmap"></div>
+    <p class="par-km"><b>${kmLabel(p.km)}</b> km <span class="muted small">la boucle, calculée sur la carte · tu vises ${kmLabel(par.target.km)} km</span></p>
+    ${gap ? '<p class="muted small" style="margin:0 0 8px">Pas de boucle plus proche de ta distance par ici : essaie « Autre boucle » ou glisse un point.</p>' : ''}
+    <div class="par-actions">
+      <button class="btn-ghost small-btn" data-parless aria-label="Boucle plus courte">− 0,5 km</button>
+      <button class="btn-ghost small-btn" data-parother>Autre boucle</button>
+      <button class="btn-ghost small-btn" data-parmore aria-label="Boucle plus longue">+ 0,5 km</button>
+    </div>
+    <p class="muted small" style="margin:8px 0 0">Glisse les points 1, 2, 3 pour passer ailleurs : la boucle est recalculée. Elle s'affiche pendant la séance (« Mon parcours »). <button class="day-link" data-parremove>Sans parcours</button></p>`);
+}
+
+function refreshParcours() {
+  const el = document.getElementById('prepparcours');
+  if (el && current === 'prepare') { el.outerHTML = prepParcoursBlock(); mountPrepParcours(); }
+}
+
+function mountPrepParcours() {
+  const el = document.getElementById('parmap');
+  const p = prep?.par?.plan;
+  if (!el || !p || el.dataset.drawn) return;
+  el.dataset.drawn = '1';
+  drawParcours(el, { start: prep.par.start, line: decodePolyline(p.poly), waypoints: p.waypoints }, (wps) => moveParcours(wps))
+    .catch(() => { el.textContent = 'Carte indisponible hors connexion.'; });
+}
+
+const parcoursError = (e) => (e?.code === 'horsligne' ? 'Pas de connexion : impossible de calculer un parcours.' : e?.status === 401 ? 'Reconnecte ton compte (Profil) pour les parcours.' : e?.message || 'Parcours indisponible.');
+
+async function findParcours({ km, bearing } = {}) {
+  if (!prep?.pos) return;
+  const s = prep.session;
+  const base = parcoursTarget(s);
+  const target = { ...base, km: Math.min(25, Math.max(1, km ?? prep.par?.target?.km ?? base.km)) };
+  const start = prep.pos;
+  const b = bearing ?? Math.floor(Math.random() * 360);
+  prep.par = { status: 'loading', target, start, plan: prep.par?.plan || null };
+  refreshParcours();
+  try {
+    const plan = await planLoop(start, target.km, b, account.parcoursRoute);
+    if (!prep || prep.session !== s) return;
+    prep.par = { status: 'ok', target, start, plan };
+  } catch (e) {
+    if (!prep || prep.session !== s) return;
+    prep.par = { status: 'error', target, start, msg: parcoursError(e) };
+  }
+  refreshParcours();
+}
+
+async function moveParcours(waypoints) {
+  const par = prep?.par;
+  if (!par?.plan) return;
+  const s = prep.session;
+  try {
+    const plan = await reroute(par.start, waypoints, account.parcoursRoute);
+    if (!prep || prep.session !== s) return;
+    prep.par = { ...par, plan: { ...plan, bearing: par.plan.bearing } };
+  } catch (e) {
+    if (!prep || prep.session !== s) return;
+    prep.par = { ...par, status: 'error', msg: parcoursError(e) };
+  }
+  refreshParcours();
+}
+
+// Pendant la séance : la carte n'est dessinée que si « Mon parcours » est ouvert.
+let liveParMap = null;
+let liveParAt = 0;
+function mountLiveParcours() {
+  const el = document.getElementById('livemap');
+  if (!el || !live?.session.parcours || el.dataset.drawn || !el.closest('details[open]')) return;
+  el.dataset.drawn = '1';
+  liveParMap = null;
+  liveParcoursMap(el, decodePolyline(live.session.parcours.poly)).then((m) => { liveParMap = m; updateLiveParcours(true); })
+    .catch(() => { el.textContent = 'Carte indisponible hors connexion.'; });
+}
+function updateLiveParcours(force = false) {
+  if (!liveParMap || !live || !document.getElementById('livemap')?.isConnected) return;
+  if (!force && Date.now() - liveParAt < 3000) return;
+  liveParAt = Date.now();
+  liveParMap.update(live.gps.points.map((x) => [x.lat, x.lon]));
 }
 
 // Où réautoriser la localisation : seulement la consigne de l'appareil utilisé.
@@ -1045,13 +1195,28 @@ function openFinishSheet() {
   const stepsLeft = steps.length - Math.max(0, i);
   const ls = isLibre(live.session) ? libreState(live.session, i) : null;
   closeFinishSheet();
+  // Test : « Terminer » avant le retour au calme propose d'abord les 5 min de marche de fin.
+  if (ls && ['echauffement', 'course', 'marche'].includes(ls.phase)) {
+    document.body.insertAdjacentHTML('beforeend', `
+      <div class="hr-sheet finish-sheet" role="dialog" aria-label="Finir le test">
+        <div class="hr-sheet-in">
+          <h2>Finir le test ?</h2>
+          <p>Tu en es au <b>bloc ${ls.bloc} sur ${ls.blocs}</b>. Ce que tu as fait est gardé : on termine par 5 min de marche, puis « C'est fini ».</p>
+          <button class="btn-primary" data-librefinir>Finir par 5 min de marche</button>
+          <button class="btn-ghost" data-finishno style="width:100%;margin:8px 0">Continuer le test</button>
+          <button class="btn-stop" data-finishok>Arrêter sans marcher, faire le bilan</button>
+        </div>
+      </div>`);
+    document.body.classList.add('sheet-open');
+    return;
+  }
   document.body.insertAdjacentHTML('beforeend', `
     <div class="hr-sheet finish-sheet" role="dialog" aria-label="Terminer la séance">
       <div class="hr-sheet-in">
         <h2>Terminer maintenant ?</h2>
         <p>${ls ? `Tu en es au <b>bloc ${ls.bloc} sur ${ls.blocs}</b>.` : `Il reste <b>${mmss(left)}</b> et ${stepsLeft} étape${stepsLeft > 1 ? 's' : ''}.`} Ce que tu as déjà fait est gardé pour le bilan.</p>
         <button class="btn-primary" data-finishno>Continuer la séance</button>
-        <button class="btn-stop" data-finishok>${isTest(live.session) ? 'Arrêter le test' : 'Terminer et faire le bilan'}</button>
+        <button class="btn-stop" data-finishok>${isTest(live.session) ? 'Arrêter le test' : ls ? 'C\'est fini : faire le bilan' : 'Terminer et faire le bilan'}</button>
       </div>
     </div>`);
   document.body.classList.add('sheet-open');
@@ -1226,7 +1391,7 @@ function startGps() {
       // du programme, la piste est finie mais la séance continue jusqu'à « Terminer ».
       if (audio.paused && !live.overAt) return;
       if (pos.coords.accuracy <= 30) addAltitude(live.gps, pos.coords.altitude, pos.coords.altitudeAccuracy, pos.timestamp);
-      addPoint(live.gps, { lat: pos.coords.latitude, lon: pos.coords.longitude, t: pos.timestamp, acc: pos.coords.accuracy });
+      if (addPoint(live.gps, { lat: pos.coords.latitude, lon: pos.coords.longitude, t: pos.timestamp, acc: pos.coords.accuracy })) updateLiveParcours();
     },
     (err) => { if (live) live.gpsError = err.code === 1 ? 'GPS refusé' : 'GPS en attente'; },
     { enableHighAccuracy: true, maximumAge: 0, timeout: 20000 },
@@ -1396,6 +1561,8 @@ function retractLive() {
 function libreLive(back = 0) {
   const i = liveStep();
   if (!live || live.swapping || !isLibre(live.session) || i < 0 || i >= live.session.steps.length) return;
+  // Retour au calme : « C'est fini » l'écourte et va au bilan.
+  if (libreState(live.session, i).phase === 'recup') { closeFinishSheet(); go('bilan'); return; }
   reshapeSession(libreAction(live.session, i, Math.max(0, audio.currentTime - live.track.starts[i] - back)));
 }
 
@@ -1521,7 +1688,7 @@ function tickLibre(i, t) {
     el('next').innerHTML = `${m(`Marche · reste ${mmss(left)} ·`)} ensuite bloc ${st.bloc}/${st.blocs}, au signal`;
   } else if (st.phase === 'recup') {
     el('now').textContent = 'Marche';
-    el('next').innerHTML = `${m(`Retour au calme · reste ${mmss(left)} ·`)} puis le signal de fin`;
+    el('next').innerHTML = `${m(`Retour au calme · reste ${mmss(left)} ·`)} « C'est fini » pour arrêter avant`;
   } else if (st.phase === 'fin') {
     el('now').textContent = 'Test fini';
     el('next').innerHTML = `${m(`+${mmss(Math.max(0, liveElapsed() - (live.track.end - starts[0])))} en plus ·`)} continue à marcher si tu veux, puis « Terminer »`;
@@ -1923,7 +2090,7 @@ const screens = {
           <li>5 min de marche d'échauffement (« Je commence à courir » pour l'écourter).</li>
           <li>Cours aussi longtemps que tu peux. Dès que tu t'arrêtes, touche <b>« Je marche »</b>.</li>
           <li>2 min de marche, puis le signal de course : repars. <b>« Je recours »</b> si tu repars avant.</li>
-          <li>Après le 5e bloc, 5 min de marche pour revenir au calme (« Finir la marche » pour l'écourter), puis « Terminer ».</li>
+          <li>Après le 5e bloc, ou si tu touches « Terminer » avant : 5 min de marche de retour au calme. « C'est fini » pour arrêter avant, ou continue à marcher : le chrono tourne jusqu'à « C'est fini ».</li>
         </ol>
         <p class="muted small" style="margin:0">Signaux seulement, pas de voix. Écran bloqué : appui long 2 s sur « Je marche ». Hors programme : enregistrée comme une course, sans effet sur ton palier.</p>
       </section>` : `<section class="prep-sum">
@@ -1932,6 +2099,7 @@ const screens = {
         <div class="effort-bar">${s.steps.map((x) => `<i class="${KINDS[x.kind].effort}" style="flex:${x.duration}"></i>`).join('')}</div>
         <p class="small" style="margin:8px 0 0">${esc(stepsSummary(s.steps))}</p>
       </section>`}
+      ${prepParcoursBlock()}
       <ul class="prep-list">
         ${prepGpsBlock()}
         ${prepSoundBlock()}
@@ -1972,11 +2140,12 @@ const screens = {
         </div>
         <div class="gpsline" id="gps"></div>
         ${IOS && load().settings.son !== 'exclusif' ? '<p class="muted small" style="margin:0">Mode musique : iPhone hors silencieux, sinon pas de signaux.</p>' : ''}
-        <button class="btn-primary live-done" id="livedone" data-finishok hidden>${isTest(live?.session) ? 'Terminer le test' : 'Terminer et faire le bilan'}</button>
+        <button class="btn-primary live-done" id="livedone" data-finishok hidden>${isTest(live?.session) ? 'Terminer le test' : libre ? 'C\'est fini : faire le bilan' : 'Terminer et faire le bilan'}</button>
         ${live?.overAt ? '' : `<div class="live-controls${libre ? ' one' : ''}">
           <button class="toggle${playing ? '' : ' paused'}" data-toggle>${playing ? 'Pause' : 'Reprendre'}</button>
           ${libre ? '' : '<button data-skip>Étape suivante</button>'}
         </div>`}
+        ${live?.session.parcours ? `<details class="live-par"${live.parOpen ? ' open' : ''} data-livepar><summary>Mon parcours <span class="muted">· boucle de ${kmLabel(live.session.parcours.km)} km</span><i>›</i></summary><div class="map live-map" id="livemap"></div></details>` : ''}
         <div class="live-extra">
           <button class="lockbtn" data-touchlock>🔒 Bloquer l'écran</button>
           <button class="btn-stop" data-finish>Terminer…</button>
@@ -2195,7 +2364,7 @@ const screens = {
     const sorted = [...d.history].sort((a, b) => String(b.date).localeCompare(String(a.date)));
     const runs = d.history.filter((h) => sportOf(h) === 'course');
     const swims = d.history.filter((h) => sportOf(h) === 'natation');
-    const longest = Math.max(0, ...runs.map((h) => h.distanceKm || 0));
+    const longest = Math.max(0, ...runs.map(runKm));
     const paces = runs.map((h) => h.allureSecKm || (h.distanceKm && h.elapsedSec && !h.distanceEstimee ? h.elapsedSec / h.distanceKm : 0)).filter(Boolean);
     const bestSwim = Math.max(0, ...swims.map(swimMeters));
     const progSports = ['course', 'natation', 'muscu'].filter((x) => practiced(d, x) || d.history.some((h) => sportOf(h) === x));
@@ -2228,6 +2397,7 @@ const screens = {
           <p class="delta ${diff > 0 ? 'up' : diff < 0 ? 'down' : ''}">${diff > 0 ? '▲' : diff < 0 ? '▼' : '='} ${fmt(Math.abs(diff))} ${UNIT_LABEL[key]} par rapport à la semaine dernière</p>
           ${weekCurve(d.history, sp, key)}
         </section>
+        ${sp === 'course' ? testsChart(d.history) : ''}
         ${sp === 'muscu' ? `<p class="muted small" style="margin-top:4px">${key === 'kg' ? 'Total soulevé = charge × répétitions de la semaine, hors poids du corps.' : 'Répétitions faites dans la semaine, toutes séries comprises (gainage non compté). Passe en kg dès que tu notes une charge.'}</p>` : ''}
         <h3>Records</h3>
         ${sp === 'muscu' && key === 'reps' ? `<div class="records">${topSets.length ? topSets.map((x) => `<div class="muscu"><b>${x.r}<small>rép.</small></b><span>${esc(x.nom.split(" (")[0])} · en une série</span></div>`).join('') : '<div class="muscu"><b>–</b><span>aucune série notée</span></div>'}</div>` : sp === 'muscu' ? `<div class="records">${topLifts.length ? topLifts.map((x) => `<div class="muscu"><b>${String(x.poids).replace('.', ',')}<small>kg</small></b><span>${esc(x.nom.split(' (')[0])}</span></div>`).join('') : '<div class="muscu"><b>–</b><span>aucune charge notée</span></div>'}</div>` : `<div class="records">
@@ -2498,6 +2668,8 @@ function render() {
   for (const b of document.querySelectorAll('#tabs button')) b.classList.toggle('on', b.dataset.tab === (TAB_OF[current] || current));
   document.body.classList.toggle('is-live', current === 'live' || current === 'muscu');
   mountMaps();
+  mountPrepParcours();
+  mountLiveParcours();
   placeWeek();
   if (current === 'live') requestAnimationFrame(tick);
   guidedLoop();
@@ -2859,11 +3031,22 @@ document.addEventListener('click', (e) => {
     openPrepare(testSession());
   } else if ('ready' in ds) {
     if (!prep) return;
-    const s = prep.session;
+    const p = prep.par?.status === 'ok' && prep.par.plan;
+    // Parcours choisi : gardé avec la séance (reprise comprise), pas dans l'historique.
+    const s = p ? { ...prep.session, parcours: { poly: p.poly, km: p.km } } : prep.session;
     stopPrepGps();
     testAudio.pause();
     prep = null;
     startSession(s);
+  } else if ('parfind' in ds) {
+    findParcours();
+  } else if ('parother' in ds) {
+    findParcours({ bearing: ((prep?.par?.plan?.bearing ?? 0) + 90 + Math.floor(Math.random() * 90)) % 360 });
+  } else if ('parless' in ds || 'parmore' in ds) {
+    const t = prep?.par?.target?.km;
+    if (t) findParcours({ km: t + ('parmore' in ds ? 0.5 : -0.5), bearing: prep.par.plan?.bearing });
+  } else if ('parremove' in ds) {
+    if (prep) { prep.par = { status: 'idle' }; refreshParcours(); }
   } else if ('prepback' in ds) {
     const back = prep?.from && prep.from !== 'prepare' ? prep.from : 'accueil';
     go(back);
@@ -2889,6 +3072,11 @@ document.addEventListener('click', (e) => {
     testAudio.onended = () => { if (prep) { prep.testing = false; if (current === 'prepare') render(); } };
     testAudio.play().catch((err) => { if (prep) prep.testing = false; alert(`Lecture impossible : ${err.message}`); });
     render();
+  } else if ('librefinir' in ds) {
+    closeFinishSheet();
+    const i = liveStep();
+    const next = live && !live.swapping ? libreFinir(live.session, i, audio.currentTime - live.track.starts[i]) : null;
+    if (next) reshapeSession(next);
   } else if ('finishno' in ds) {
     closeFinishSheet();
   } else if ('finishok' in ds) {

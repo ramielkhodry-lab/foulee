@@ -65,6 +65,12 @@ for (const [name, dev] of [['iphone', 'iPhone 13'], ['android', 'Pixel 7']]) {
   const runText = await runRow.textContent();
   await runRow.screenshot({ path: `${out}/${name}-2-course-distance.png` });
   const oldTest = await rows.nth(1).evaluate((el) => { el.open = true; return el.textContent; });
+  await page.evaluate(() => window.scrollTo(0, 0));
+  const progText = await page.textContent('#app');
+  const bars = await page.locator('.tbar').count();
+  const tags = await page.locator('.curve-x .test-tag').count();
+  await page.locator('section.prog').screenshot({ path: `${out}/${name}-0-courbe-semaine.png` });
+  await page.locator('.tests-chart').screenshot({ path: `${out}/${name}-0b-mes-tests.png` });
 
   await page.click('[data-setpalier="4|t2"]');
   await page.waitForSelector('text=Palier 4 choisi');
@@ -100,7 +106,9 @@ for (const [name, dev] of [['iphone', 'iPhone 13'], ['android', 'Pixel 7']]) {
     'liste : tes tests sur le palier 4': /^4/.test(tag.trim()),
     'choix libre : palier 3': afterPick === '3',
     'retour automatique : palier 2': afterAuto === '2',
-    'aucune erreur': errors.length === 0,
+    'progression : « Mes tests » (2 barres, 7:30 dernière)': bars === 2 && progText.includes('Mes tests') && progText.includes('Plus longue course continue') && progText.includes('7:30'),
+    'courbe : semaines avec test marquées': tags >= 1,
+        'aucune erreur': errors.length === 0,
   };
   for (const [k, v] of Object.entries(checks)) {
     console.log(`${v ? 'ok ' : 'ÉCHEC'} ${name} : ${k}`);

@@ -14,6 +14,7 @@ import {
 import { isoBase64URL } from '@simplewebauthn/server/helpers';
 import { conseilsIA, IaError } from './ia.js';
 import { bodyText, parseSamples, importMessage, MAX_BODY, KEEP_DAYS } from './cardio.js';
+import { footRoute, ParcoursError } from './parcours.js';
 
 const SESSION_DAYS = 180;
 const INVITE_DAYS = 14;
@@ -342,6 +343,14 @@ const routes = {
     for (const r of other.results) (autres[r.kind] ||= []).push([r.t, r.v]);
     return { samples: rows.results.map((r) => [r.t, r.bpm]), autres };
   },
+
+  // Parcours proposé avant une course : itinéraire à pied entre des points. Réservé aux comptes
+  // (pas de relais ouvert à tous). Rien n'est stocké ni journalisé.
+  'POST /me/parcours': async (req, env) => {
+    await currentUser(req, env);
+    const body = await readJson(req);
+    return footRoute(body.points);
+  },
 };
 
 // Import par le Raccourci iPhone : réponse en texte, affichée telle quelle par le Raccourci.
@@ -399,7 +408,7 @@ export default {
     try {
       return json(env, await handler(request, env));
     } catch (e) {
-      if (e instanceof HttpError) return json(env, { error: e.message }, e.status);
+      if (e instanceof HttpError || e instanceof ParcoursError) return json(env, { error: e.message }, e.status);
       if (e instanceof IaError) return json(env, { error: e.message, code: e.code, resetAt: e.resetAt }, e.code === 'indisponible' ? 503 : 429);
       console.error(e);
       return json(env, { error: 'Erreur serveur' }, 500);

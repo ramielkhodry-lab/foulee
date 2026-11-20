@@ -113,9 +113,8 @@ for (const [name, dev] of [['iphone', 'iPhone 13'], ['android', 'Pixel 7']]) {
   await page.waitForFunction(() => document.getElementById('stepno').textContent === 'Retour au calme', null, { timeout: 8000 });
   const recup = await st();
   await page.screenshot({ path: `${out}/${name}-5b-retour-au-calme.png` });
-  await seek((await pos()) + 60);
-  await page.waitForTimeout(500);
-  await page.click('#librebtn'); // « Finir la marche » après ~1 min
+  // On laisse finir les 5 min (puis on continue à marcher : « + »).
+  await seek((await pos()) + 296);
   // Fin du programme : le « + » démarre tout de suite et continue sans à-coup après la fin de la piste.
   await page.waitForFunction(() => document.getElementById('stepno').textContent === 'Fin', null, { timeout: 8000 });
   await page.waitForTimeout(1500);
@@ -144,6 +143,38 @@ for (const [name, dev] of [['iphone', 'iPhone 13'], ['android', 'Pixel 7']]) {
   await page.waitForTimeout(400);
   await page.locator('details.hist').first().screenshot({ path: `${out}/${name}-8-historique.png` });
   const histText = await page.locator('details.hist').first().textContent();
+
+  // 2e test : un seul bloc, puis « Terminer… » → « Finir par 5 min de marche » → « C'est fini ».
+  const early = {};
+  await page.click('#tabs [data-tab="demarrer"]');
+  await page.click('[data-startlibre]');
+  await page.waitForSelector('[data-ready]:not([disabled])', { timeout: 15000 });
+  await page.click('[data-ready]');
+  await page.waitForSelector('#librebtn');
+  await page.waitForTimeout(800);
+  await seek(7 + 297);
+  await page.waitForFunction(() => document.getElementById('now').textContent === 'Cours', null, { timeout: 10000 });
+  await seek((await pos()) + 80);
+  await page.waitForTimeout(1500);
+  await page.click('[data-finish]');
+  await page.waitForSelector('[data-librefinir]');
+  await page.screenshot({ path: `${out}/${name}-9-terminer-avant.png` });
+  await page.click('[data-librefinir]');
+  await page.waitForFunction(() => document.getElementById('stepno').textContent === 'Retour au calme', null, { timeout: 8000 });
+  await page.waitForTimeout(1700);
+  early.recup = await st();
+  await page.screenshot({ path: `${out}/${name}-10-retour-au-calme.png` });
+  await seek((await pos()) + 90);
+  await page.waitForTimeout(800);
+  await page.click('#librebtn');
+  await page.waitForSelector('[data-savebilan]');
+  early.bilan = await page.textContent('#app');
+  await page.click('[data-savebilan]');
+  await page.waitForSelector('text=Et maintenant');
+  const h2 = await page.evaluate(() => JSON.parse(localStorage.getItem('foulee.v1')).history[0]);
+  early.ok = early.recup.btn === 'C\'est fini' && h2.blocs.length === 1 && h2.steps.at(-1).kind === 'recuperation' && h2.steps.at(-1).duration < 120
+    && early.bilan.includes('Retour au calme') && !early.bilan.includes('Course 2') && h2.segments.map((g) => g.kind).join(',') === 'echauffement,course,recuperation';
+  if (!early.ok) console.log(name, 'arrêt anticipé', early.recup, h2.blocs, h2.steps, h2.segments?.map((g) => g.kind));
   clearInterval(mover);
 
   const secs = (h.blocs || []).map((b) => b.sec);
@@ -158,7 +189,8 @@ for (const [name, dev] of [['iphone', 'iPhone 13'], ['android', 'Pixel 7']]) {
     'distance du bloc en grand pendant la course': log.every((x) => /^\d,\d\dkm$/.test(x.during.count)),
     'remise à zéro au départ du bloc': log.slice(0, 4).every((x) => parseFloat(x.restart.replace(',', '.')) <= 0.01 && parseFloat(x.restart.replace(',', '.')) < parseFloat(x.during.count.replace(',', '.')) + 0.001),
 
-        'retour au calme 5 min après le 5e bloc': recup.btn === 'Finir la marche' && /reste [45]:\d\d/.test(recup.next) && session.steps.at(-1).kind === 'recuperation' && session.steps.at(-1).duration < 120,
+        'retour au calme 5 min après le 5e bloc': recup.btn === 'C\'est fini' && /reste [45]:\d\d/.test(recup.next) && session.steps.at(-1).kind === 'recuperation' && session.steps.at(-1).duration === 300,
+    'arrêt anticipé : « Terminer » → 5 min de marche → « C\'est fini »': early.ok,
         'temps en plus : démarre tout de suite': /\+0:0[1-3] en plus/.test(plusA.next),
     'temps en plus : continu après la fin de la piste': /\+0:1[0-3] en plus/.test(plusB.next) && (() => { const sec = (x) => x.split(':').reduce((m, v) => m * 60 + Number(v), 0); return Math.abs(sec(elB) - sec(elA) - 9) <= 1; })(),
         'fin : « Test fini »': fin.now === 'Test fini' || fin.now === 'Programme fini',
