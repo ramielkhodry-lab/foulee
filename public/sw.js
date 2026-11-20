@@ -1,5 +1,5 @@
 // Hors connexion : l'app et les sons sont mis en cache à l'installation.
-const VERSION = 'foulee-v57';
+const VERSION = 'foulee-v58';
 const FILES = [
   './', 'index.html', 'styles.css', 'manifest.webmanifest',
   'js/app.js', 'js/phrases.js', 'js/track.js', 'js/store.js', 'js/gps.js', 'js/account.js', 'js/config.js', 'vendor/simplewebauthn-browser.js',
@@ -9,7 +9,8 @@ const FILES = [
 ];
 
 self.addEventListener('install', (e) => {
-  e.waitUntil(caches.open(VERSION).then((c) => c.addAll(FILES)).then(() => self.skipWaiting()));
+  // cache: 'reload' : jamais la copie du cache HTTP (GitHub Pages la garde 10 min après une mise en ligne).
+  e.waitUntil(caches.open(VERSION).then((c) => c.addAll(FILES.map((f) => new Request(f, { cache: 'reload' })))).then(() => self.skipWaiting()));
 });
 
 self.addEventListener('activate', (e) => {
@@ -30,8 +31,10 @@ self.addEventListener('fetch', (e) => {
     })));
     return;
   }
+  // no-cache : le navigateur redemande au serveur (réponse 304 légère si rien n'a changé) au lieu
+  // de servir une ancienne version gardée 10 min : une mise à jour se voit dès la réouverture.
   e.respondWith(
-    fetch(e.request)
+    fetch(e.request, { cache: 'no-cache' })
       .then((res) => {
         if (res.ok) {
           const copy = res.clone();
