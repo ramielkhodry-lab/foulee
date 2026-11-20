@@ -48,7 +48,7 @@ export function libreState(session, i) {
   const s = steps[i];
   if (s.kind === 'echauffement') return { phase: 'echauffement', bloc: 1, blocs, action: 'Je commence à courir' };
   const n = runsUpTo(steps, i);
-  if (s.kind === 'recuperation') return { phase: 'recup', bloc: blocs, blocs, action: 'Finir la marche' };
+  if (s.kind === 'recuperation') return { phase: 'recup', bloc: blocs, blocs, action: 'C\'est fini' }; // écourte et va au bilan
   if (s.kind === 'course') return { phase: 'course', bloc: n, blocs, action: n < blocs ? 'Je marche' : 'J\'arrête : dernier bloc fini' };
   return { phase: 'marche', bloc: n + 1, blocs, action: 'Je recours' };
 }
@@ -179,4 +179,13 @@ export function segmentTotals(segs) {
   let marche = 0;
   for (const g of segs || []) if (g.kind === 'course') course += g.km || 0; else marche += g.km || 0;
   return { course: r(course), marche: r(marche), seance: r(course + marche) };
+}
+
+// « Terminer » avant la fin : l'étape en cours s'arrête maintenant et les 5 min de retour au
+// calme commencent. null si le retour au calme est déjà commencé (ou fini).
+export function libreFinir(session, i, offset) {
+  const st = libreState(session, i);
+  if (!['echauffement', 'course', 'marche'].includes(st.phase)) return null;
+  const { ouvert, ...cut } = session.steps[i];
+  return { ...session, steps: [...session.steps.slice(0, i), { ...cut, duration: cutAt(offset), libre: true }, { kind: 'recuperation', duration: RECUP }] };
 }
