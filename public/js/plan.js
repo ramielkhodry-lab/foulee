@@ -81,6 +81,7 @@ export function planOptions(q, settings = {}) {
     joursNatation: sports.includes('natation') ? (q?.joursNatation ?? settings.joursNatation ?? [3]) : [],
     joursMuscu: sports.includes('muscu') ? (q?.joursMuscu ?? []) : [],
     palierChoix: settings.palierChoix || null,
+    palierManuel: settings.palierManuel || null,
   };
 }
 
@@ -146,6 +147,13 @@ export function nextRunLevel(history, opts = {}) {
     .filter((h) => (h.sport || 'course') === 'course' && h.level)
     .sort((a, b) => String(a.date).localeCompare(String(b.date)))
     .filter(keepReplay);
+  // Palier choisi par le coureur (Programme, ou après un test) : il vaut pour la prochaine course ;
+  // dès qu'une course du programme est faite après ce choix, les règles repartent de celle-ci.
+  const m = opts.palierManuel;
+  if (m?.level && !runs.some((h) => String(h.date) > String(m.at))) {
+    const level = Math.min(max, Math.max(1, m.level));
+    return { level, reason: `Palier ${level} choisi par toi${m.test ? ' après ton test' : ''}. Ensuite, le programme repart de ton bilan.`, manuel: true };
+  }
   if (runs.length === 0) {
     if (start > 1) return { level: start, reason: `${opts.startNote || 'Point de départ'} : ${LEVELS[start - 1].label}.` };
     return { level: 1, reason: 'Premier palier : alterner 2 min de course et 2 min de marche.' };
@@ -194,6 +202,31 @@ export function nextRunLevel(history, opts = {}) {
     level: Math.min(max, last.level),
     reason: last.difficulte ? 'Séance correcte : on la refait une fois pour la consolider.' : "Tu n'as pas noté la difficulté : on consolide ce palier une fois avant de monter.",
   };
+}
+
+// Durée (s) de la plus longue course d'un palier.
+export const runBlockSec = (id) => Math.max(...LEVELS[id - 1].main.filter((s) => s.kind !== 'marche').map((s) => s.duration));
+
+// Palier qui correspond à un test « 5 courses au max ». Un palier répète sa course plusieurs
+// fois : on prend la durée tenue sur au moins 3 blocs (la 3e plus longue ; moins de 3 blocs :
+// la plus courte), et le plus haut palier dont la course ne dépasse pas cette durée.
+// null si le test ne permet rien de dire (aucun bloc).
+export function palierPourTest(blocs, max = LEVELS.length) {
+  const secs = (blocs || []).map((b) => b.sec).filter((x) => x > 0).sort((a, b) => b - a);
+  if (!secs.length) return null;
+  const ref = secs[Math.min(2, secs.length - 1)];
+  let level = 1;
+  for (let id = 1; id <= Math.min(max, LEVELS.length); id++) if (runBlockSec(id) <= ref) level = id;
+  return { level, refSec: ref, fois: Math.min(3, secs.length) };
+}
+
+// Les 2 derniers tests : palier proposé seulement s'ils sont 2 (le plus bas des deux, pour ne
+// pas sauter sur un bon jour). Avec un seul test : son palier, à confirmer.
+export function palierDesTests(history, max = LEVELS.length) {
+  const tests = history.filter((h) => h.libre && h.blocs?.length).sort((a, b) => String(a.date).localeCompare(String(b.date))).slice(-2);
+  const res = tests.map((h) => palierPourTest(h.blocs, max)).filter(Boolean);
+  if (!res.length) return null;
+  return { level: Math.min(...res.map((r) => r.level)), confirme: res.length >= 2, levels: res.map((r) => r.level), lastId: tests.at(-1).id };
 }
 
 // Natation : +2 longueurs par rapport à la dernière séance (environ +10 %), plafonné

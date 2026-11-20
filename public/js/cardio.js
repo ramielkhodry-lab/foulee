@@ -130,7 +130,7 @@ export function curveSvg(c, cls = 'course') {
 // marche comprise, comme l'app Forme). null si rien n'a été mesuré.
 // Version du calcul : une séance résumée avec une version plus ancienne est recalculée (le
 // 2/11/2026, les valeurs « 1,2e-05 » km étaient lues 1,2 km par le serveur : 6,93 km au lieu de 4,8).
-export const MONTRE_V = 2;
+export const MONTRE_V = 3; // 3 : distance en courant (marche exclue), par bloc pour le test
 export const montreStale = (m) => Boolean(m) && m.v !== MONTRE_V;
 export function summarizeMontre(h, autres) {
   const w = windowOf(h);
@@ -142,6 +142,14 @@ export function summarizeMontre(h, autres) {
   if (dist >= 0.1) m.distKm = Math.round(dist * 100) / 100;
   const sp = splits((autres.dist || []).filter(([t]) => t >= w[0] && t < w[1]));
   if (sp) m.splits = sp;
+  // Distance en courant seulement : la montre, étape de course par étape de course.
+  if (h.steps?.length && h.stepMs?.length > h.steps.length - 1) {
+    const between = (a, b) => sum((autres.dist || []).filter(([t]) => t >= a && t < b).map((x) => x[1]));
+    const runs = h.steps.map((s, k) => (KINDS[s.kind]?.effort === 'course' && Number.isFinite(h.stepMs[k]) && Number.isFinite(h.stepMs[k + 1]) ? between(h.stepMs[k], h.stepMs[k + 1]) : null));
+    const km = runs.filter((x) => x !== null).reduce((a, x) => a + x, 0);
+    if (km >= 0.05) m.enCourseKm = Math.round(km * 100) / 100;
+    if (h.libre && km >= 0.05) m.blocsKm = runs.filter((x, k) => x !== null && h.steps[k].kind === 'course').map((x) => Math.round(x * 100) / 100);
+  }
   const kcal = sum(inside('kcal'));
   if (kcal >= 1) m.kcal = Math.round(kcal);
   const puiss = inside('puiss').filter((v) => v > 0);

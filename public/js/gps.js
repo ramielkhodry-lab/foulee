@@ -208,3 +208,29 @@ export function decodeTrace(trace) {
     return pts;
   });
 }
+
+// Distance (km) parcourue entre deux instants (ms), sur des points [lat, lon, t].
+export function kmBetween(points, a, b) {
+  let m = 0;
+  for (let k = 1; k < points.length; k++) {
+    const p = points[k - 1];
+    const q = points[k];
+    if (p[2] >= a && q[2] <= b) m += haversine({ lat: p[0], lon: p[1] }, { lat: q[0], lon: q[1] });
+  }
+  return Math.round(m / 10) / 100;
+}
+
+// Précision moyenne (m) des points mesurés entre deux instants, null si inconnue
+// (points repris après une fermeture de l'app : précision non gardée).
+export function accBetween(points, a, b) {
+  const acc = points.filter((p) => p.t >= a && p.t <= b && p.acc > 0).map((p) => p.acc);
+  return acc.length ? Math.round(acc.reduce((x, y) => x + y, 0) / acc.length) : null;
+}
+
+// Mètres parcourus depuis l'instant t0 (ms), sur les points retenus en direct.
+export function metersSince(track, t0) {
+  let m = 0;
+  const pts = track.points;
+  for (let k = pts.length - 1; k > 0 && pts[k - 1].t >= t0; k--) m += haversine(pts[k - 1], pts[k]);
+  return m;
+}

@@ -95,3 +95,60 @@ test('hors palier : un test libre ne change pas nextRunLevel', () => {
   assert.equal(replayRun(withTest[1]), null);
   assert.equal(canReplay(withTest[1]), true);
 });
+
+import { palierPourTest, palierDesTests, runBlockSec } from '../public/js/plan.js';
+import { enCourse } from '../public/js/libre.js';
+
+test('palier d\'un test : course tenue sur 3 blocs', () => {
+  assert.equal(runBlockSec(2), 180);
+  assert.equal(runBlockSec(5), 420);
+  // 6 min tenues 3 fois → palier 4 (5 min), pas 5 (7 min).
+  assert.deepEqual(palierPourTest([{ sec: 400 }, { sec: 365 }, { sec: 360 }, { sec: 200 }, { sec: 150 }]), { level: 4, refSec: 360, fois: 3 });
+  // Un seul bon bloc ne suffit pas.
+  assert.equal(palierPourTest([{ sec: 900 }, { sec: 130 }, { sec: 125 }]).level, 1);
+  assert.equal(palierPourTest([{ sec: 60 }]).level, 1);
+  assert.equal(palierPourTest([]), null);
+  // Plafond du programme.
+  assert.equal(palierPourTest([{ sec: 4000 }, { sec: 4000 }, { sec: 4000 }], 12).level, 12);
+});
+
+test('2 tests concordants : le plus bas des deux ; un seul : à confirmer', () => {
+  const t = (id, date, sec) => ({ id, sport: 'course', libre: true, date, blocs: [sec, sec, sec].map((x) => ({ sec: x })) });
+  assert.equal(palierDesTests([]), null);
+  assert.deepEqual(palierDesTests([t('a', '2026-11-20', 360)]), { level: 4, confirme: false, levels: [4], lastId: 'a' });
+  assert.deepEqual(palierDesTests([t('a', '2026-11-20', 360), t('b', '2026-11-24', 430)]), { level: 4, confirme: true, levels: [4, 5], lastId: 'b' });
+  assert.equal(palierDesTests([t('z', '2026-11-01', 100), t('a', '2026-11-20', 430), t('b', '2026-11-24', 430)]).level, 5);
+});
+
+test('palier choisi : vaut jusqu\'à la prochaine course du programme', () => {
+  const base = [{ id: 'a', sport: 'course', level: 2, date: '2026-11-13T18:00:00', difficulte: 3 }];
+  const palierManuel = { level: 4, at: '2026-11-20T11:00:00', test: 'b' };
+  const r = nextRunLevel(base, { palierManuel });
+  assert.equal(r.level, 4);
+  assert.equal(r.manuel, true);
+  // Une course au palier 4 faite après le choix : les règles repartent d'elle.
+  const after = [...base, { id: 'c', sport: 'course', level: 4, date: '2026-11-21T18:00:00', difficulte: 4 }];
+  const r2 = nextRunLevel(after, { palierManuel });
+  assert.equal(r2.level, 4);
+  assert.equal(r2.manuel, undefined);
+  // Plafond.
+  assert.equal(nextRunLevel(base, { palierManuel: { level: 30, at: '2026-11-20' }, maxLevel: 12 }).level, 12);
+});
+
+test('distance en courant : marche exclue', () => {
+  const steps = [{ kind: 'echauffement', duration: 300 }, { kind: 'course_lente', duration: 120 }, { kind: 'marche', duration: 120 }, { kind: 'course_lente', duration: 120 }];
+  const t0 = 1e12;
+  const stepMs = [t0, t0 + 300e3, t0 + 420e3, t0 + 540e3, t0 + 660e3];
+  const points = [];
+  const raw = [];
+  for (let k = 0; k <= 66; k++) {
+    const p = [48 + (k * 10 * 2) / 111195, 2, t0 + k * 10000]; // 2 m/s
+    points.push(p);
+    raw.push({ lat: p[0], lon: p[1], t: p[2], acc: k < 40 ? 5 : 25 });
+  }
+  const r = enCourse(steps, stepMs, points, raw);
+  assert.equal(r.sec, 240);
+  assert.ok(Math.abs(r.km - 0.48) < 0.03, String(r.km));
+  assert.equal(r.accM, 18); // moyenne des deux courses : ≈ 10 m puis 25 m
+  assert.equal(enCourse(steps, null, points), null);
+});

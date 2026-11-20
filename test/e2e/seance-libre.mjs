@@ -104,6 +104,7 @@ for (const [name, dev] of [['iphone', 'iPhone 13'], ['android', 'Pixel 7']]) {
       }
       await page.waitForFunction(() => document.getElementById('now').textContent === 'Cours', null, { timeout: 12000 });
       await page.waitForTimeout(400);
+      log[k].restart = (await st()).count;
       t0 = await pos();
     } else {
       log.push({ during });
@@ -140,7 +141,10 @@ for (const [name, dev] of [['iphone', 'iPhone 13'], ['android', 'Pixel 7']]) {
     'marche : 2 min et bloc suivant annoncé': log[0].walk.stepno === 'Bloc 2/5 · marche 2 min' && /^[12]:\d\d$/.test(log[0].walk.count),
     'séance : 5 courses, 4 marches': session.steps.filter((x) => x.kind === 'course').length === 5 && session.steps.filter((x) => x.kind === 'marche').length === 4,
     'marche coupée par « Je recours »': session.steps.filter((x) => x.kind === 'marche')[3].duration < 60,
-    'fin : « Test fini »': fin.now === 'Test fini' || fin.now === 'Programme fini',
+    'distance du bloc en grand pendant la course': log.every((x) => /^\d,\d\dkm$/.test(x.during.count)),
+    'remise à zéro au départ du bloc': log.slice(0, 4).every((x) => parseFloat(x.restart.replace(',', '.')) <= 0.01 && parseFloat(x.restart.replace(',', '.')) < parseFloat(x.during.count.replace(',', '.')) + 0.001),
+    'bilan : total de la séance + distance en courant': bilanText.includes('Distance totale de la séance') && bilanText.includes('Distance en courant'),
+        'fin : « Test fini »': fin.now === 'Test fini' || fin.now === 'Programme fini',
     'bilan : blocs affichés': bilanText.includes('Plus longue course continue') && bilanText.includes('Bloc 5'),
     'enregistrée hors palier': h.libre === true && h.level === null && h.blocsPrevus === 5,
     'blocs : durées justes (+3 s max)': close,
@@ -150,7 +154,7 @@ for (const [name, dev] of [['iphone', 'iPhone 13'], ['android', 'Pixel 7']]) {
     'palier inchangé': JSON.stringify(afterData.settings.palierChoix ?? null) === JSON.stringify(before.settings.palierChoix ?? null),
     'aucune erreur': errors.length === 0,
   };
-  console.log(name, JSON.stringify({ secs, km: h.blocs?.map((b) => b.km), fin }));
+  console.log(name, JSON.stringify({ secs, km: h.blocs?.map((b) => b.km), fin, counts: log.map((x) => [x.during.count, x.restart]) }));
   for (const [k, v] of Object.entries(checks)) {
     console.log(`${v ? 'ok ' : 'ÉCHEC'} ${name} : ${k}`);
     if (!v) failures.push(`${name} : ${k}`);
