@@ -1145,7 +1145,7 @@ function renderTouchLock() {
   el.id = 'touchlock';
   el.innerHTML = `
     <button class="lock-extend" type="button" hidden><i></i><span>+1 répétition</span><small></small><em>Maintiens 2 secondes</em></button>
-    <button class="lock-extend lock-libre" type="button" hidden><i></i><span></span><em>Maintiens 2 secondes</em></button>
+    <button class="lock-libre" type="button" hidden><i></i><span></span><em>Maintiens 2 secondes</em></button>
     <div class="lock-zone">
       <div class="lock-badge">Touches bloquées</div>
       <button class="lock-btn" type="button" aria-label="Maintenir 2 secondes pour débloquer"><svg viewBox="0 0 100 100" aria-hidden="true"><circle class="lock-ring" cx="50" cy="50" r="46"/></svg><span>🔒</span></button>
@@ -1154,7 +1154,7 @@ function renderTouchLock() {
   // Deux boutons à appui long : le cadenas débloque, « +1 répétition » prolonge sans débloquer.
   const holdable = [
     [el.querySelector('.lock-btn'), () => { touchLocked = false; renderTouchLock(); }],
-    [el.querySelector('.lock-extend:not(.lock-libre)'), () => { extendLive(); if (live) updateExtend(liveStep()); }],
+    [el.querySelector('.lock-extend'), () => { extendLive(); if (live) updateExtend(liveStep()); }],
     [el.querySelector('.lock-libre'), () => libreLive(UNLOCK_MS / 1000)],
   ];
   const pointers = new Set();
@@ -1345,7 +1345,7 @@ function updateExtend(i) {
       }
     }
   }
-  const lockBtn = document.querySelector('#touchlock .lock-extend:not(.lock-libre)');
+  const lockBtn = document.querySelector('#touchlock .lock-extend');
   if (lockBtn) {
     lockBtn.hidden = !can;
     if (can) lockBtn.querySelector('small').textContent = `Ta récup devient la ${repLabel(st)}${st.extra ? ` · +${st.extra} déjà` : ''}`;
