@@ -110,6 +110,12 @@ for (const [name, dev] of [['iphone', 'iPhone 13'], ['android', 'Pixel 7']]) {
       log.push({ during });
     }
   }
+  await page.waitForFunction(() => document.getElementById('stepno').textContent === 'Retour au calme', null, { timeout: 8000 });
+  const recup = await st();
+  await page.screenshot({ path: `${out}/${name}-5b-retour-au-calme.png` });
+  await seek((await pos()) + 60);
+  await page.waitForTimeout(500);
+  await page.click('#librebtn'); // « Finir la marche » après ~1 min
   await page.waitForSelector('#livedone:not([hidden])', { timeout: 15000 }).catch(async (e) => { console.log(await st(), await pos(), await page.evaluate(() => JSON.parse(localStorage.getItem('foulee.live')).session.steps)); throw e; });
   const fin = await st();
   await page.screenshot({ path: `${out}/${name}-5-fin.png` });
@@ -144,6 +150,7 @@ for (const [name, dev] of [['iphone', 'iPhone 13'], ['android', 'Pixel 7']]) {
     'distance du bloc en grand pendant la course': log.every((x) => /^\d,\d\dkm$/.test(x.during.count)),
     'remise à zéro au départ du bloc': log.slice(0, 4).every((x) => parseFloat(x.restart.replace(',', '.')) <= 0.01 && parseFloat(x.restart.replace(',', '.')) < parseFloat(x.during.count.replace(',', '.')) + 0.001),
     'bilan : total de la séance + distance en courant': bilanText.includes('Distance totale de la séance') && bilanText.includes('Distance en courant'),
+        'retour au calme 5 min après le 5e bloc': recup.btn === 'Finir la marche' && /^[45]:\d\d$/.test(recup.count) && session.steps.at(-1).kind === 'recuperation' && session.steps.at(-1).duration < 120,
         'fin : « Test fini »': fin.now === 'Test fini' || fin.now === 'Programme fini',
     'bilan : blocs affichés': bilanText.includes('Plus longue course continue') && bilanText.includes('Bloc 5'),
     'enregistrée hors palier': h.libre === true && h.level === null && h.blocsPrevus === 5,

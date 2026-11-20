@@ -18,6 +18,7 @@ export const BLOCS = 5;
 export const MARCHE = 120; // 2 min de marche après chaque arrêt, toujours
 export const OPEN = 1200; // durée provisoire d'un bloc de course, rallongée au besoin
 export const WARMUP = 300;
+export const RECUP = 300; // 5 min de marche de retour au calme après le 5e bloc
 const MAX_STEP = 4 * 3600;
 const RALLONGE_SOUS = 300; // s restantes sur l'étape ouverte : on rallonge
 
@@ -47,6 +48,7 @@ export function libreState(session, i) {
   const s = steps[i];
   if (s.kind === 'echauffement') return { phase: 'echauffement', bloc: 1, blocs, action: 'Je commence à courir' };
   const n = runsUpTo(steps, i);
+  if (s.kind === 'recuperation') return { phase: 'recup', bloc: blocs, blocs, action: 'Finir la marche' };
   if (s.kind === 'course') return { phase: 'course', bloc: n, blocs, action: n < blocs ? 'Je marche' : 'J\'arrête : dernier bloc fini' };
   return { phase: 'marche', bloc: n + 1, blocs, action: 'Je recours' };
 }
@@ -63,6 +65,9 @@ export function libreAction(session, i, offset) {
   steps.push({ ...cut, duration: cutAt(offset), libre: true });
   if (st.phase === 'course') {
     if (st.bloc < st.blocs) steps.push({ kind: 'marche', duration: MARCHE }, openRun());
+    else steps.push({ kind: 'recuperation', duration: RECUP }); // retour au calme, puis signal de fin
+  } else if (st.phase === 'recup') {
+    // Retour au calme écourté : la séance s'arrête ici (signal de fin).
   } else {
     steps.push(openRun()); // fin d'échauffement ou reprise avant les 2 min
   }

@@ -21,8 +21,12 @@ test('déroulé : échauffement, 5 blocs, 4 marches de 2 min, puis fin', () => {
       assert.equal(libreState(s, i + 2).bloc, b + 1);
       i += 2;
     } else {
-      assert.equal(s.steps.length, i + 1, 'plus rien après le 5e bloc');
-      assert.equal(libreState(s, i + 1).phase, 'fin');
+      assert.deepEqual(s.steps[i + 1], { kind: 'recuperation', duration: 300 }, '5 min de retour au calme');
+      assert.equal(libreState(s, i + 1).phase, 'recup');
+      assert.equal(libreState(s, i + 2).phase, 'fin');
+      const court = libreAction(s, i + 1, 90); // retour au calme écourté
+      assert.equal(court.steps.length, i + 2);
+      assert.equal(court.steps.at(-1).duration, 91);
     }
   }
   assert.equal(s.steps.filter((x) => x.kind === 'course').length, 5);
@@ -62,6 +66,7 @@ test('bloc ouvert rallongé seulement près de sa fin', () => {
   let f = libreSession();
   let i = 1;
   for (let b = 1; b <= 5; b++) { f = libreAction(f, i, 60); i += 2; }
+  assert.equal(libreRallonge(f, f.steps.length - 2, 60), null);
   assert.equal(libreRallonge(f, f.steps.length - 1, 60), null);
 });
 

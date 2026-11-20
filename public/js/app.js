@@ -1417,12 +1417,15 @@ function tickLibre(i, t) {
     el('next').innerHTML = `<span class="muted">Bloc ${st.bloc} · ${mmss(since)} ·</span> ${st.bloc < st.blocs ? 'dès que tu t\'arrêtes, touche « Je marche »' : 'dernier bloc : touche quand tu t\'arrêtes'}`;
   } else if (st.phase === 'marche') {
     el('next').innerHTML = `<span class="muted">Ensuite</span> Bloc ${st.bloc}/${st.blocs}, au signal`;
+  } else if (st.phase === 'recup') {
+    el('now').textContent = 'Marche';
+    el('next').innerHTML = '<span class="muted">Retour au calme ·</span> 5 min, puis le signal de fin';
   } else if (st.phase === 'fin') {
     el('now').textContent = 'Test fini';
     el('next').textContent = 'Marche pour récupérer. Le chrono et le GPS continuent jusqu\'à « Terminer ».';
   }
   el('stepno').textContent = st.phase === 'intro' ? 'Départ' : st.phase === 'echauffement' ? 'Échauffement'
-    : st.phase === 'fin' ? 'Fin' : `Bloc ${st.bloc}/${st.blocs} · ${st.phase === 'course' ? 'course' : 'marche 2 min'}`;
+    : st.phase === 'fin' ? 'Fin' : st.phase === 'recup' ? 'Retour au calme' : `Bloc ${st.bloc}/${st.blocs} · ${st.phase === 'course' ? 'course' : 'marche 2 min'}`;
   const btn = el('librebtn');
   if (btn) {
     btn.hidden = !st.action || touchLocked;
@@ -1816,7 +1819,7 @@ const screens = {
           <li>5 min de marche d'échauffement (« Je commence à courir » pour l'écourter).</li>
           <li>Cours aussi longtemps que tu peux. Dès que tu t'arrêtes, touche <b>« Je marche »</b>.</li>
           <li>2 min de marche, puis le signal de course : repars. <b>« Je recours »</b> si tu repars avant.</li>
-          <li>5 blocs de course, puis « Terminer » quand tu as fini de marcher.</li>
+          <li>Après le 5e bloc, 5 min de marche pour revenir au calme (« Finir la marche » pour l'écourter), puis « Terminer ».</li>
         </ol>
         <p class="muted small" style="margin:0">Signaux seulement, pas de voix. Écran bloqué : appui long 2 s sur « Je marche ». Hors programme : enregistrée comme une course, sans effet sur ton palier.</p>
       </section>` : `<section class="prep-sum">

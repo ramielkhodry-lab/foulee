@@ -691,6 +691,7 @@ body.flash-muscu { animation: flash-muscu 1.5s ease-out; }
 .libre-btn[hidden] { display: none; }
 .libre-btn[data-phase="course"] { background: var(--ink); }
 .libre-btn[data-phase="marche"], .libre-btn[data-phase="echauffement"] { background: var(--run); }
+.libre-btn[data-phase="recup"] { background: var(--surface-2); color: var(--ink); }
 .libre-blocs { display: flex; flex-wrap: wrap; gap: 8px; margin: 14px 0 0; min-height: 10px; }
 .libre-blocs span { display: flex; align-items: baseline; gap: 6px; padding: 6px 10px; border-radius: 12px; background: var(--surface-2); font-weight: 800; font-variant-numeric: tabular-nums; }
 .libre-blocs span small { color: var(--muted); font-weight: 700; }
