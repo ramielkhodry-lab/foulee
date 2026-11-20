@@ -685,3 +685,18 @@ body.flash-muscu { animation: flash-muscu 1.5s ease-out; }
 .li-more .replay.course { color: var(--run); border-color: var(--run); }
 .li-more .replay.muscu { color: var(--muscu); border-color: var(--muscu); }
 .replay-note { margin-top: 0; }
+
+/* Test « 5 courses au max » */
+.libre-btn { width: 100%; min-height: 96px; margin: 14px 0 0; font-size: 26px; font-weight: 800; border-radius: 24px; background: var(--ink); color: var(--on-accent); border: 0; touch-action: manipulation; }
+.libre-btn[hidden] { display: none; }
+.libre-btn[data-phase="course"] { background: var(--ink); }
+.libre-btn[data-phase="marche"], .libre-btn[data-phase="echauffement"] { background: var(--run); }
+.libre-blocs { display: flex; flex-wrap: wrap; gap: 8px; margin: 14px 0 0; min-height: 10px; }
+.libre-blocs span { display: flex; align-items: baseline; gap: 6px; padding: 6px 10px; border-radius: 12px; background: var(--surface-2); font-weight: 800; font-variant-numeric: tabular-nums; }
+.libre-blocs span small { color: var(--muted); font-weight: 700; }
+.libre-blocs span.on { outline: 2px solid var(--run); }
+.libre-sum { margin: 10px 0; }
+.libre-list { margin: 8px 0; }
+.libre-list li.best b { color: var(--run); }
+.libre-how { margin: 10px 0; padding-left: 20px; text-align: left; }
+.libre-how li { margin: 4px 0; }
