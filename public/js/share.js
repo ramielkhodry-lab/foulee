@@ -6,6 +6,7 @@
 
 import { tonnage } from './muscu.js';
 import { libreResume } from './libre.js';
+import { ATTRIBUTION_TEXT } from './mapstyle.js';
 
 export const COLORS = { course: '#C8FF2E', natation: '#2F8CFF', muscu: '#FF7A1A', autre: '#F5F5F7' };
 const LABEL = { course: 'Course', natation: 'Natation', muscu: 'Musculation', autre: 'Activité' };
@@ -119,7 +120,43 @@ function fit(ctx, text, font, size, maxW) {
   return s;
 }
 
-export async function drawCard(h, segments) {
+// Fond de carte flat sous le tracé (option « Afficher la carte ») : une carte MapLibre hors écran,
+// cadrée sur le tracé, recopiée dans l'image. Renvoie aussi la projection pour y poser le tracé.
+async function mapSnapshot(segments, w, h, pad) {
+  const [{ loadMaplibre }, { flatStyle }] = await Promise.all([import('./map.js'), import('./mapstyle.js')]);
+  const gl = await loadMaplibre();
+  const div = document.createElement('div');
+  div.style.cssText = `position:fixed;left:${-w - 200}px;top:0;width:${w}px;height:${h}px;pointer-events:none`;
+  document.body.appendChild(div);
+  const pts = segments.flat();
+  const lons = pts.map((p) => p[1]);
+  const lats = pts.map((p) => p[0]);
+  let map;
+  try {
+    map = new gl.Map({
+      container: div, style: flatStyle(), interactive: false, attributionControl: false, pixelRatio: 1, fadeDuration: 0,
+      canvasContextAttributes: { preserveDrawingBuffer: true },
+      bounds: [[Math.min(...lons), Math.min(...lats)], [Math.max(...lons), Math.max(...lats)]],
+      fitBoundsOptions: { padding: pad, maxZoom: 17 },
+    });
+    await new Promise((resolve, reject) => {
+      const t = setTimeout(() => reject(new Error('carte trop lente à charger')), 12000);
+      map.once('idle', () => { clearTimeout(t); resolve(); });
+      map.on('error', (e) => { if (!map.loaded() && /style|source/i.test(String(e?.error?.message || ''))) { clearTimeout(t); reject(new Error('carte indisponible')); } });
+    });
+    const img = document.createElement('canvas');
+    img.width = w;
+    img.height = h;
+    img.getContext('2d').drawImage(map.getCanvas(), 0, 0, w, h);
+    const proj = (p) => { const q = map.project([p[1], p[0]]); return [q.x, q.y]; };
+    return { img, lines: segments.map((seg) => seg.map(proj)) };
+  } finally {
+    map?.remove();
+    div.remove();
+  }
+}
+
+export async function drawCard(h, segments, { carte = false } = {}) {
   await fonts();
   const r = recap(h);
   const c = document.createElement('canvas');
@@ -189,7 +226,29 @@ export async function drawCard(h, segments) {
   // Milieu : le tracé, sinon les lignes de détail.
   const top = y + 60;
   const bottom = (hasStats ? statsY - 180 : H - P);
-  const lines = project(segments || [], { x: P + 20, y: top, w: W - 2 * P - 40, h: Math.max(0, bottom - top) });
+  let lines = [];
+  let carteErr = null;
+  if (carte && segments?.length && bottom - top > 200) {
+    try {
+      const snap = await mapSnapshot(segments, W, bottom - top, 70);
+      ctx.drawImage(snap.img, 0, top);
+      // Fondu vers le noir en haut et en bas : la carte se fond dans l'affiche.
+      for (const [y0, y1] of [[top, top + 70], [bottom, bottom - 70]]) {
+        const g = ctx.createLinearGradient(0, y0, 0, y1);
+        g.addColorStop(0, 'rgba(0,0,0,1)');
+        g.addColorStop(1, 'rgba(0,0,0,0)');
+        ctx.fillStyle = g;
+        ctx.fillRect(0, Math.min(y0, y1), W, 70);
+      }
+      ctx.fillStyle = '#6E6E76';
+      ctx.font = `600 20px ${FONT}`;
+      ctx.textAlign = 'right';
+      ctx.fillText(ATTRIBUTION_TEXT, W - P, bottom - 12);
+      ctx.textAlign = 'left';
+      lines = snap.lines.map((seg) => seg.map(([x, yy]) => [x, top + yy]));
+    } catch (err) { carteErr = err.message; }
+  }
+  if (!lines.length) lines = project(segments || [], { x: P + 20, y: top, w: W - 2 * P - 40, h: Math.max(0, bottom - top) });
   if (lines.length && bottom - top > 200) {
     ctx.lineCap = 'round';
     ctx.lineJoin = 'round';
@@ -228,7 +287,7 @@ export async function drawCard(h, segments) {
       ctx.fillText(t, P, top + 40 + i * 62);
     });
   }
-  return { canvas: c, recap: r };
+  return { canvas: c, recap: r, carteErr };
 }
 
 export function canvasBlob(canvas) {

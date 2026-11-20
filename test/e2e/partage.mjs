@@ -6,6 +6,7 @@ const { chromium, devices } = createRequire(import.meta.url)('playwright');
 import { createServer } from 'node:http';
 import { readFile, writeFile, mkdir } from 'node:fs/promises';
 import { join, extname } from 'node:path';
+import { routeTuiles } from './tuiles-factices.mjs';
 
 const out = process.argv[2] || '/tmp/foulee-partage';
 await mkdir(out, { recursive: true });
@@ -43,7 +44,7 @@ const data = {
   settings: { son: 'musique', annonces: 'signaux' },
 };
 
-const browser = await chromium.launch();
+const browser = await chromium.launch({ args: ['--enable-unsafe-swiftshader', '--use-angle=swiftshader'] });
 const failures = [];
 let check0 = true;
 for (const [name, dev] of [['iphone', 'iPhone 13'], ['android', 'Pixel 7']]) {
@@ -52,6 +53,7 @@ for (const [name, dev] of [['iphone', 'iPhone 13'], ['android', 'Pixel 7']]) {
     const page = await context.newPage();
     await page.clock.install({ time: new Date('2026-11-20T14:00:00') });
     await page.route('**/tile.openstreetmap.org/**', (r) => r.fulfill({ status: 200, contentType: 'image/png', body: PNG }));
+    await routeTuiles(page);
     const errors = [];
     page.on('pageerror', (e) => errors.push(e.message));
     page.on('dialog', (d) => { errors.push('dialog: ' + d.message()); d.accept(); });
@@ -72,6 +74,17 @@ for (const [name, dev] of [['iphone', 'iPhone 13'], ['android', 'Pixel 7']]) {
       await page.evaluate((i) => { const d = document.querySelector(`[data-partage="${i}"]`).closest('details'); if (!d.open) d.querySelector('summary').click(); }, id);
       await page.evaluate((i) => document.querySelector(`[data-partage="${i}"]`).scrollIntoView({ block: 'center' }), id);
       await page.waitForTimeout(400);
+      if (id === 'c1' && mode === 'fichier') {
+        // Carte de l'app : fond flat vectoriel (MapLibre) sous le tracé Leaflet.
+        await page.evaluate(() => document.querySelector('.map[data-map="c1"]').scrollIntoView({ block: 'center' }));
+        await page.waitForSelector('.map[data-map="c1"].map-flat canvas', { timeout: 20000 });
+        await page.waitForTimeout(2500);
+        check(!(await page.$('.map[data-map="c1"] .map-osm')), 'carte de l\'app : repli OSM au lieu du flat');
+        check(/OpenStreetMap/.test(await page.textContent('.map[data-map="c1"] .leaflet-control-attribution')), 'attribution OSM absente');
+        await page.screenshot({ path: `${out}/${name}-0-carte-app.png` });
+        await page.evaluate(() => document.querySelector('[data-partage="c1"]').scrollIntoView({ block: 'center' }));
+        await page.waitForTimeout(300);
+      }
       if (id === 'c1' && mode === 'fichier') await page.screenshot({ path: `${out}/${name}-1-historique-${label}.png` });
       await page.locator(`[data-partage="${id}"]`).first().dispatchEvent("click"); // clic simulé : Playwright/Pixel mesure la position avant un défilement
       await page.waitForSelector('.partage-img img', { timeout: 10000 });
@@ -95,6 +108,20 @@ for (const [name, dev] of [['iphone', 'iPhone 13'], ['android', 'Pixel 7']]) {
         const sh = await page.evaluate(() => window.__shared.pop());
         check(dl.suggestedFilename() === 'foulee-2026-11-20.png', `téléchargement ${dl.suggestedFilename()}`);
         check(sh && !sh.files.length && /5,21 km/.test(sh.text), `repli texte : ${JSON.stringify(sh)}`);
+      }
+      // Carte (course, avec tracé) : interrupteur désactivé par défaut, retenu ensuite.
+      if (id === 'c1' && mode === 'fichier') {
+        check(!(await page.isChecked('[data-partagecarte]')), 'carte cochée par défaut');
+        await page.check('[data-partagecarte]');
+        await page.waitForSelector('.partage-img img', { timeout: 20000 });
+        await page.waitForFunction(() => document.querySelector('.partage-img img')?.complete);
+        const alerte = await page.$('.partage-go .alert');
+        check(!alerte, `carte non ajoutée : ${alerte ? await alerte.textContent() : ''}`);
+        const imgc = await page.evaluate(async () => { const r = await fetch(document.querySelector('.partage-img img').src); const b = new Uint8Array(await r.arrayBuffer()); let s = ''; for (const c of b) s += String.fromCharCode(c); return btoa(s); });
+        if (name === 'iphone') await writeFile(`${out}/image-course-carte.png`, Buffer.from(imgc, 'base64'));
+        await page.screenshot({ path: `${out}/${name}-4-partage-carte.png` });
+        check(await page.evaluate(() => JSON.parse(localStorage.getItem('foulee.v1')).settings.partageCarte === true), 'choix carte non retenu');
+        check(/sur la carte/.test(await page.textContent('.partage-note')), 'note carte');
       }
       await page.click('[data-partageclose]');
       check(!(await page.$('.partage-sheet')), 'feuille pas fermée');
