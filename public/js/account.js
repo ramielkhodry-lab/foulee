@@ -127,3 +127,6 @@ export function mergeData(local, remote) {
     sessions: byId(local.sessions, remote.sessions),
   };
 }
+
+// Itinéraire à pied entre des points [[lat, lon], ...] (parcours proposé avant une course).
+export const parcoursRoute = (points) => api('/me/parcours', { method: 'POST', body: { points }, auth: true });
