@@ -15,7 +15,7 @@ import { replayRun, replayMuscu, canReplay } from './refaire.js';
 import { drawCard, canvasBlob, fileName } from './share.js';
 import { testSession, isTest } from './test-seance.js';
 import { courseLibreSession, courseLibreCfg, isCourseLibre, BORNES as CL_BORNES } from './course-libre.js';
-import { libreSession, isLibre, libreState, libreAction, libreRallonge, libreDone, libreBlocs, libreResume, enCourse, GPS_FLOU, libreSegments, segmentTotals, libreFinir, testCfg, blocLabel } from './libre.js';
+import { libreSession, isLibre, libreState, libreAction, libreRallonge, libreDone, libreBlocs, libreResume, enCourse, GPS_FLOU, libreSegments, courseSegments, segmentTotals, libreFinir, testCfg, blocLabel } from './libre.js';
 import { upcoming, moveOptions, planOptions, nextRunLevel, runLevel, afterBilan, palierDesTests, HORIZON, GOALS_RUN, START_RUN, GOALS_SWIM, START_SWIM, LEVELS } from './plan.js';
 
 const app = document.getElementById('app');
@@ -469,18 +469,35 @@ function segmentsTable(h, r, mk) {
   const seance = h.distanceKm || seg.seance;
   const tot = { course: seg.course, marche: Math.max(0, Math.round((seance - seg.course) * 100) / 100), seance };
   const flou = segs.some((g) => !g.montre && g.accM > GPS_FLOU);
+  const mesure = segs.some((g) => g.km != null) || Boolean(h.distanceKm);
   return `<ol class="steps libre-list segs">${segs.map((g) => {
-    const best = g.kind === 'course' && g.n === r.blocMax;
+    const best = g.kind === 'course' && r && g.n === r.blocMax;
     const approx = !g.montre && g.accM > GPS_FLOU ? '≈ ' : '';
-    return `<li class="seg-${g.kind}${best ? ' best' : ''}"><span>${(SEG_LABEL[g.kind] || (() => g.kind))(g)}</span><span class="small"><b>${mmss(g.sec)}</b> · ${approx}${kmFr(g.km || 0)} km${g.kind === 'course' && g.km >= 0.1 ? ` · ${allure(g.sec / g.km)}` : ''}</span></li>`;
+    // km null : le GPS n'a rien mesuré pendant ce segment (jamais « 0 km »).
+    const dist = g.km == null ? '– km' : `${approx}${kmFr(g.km)} km`;
+    return `<li class="seg-${g.kind}${best ? ' best' : ''}"><span>${(SEG_LABEL[g.kind] || (() => g.kind))(g)}</span><span class="small"><b>${mmss(g.sec)}</b> · ${dist}${g.kind === 'course' && g.km >= 0.1 ? ` · ${allure(g.sec / g.km)}` : ''}</span></li>`;
   }).join('')}</ol>
-    <ul class="seg-totals">
+    ${mesure ? `<ul class="seg-totals">
       <li><span>En courant</span><b>${kmFr(tot.course)} km</b></li>
       <li><span>En marchant</span><b>${kmFr(tot.marche)} km</b></li>
       <li class="all"><span>Séance entière</span><b>${kmFr(tot.seance)} km</b></li>
     </ul>
-    <p class="muted small" style="margin:0">${mk ? 'Courses : distance de ta montre.' : 'Distances du GPS du téléphone.'} « En marchant » = séance entière moins les courses (échauffement, marches, retour au calme, marche en plus).${h.distanceSource === 'manuelle' ? ' Séance corrigée à la main.' : h.distanceSource && h.distanceSource !== 'gps' ? ' Séance entière : distance de ta montre.' : ''}</p>
+    ${segs.some((g) => g.km == null) ? '<p class="muted small" style="margin:0">– : pas de GPS pendant ce segment, distance non mesurée.</p>' : ''}
+    <p class="muted small" style="margin:0">${mk ? 'Courses : distance de ta montre.' : 'Distances du GPS du téléphone.'} « En marchant » = séance entière moins les courses (échauffement, marches, retour au calme, marche en plus).${h.distanceSource === 'manuelle' ? ' Séance corrigée à la main.' : h.distanceSource && h.distanceSource !== 'gps' ? ' Séance entière : distance de ta montre.' : ''}</p>` : '<p class="muted small" style="margin:0">Pas de GPS pendant la séance : distances non mesurées.</p>'}
     ${flou ? '<p class="alert small gps-flou">GPS imprécis sur les segments marqués ≈ : distances à prendre avec prudence.</p>' : ''}`;
+}
+
+// Autre course guidée : le détail segment par segment s'il a été gardé (séances depuis le
+// 23/11/2026), sinon la distance en courant. La montre, si elle a mesuré la distance en
+// courant, est rappelée sous les totaux (le détail reste celui du GPS).
+function runSegBlock(h) {
+  if (!h.segments?.length) return courseDistBlock(h);
+  const m = h.montre?.enCourseKm;
+  return `<div class="libre-sum run-segs">
+    <p class="eyebrow" style="margin:0">Course et marche, segment par segment</p>
+    ${segmentsTable(h, null, null)}
+    ${m ? `<p class="small" style="margin:0">Ta montre : <b>${kmFr(m)} km</b> en courant <span class="muted">(marche exclue)</span></p>` : ''}
+  </div>`;
 }
 
 // Test « 5 courses au max » : chaque bloc de course, la plus longue, les pauses.
@@ -542,7 +559,7 @@ function historyRow(h, open = false) {
         ${cardioBlock(h.cardio, h.id)}
         ${montreBlock(h)}
         ${h.deniveleM != null ? `<p class="muted small">Dénivelé : +${h.deniveleM} m, mesuré par le téléphone.</p>` : ''}
-        ${h.libre ? libreBlock(h) : sport === 'course' ? courseDistBlock(h) : ''}
+        ${h.libre ? libreBlock(h) : sport === 'course' ? runSegBlock(h) : ''}
         ${h.source === 'guidee' && (h.distanceSource === 'manuelle' || h.dureeSource === 'manuelle') ? `<p class="muted small">Corrigé à la main${h.distanceSource === 'manuelle' ? ` : ${h.distanceKm.toLocaleString('fr-FR')} km` : ''}${h.dureeSource === 'manuelle' ? `${h.distanceSource === 'manuelle' ? ',' : ' :'} ${Math.round(h.elapsedSec / 60)} min` : ''}. C'est ce qui compte.</p>` : ''}
         ${sport === 'muscu' && h.exercices?.length ? `<ul class="steps">${h.exercices.map((x) => `<li><span>${esc(x.nom)}</span><span class="muted small">${x.poids ? `${kgLabel(x.poids)} · ` : ''}${(x.reps || []).filter((r) => r > 0).join(' / ')}${x.unite === 's' ? ' s' : ''}</span></li>`).join('')}</ul>${tonnage(h) ? '<p class="muted small">Total soulevé : charge × répétitions, hors poids du corps.</p>' : ''}` : ''}
         ${sport === 'natation' && h.swim?.nages?.length ? `<p class="small">${esc(h.swim.nages.join(', '))}${h.swim.detail ? ` · ${esc(h.swim.detail)}` : ''}</p>` : ''}
@@ -1731,6 +1748,19 @@ function updateExtend(i) {
   }
 }
 
+// Distance (km) du segment en cours (étape i, commencée il y a `since` s de piste), remise à
+// zéro à chaque changement d'étape. Heure de départ notée à sa première image : une pause ne
+// la décale pas. Recalculée seulement quand un point GPS arrive.
+function segKmNow(i, since) {
+  if (live.segKm?.i !== i) live.segKm = { i, t0: Date.now() - since * 1000, n: -1, km: 0 };
+  if (live.segKm.n !== live.gps.points.length) {
+    live.segKm.n = live.gps.points.length;
+    live.segKm.km = metersSince(live.gps, live.segKm.t0) / 1000;
+  }
+  return live.segKm.km;
+}
+const km2 = (km) => km.toLocaleString('fr-FR', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+
 // Test « 5 courses au max » : textes, gros bouton, blocs faits, rallonge du bloc ouvert.
 function tickLibre(i, t) {
   const { starts } = live.track;
@@ -1742,15 +1772,7 @@ function tickLibre(i, t) {
   // Chiffre dominant : la distance du segment en cours (échauffement, bloc, marche, retour au
   // calme, marche en plus), remise à zéro à chaque changement. Le temps passe sur la ligne du
   // dessous, la distance de toute la séance en bas (km séance).
-  if (st.phase !== 'intro') {
-    // Heure de départ du segment : notée à sa première image (une pause ne la décale pas).
-    if (live.segKm?.i !== i) live.segKm = { i, t0: Date.now() - since * 1000, n: -1, km: 0 };
-    if (live.segKm.n !== live.gps.points.length) {
-      live.segKm.n = live.gps.points.length;
-      live.segKm.km = metersSince(live.gps, live.segKm.t0) / 1000;
-    }
-    el('count').innerHTML = `${live.segKm.km.toLocaleString('fr-FR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}<small>km</small>`;
-  }
+  if (st.phase !== 'intro') el('count').innerHTML = `${km2(segKmNow(i, since))}<small>km</small>`;
   const m = (txt) => `<span class="muted">${txt}</span>`;
   if (st.phase === 'echauffement') {
     el('next').innerHTML = `${m(`Échauffement · reste ${mmss(left)} ·`)} ensuite bloc ${blocLabel({ ...st, bloc: 1 })}, le plus longtemps possible`;
@@ -1798,6 +1820,18 @@ function tickLibre(i, t) {
 }
 
 // Affichage du lecteur : relu à chaque image depuis la position de la piste, donc sans dérive.
+// Autres courses : sous le temps restant, la distance de l'étape en cours (course ou marche),
+// remise à zéro à chaque étape. « – » tant que le GPS n'a rien mesuré.
+function segLine(i, since, what) {
+  const box = document.getElementById('segkm');
+  if (!box || isLibre(live.session)) return;
+  const km = segKmNow(i, since);
+  const ok = !live.gpsError && live.gps.points.length > 0;
+  const txt = `<b>${ok ? km2(km) : '–'}</b> km ${what}`;
+  if (box.innerHTML !== txt) box.innerHTML = txt;
+  box.hidden = false;
+}
+
 function tick() {
   if (current !== 'live' || !live) return;
   if (live.swapping) { requestAnimationFrame(tick); return; }
@@ -1829,11 +1863,13 @@ function tick() {
     el('count').textContent = `+${mmss(Math.max(0, liveElapsed() - (end - starts[0])))}`;
     el('count').classList.add('over');
     el('next').textContent = 'Le chrono et le GPS continuent jusqu\'à « Terminer ».';
+    segLine(steps.length, liveElapsed() - (end - starts[0]), 'en plus');
   } else {
     el('now').textContent = effort === 'course' ? 'Cours' : 'Marche';
     el('count').textContent = mmss(starts[i] + steps[i].duration - t);
     const n = steps[i + 1];
     el('next').innerHTML = n ? `<span class="muted">Ensuite</span> ${esc(KINDS[n.kind].label)} · ${minutesLabel(n.duration)}` : 'Dernière étape';
+    segLine(i, t - starts[i], effort === 'course' ? 'sur cette course' : 'sur cette marche');
   }
   updateExtend(i);
   el('stepno').textContent = i < 0 ? 'Départ' : i >= steps.length ? 'Fin' : `Étape ${i + 1}/${steps.length} · ${KINDS[steps[i].kind].label}`;
@@ -2250,6 +2286,7 @@ const screens = {
         ${interrupted ? '<div class="alert">Séance interrompue (appel, Siri ou autre app). Touche « Reprendre ».</div>' : ''}
         <p class="now" id="now"></p>
         <p class="count" id="count"></p>
+        <p class="segkm" id="segkm" hidden></p>
         <p class="next" id="next"></p>
         <div class="extend" id="extend" hidden></div>
         ${libre ? '<button class="libre-btn" id="librebtn" data-libre hidden></button><div class="libre-blocs" id="libreblocs"></div>' : segmentsBar()}
@@ -2424,7 +2461,7 @@ const screens = {
       <div class="card">
         <p><strong>${esc(b.sessionName)}</strong></p>
         <p class="muted">${mmss(b.elapsedSec)} de séance${b.prolongSec ? `, dont ${mmss(b.prolongSec)} après le programme` : ''}${b.libre ? '' : ` · ${b.completedSteps} étape(s) sur ${b.steps.length}${b.skipped.length ? ` · ${b.skipped.length} passée(s)` : ''}`}</p>
-        ${b.libre ? libreBlock(b) : courseDistBlock(b)}
+        ${b.libre ? libreBlock(b) : runSegBlock(b)}
         ${b.extra ? `<p class="small">${extraLine(b)}</p>` : ''}
         ${b.trace ? `<div class="map" data-map="bilan"></div>${b.gpsIncomplet ? '<p class="muted small">En pointillés : écran verrouillé, le GPS ne suivait plus.</p>' : ''}` : ''}
         ${b.distanceSource === 'gps' ? `<p class="small">GPS : ${b.distanceKm.toLocaleString('fr-FR')} km${b.allureSecKm ? ` · ${allure(b.allureSecKm)}` : ''}${b.gpsIncomplet ? ' · <strong>incomplet</strong> (écran verrouillé un moment)' : ''}</p>` : ''}
@@ -2848,6 +2885,9 @@ function runBilan({ session, starts, end, reached, elapsedSec, prolongSec = 0, t
   const stepMsAll = stepTimes(anchors || [], starts, end, reached);
   const stepMs = libre && stepMsAll ? stepMsAll.slice(0, steps.length + 1) : stepMsAll;
   const courseDist = enCourse(steps, stepMs, gps.points, track.points);
+  // Autres courses : segment par segment. La marche après le programme seulement s'il a été
+  // fini (arrêt avant la fin : le temps passé à confirmer n'est pas une marche).
+  const segs = libre ? null : courseSegments(steps, stepMs, gps.points, track.points, reached >= end ? finMs : null);
   return {
     id: uid(),
     sport: 'course',
@@ -2859,6 +2899,7 @@ function runBilan({ session, starts, end, reached, elapsedSec, prolongSec = 0, t
     ...(isCourseLibre(session) ? { courseLibre: session.courseLibre } : {}),
     ...(libre ? { libre: true, blocsPrevus: session.illimite ? null : session.blocs || 5, ...(session.marches ? { marches: session.marches } : {}), blocs: libreBlocs(steps, stepMs, gps.points, track.points), segments: libreSegments(steps, stepMs, gps.points, track.points, finMs) || undefined } : {}),
     ...(courseDist ? { enCourse: courseDist } : {}),
+    ...(segs ? { segments: segs } : {}),
     steps,
     plannedSec: total(steps),
     elapsedSec,
