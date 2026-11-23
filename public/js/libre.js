@@ -189,6 +189,36 @@ export function libreSegments(steps, stepMs, points, raw = [], finMs = null) {
   return out;
 }
 
+// Toute autre course guidée (programme, course libre, séance refaite) : même détail, segment
+// par segment. Les étapes de course (course, course lente) sont des « course n », les marches
+// qui suivent des « marche n » ; la durée est celle réellement passée (étape passée ou séance
+// arrêtée avant la fin : coupée), les étapes jamais atteintes sont absentes. km = null quand
+// le GPS n'a rien mesuré pendant le segment (affiché « – », jamais 0).
+// Format identique à libreSegments, lu tel quel par l'ancienne version.
+export function courseSegments(steps, stepMs, points, raw = [], finMs = null) {
+  if (!stepMs?.length) return null;
+  const pts = points || [];
+  const km = (a, b) => (pts.filter((p) => p[2] >= a && p[2] <= b).length >= 2 ? kmBetween(pts, a, b) : null);
+  const out = [];
+  let n = 0;
+  steps.forEach((s, k) => {
+    const a = stepMs[k];
+    const b = stepMs[k + 1];
+    if (!Number.isFinite(a) || !Number.isFinite(b) || b - a < 1000) return;
+    const effort = KINDS[s.kind]?.effort;
+    const kind = effort === 'course' ? 'course' : s.kind;
+    if (kind === 'course') n++;
+    const acc = accBetween(raw, a, b);
+    out.push({ kind, ...(kind === 'course' || kind === 'marche' ? { n } : {}), sec: Math.round((b - a) / 1000), km: km(a, b), ...(acc ? { accM: acc } : {}) });
+  });
+  const end = stepMs[steps.length];
+  if (Number.isFinite(end) && finMs && finMs - end >= 5000) {
+    const acc = accBetween(raw, end, finMs);
+    out.push({ kind: 'plus', sec: Math.round((finMs - end) / 1000), km: km(end, finMs), ...(acc ? { accM: acc } : {}) });
+  }
+  return out.length ? out : null;
+}
+
 // Totaux des segments : en courant, en marchant (échauffement, marches, retour au calme et
 // marche en plus), et la séance entière.
 export function segmentTotals(segs) {

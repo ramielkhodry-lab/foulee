@@ -218,3 +218,33 @@ test('test sans marche : course dès le départ, Terminer sans marche de fin', (
   assert.equal(finir2(s, 0, 30), null);
   assert.deepEqual(testCfg({ echauf: 99, fin: -1 }), { echauf: 30, fin: 0 });
 });
+
+import { courseSegments } from '../public/js/libre.js';
+
+test('autres courses : segments du programme, étapes passées coupées, sans GPS = null', () => {
+  const steps = [{ kind: 'echauffement', duration: 300 }, { kind: 'course_lente', duration: 120 }, { kind: 'marche', duration: 60 }, { kind: 'course', duration: 120 }, { kind: 'marche', duration: 60 }, { kind: 'recuperation', duration: 300 }];
+  const t0 = 1e12;
+  // Course 2 passée au bout de 40 s ; séance arrêtée avant la récupération (deux étapes jamais atteintes).
+  const real = [300, 120, 60, 40, 0, 0];
+  const stepMs = [t0];
+  for (const d of real) stepMs.push(stepMs.at(-1) + d * 1000);
+  const points = [];
+  for (let k = 0; k <= 520 / 10; k++) points.push([48 + (k * 10) / 111195, 2, t0 + k * 10000]); // 1 m/s
+  const segs = courseSegments(steps, stepMs, points, [], null);
+  assert.deepEqual(segs.map((g) => [g.kind, g.n, g.sec]), [['echauffement', undefined, 300], ['course', 1, 120], ['marche', 1, 60], ['course', 2, 40]]);
+  assert.ok(Math.abs(segs[1].km - 0.12) < 0.01, String(segs[1].km));
+  // Pas de GPS : durées gardées, distance null (affichée « – »).
+  const sans = courseSegments(steps, stepMs, [], [], null);
+  assert.equal(sans.length, 4);
+  assert.ok(sans.every((g) => g.km === null));
+  // GPS coupé pendant la marche : seule la marche est null.
+  const trou = points.filter((p) => p[2] < t0 + 421000 || p[2] > t0 + 480000);
+  assert.deepEqual(courseSegments(steps, stepMs, trou).map((g) => g.km === null), [false, false, true, false]);
+  // Marche en plus après la fin du programme.
+  const full = [t0];
+  for (const s of steps) full.push(full.at(-1) + s.duration * 1000);
+  assert.equal(courseSegments(steps, full, points, [], full.at(-1) + 90000).at(-1).kind, 'plus');
+  assert.equal(courseSegments(steps, null, points), null);
+  // Les totaux de l'ancienne version comptent bien la course lente comme course.
+  assert.ok(segmentTotals(segs).course > 0.15);
+});
