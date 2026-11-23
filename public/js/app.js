@@ -14,7 +14,8 @@ import { createGuided, currentExercise, suggestedReps, setDone, skipExercise, re
 import { replayRun, replayMuscu, canReplay } from './refaire.js';
 import { drawCard, canvasBlob, fileName } from './share.js';
 import { testSession, isTest } from './test-seance.js';
-import { libreSession, isLibre, libreState, libreAction, libreRallonge, libreDone, libreBlocs, libreResume, enCourse, GPS_FLOU, libreSegments, segmentTotals, libreFinir } from './libre.js';
+import { courseLibreSession, courseLibreCfg, isCourseLibre, BORNES as CL_BORNES } from './course-libre.js';
+import { libreSession, isLibre, libreState, libreAction, libreRallonge, libreDone, libreBlocs, libreResume, enCourse, GPS_FLOU, libreSegments, segmentTotals, libreFinir, testCfg, blocLabel } from './libre.js';
 import { upcoming, moveOptions, planOptions, nextRunLevel, runLevel, afterBilan, palierDesTests, HORIZON, GOALS_RUN, START_RUN, GOALS_SWIM, START_SWIM, LEVELS } from './plan.js';
 
 const app = document.getElementById('app');
@@ -481,7 +482,7 @@ function libreBlock(h) {
   const mk = h.montre?.blocsKm;
   const total = mk ? mk.reduce((a, x) => a + x, 0) : h.blocs.reduce((a, x) => a + (x.km || 0), 0);
   return `<div class="libre-sum">
-    <p class="small" style="margin:0">Plus longue course continue : <b>${mmss(r.plusLongue)}</b> (bloc ${r.blocMax}) · ${r.n} bloc${r.n > 1 ? 's' : ''} sur ${h.blocsPrevus || 5} · ${r.pauses} pause${r.pauses > 1 ? 's' : ''} marchée${r.pauses > 1 ? 's' : ''} · ${mmss(r.courseSec)} de course en tout</p>
+    <p class="small" style="margin:0">Plus longue course continue : <b>${mmss(r.plusLongue)}</b> (bloc ${r.blocMax}) · ${r.n} bloc${r.n > 1 ? 's' : ''}${h.blocsPrevus === null ? '' : ` sur ${h.blocsPrevus || 5}`} · ${r.pauses} pause${r.pauses > 1 ? 's' : ''} marchée${r.pauses > 1 ? 's' : ''} · ${mmss(r.courseSec)} de course en tout</p>
     ${h.segments?.length ? segmentsTable(h, r, mk) : `<ol class="steps libre-list">${h.blocs.map((x, k) => {
       const km = mk?.[k] ?? x.km;
       const flou = !mk && x.accM > GPS_FLOU;
@@ -504,7 +505,8 @@ function historyRow(h, open = false) {
   if (h.distanceKm && sport !== 'natation') parts.push(`${h.distanceKm.toLocaleString('fr-FR')} km${h.distanceEstimee ? ' (estimé)' : ''}`);
   if (h.allureSecKm) parts.push(`allure ${allure(h.allureSecKm)}`);
   if (h.gpsIncomplet) parts.push('GPS incomplet');
-  if (h.libre && libreResume(h)) parts.push(`test 5 courses · max ${mmss(libreResume(h).plusLongue)}`);
+  if (h.libre && libreResume(h)) parts.push(`test ${libreResume(h).n} course${libreResume(h).n > 1 ? 's' : ''} · max ${mmss(libreResume(h).plusLongue)}`);
+  else if (h.courseLibre) parts.push(`course libre ${h.courseLibre.course} min`);
   else if (h.steps && h.source === 'guidee') parts.push(`${h.completedSteps}/${h.steps.length} étapes`);
   if (h.extra) parts.push(`+${h.extraFaites ?? h.extra} répétition${(h.extraFaites ?? h.extra) > 1 ? 's' : ''}`);
   if (h.cardio) parts.push(`♥ ${h.cardio.avg} bpm`);
@@ -1196,13 +1198,14 @@ function openFinishSheet() {
   const ls = isLibre(live.session) ? libreState(live.session, i) : null;
   closeFinishSheet();
   // Test : « Terminer » avant le retour au calme propose d'abord les 5 min de marche de fin.
-  if (ls && ['echauffement', 'course', 'marche'].includes(ls.phase)) {
+  const finMin = live.session.illimite ? Math.round((live.session.finSec || 0) / 60) : 5;
+  if (ls && ['echauffement', 'course', 'marche'].includes(ls.phase) && finMin) {
     document.body.insertAdjacentHTML('beforeend', `
       <div class="hr-sheet finish-sheet" role="dialog" aria-label="Finir le test">
         <div class="hr-sheet-in">
           <h2>Finir le test ?</h2>
-          <p>Tu en es au <b>bloc ${ls.bloc} sur ${ls.blocs}</b>. Ce que tu as fait est gardé : on termine par 5 min de marche, puis « C'est fini ».</p>
-          <button class="btn-primary" data-librefinir>Finir par 5 min de marche</button>
+          <p>Tu en es au <b>bloc ${blocLabel(ls).replace('/', ' sur ')}</b>. Ce que tu as fait est gardé : on termine par ${finMin} min de marche, puis « C'est fini ».</p>
+          <button class="btn-primary" data-librefinir>Finir par ${finMin} min de marche</button>
           <button class="btn-ghost" data-finishno style="width:100%;margin:8px 0">Continuer le test</button>
           <button class="btn-stop" data-finishok>Arrêter sans marcher, faire le bilan</button>
         </div>
@@ -1214,7 +1217,7 @@ function openFinishSheet() {
     <div class="hr-sheet finish-sheet" role="dialog" aria-label="Terminer la séance">
       <div class="hr-sheet-in">
         <h2>Terminer maintenant ?</h2>
-        <p>${ls ? `Tu en es au <b>bloc ${ls.bloc} sur ${ls.blocs}</b>.` : `Il reste <b>${mmss(left)}</b> et ${stepsLeft} étape${stepsLeft > 1 ? 's' : ''}.`} Ce que tu as déjà fait est gardé pour le bilan.</p>
+        <p>${ls ? `Tu en es au <b>bloc ${blocLabel(ls).replace('/', ' sur ')}</b>.` : `Il reste <b>${mmss(left)}</b> et ${stepsLeft} étape${stepsLeft > 1 ? 's' : ''}.`} Ce que tu as déjà fait est gardé pour le bilan.</p>
         <button class="btn-primary" data-finishno>Continuer la séance</button>
         <button class="btn-stop" data-finishok>${isTest(live.session) ? 'Arrêter le test' : ls ? 'C\'est fini : faire le bilan' : 'Terminer et faire le bilan'}</button>
       </div>
@@ -1328,13 +1331,16 @@ document.addEventListener('click', (e) => { if (e.target.classList?.contains('pa
 // --- Séance en cours ----------------------------------------------------------
 
 let live = null; // { session, track, url, skipped:Set, maxTime, lastStep }
+let clMode = 'course'; // 'course' (course libre) ou 'test' (courses au max)
+let clCfg = null; // course libre : réglages en cours de choix (minutes)
 let testDone = null; // fin de la séance test : ce qui a été joué (rien n'est enregistré)
 
 const localNow = () => new Date().toLocaleString('sv-SE').replace(' ', 'T'); // AAAA-MM-JJTHH:MM:SS, heure locale
 
 // Test « 5 courses au max » : signaux seuls (une annonce dirait une durée qui n'existe pas)
 // et pas de mi-séance (la durée totale n'est pas connue).
-const trackOpts = (session) => ({ voice: load().settings.annonces === 'voix' && !isLibre(session), leadIn: session.leadIn, half: !isLibre(session) });
+// Course libre : la mi-séance tombe à la moitié de la course (halfStep), pas de la séance.
+const trackOpts = (session) => ({ voice: load().settings.annonces === 'voix' && !isLibre(session), leadIn: session.leadIn, half: !isLibre(session), halfStep: session.halfStep ?? null });
 
 function startSession(session, resume = null) {
   if (!audioAssets) {
@@ -1709,11 +1715,11 @@ function tickLibre(i, t) {
   }
   const m = (txt) => `<span class="muted">${txt}</span>`;
   if (st.phase === 'echauffement') {
-    el('next').innerHTML = `${m(`Échauffement · reste ${mmss(left)} ·`)} ensuite bloc 1/${st.blocs}, le plus longtemps possible`;
+    el('next').innerHTML = `${m(`Échauffement · reste ${mmss(left)} ·`)} ensuite bloc ${blocLabel({ ...st, bloc: 1 })}, le plus longtemps possible`;
   } else if (st.phase === 'course') {
     el('next').innerHTML = `${m(`Bloc ${st.bloc} · ${mmss(since)} ·`)} ${st.bloc < st.blocs ? 'dès que tu t\'arrêtes, touche « Je marche »' : 'dernier bloc : touche quand tu t\'arrêtes'}`;
   } else if (st.phase === 'marche') {
-    el('next').innerHTML = `${m(`Marche · reste ${mmss(left)} ·`)} ensuite bloc ${st.bloc}/${st.blocs}, au signal`;
+    el('next').innerHTML = `${m(`Marche · reste ${mmss(left)} ·`)} ensuite bloc ${blocLabel(st)}, au signal`;
   } else if (st.phase === 'recup') {
     el('now').textContent = 'Marche';
     el('next').innerHTML = `${m(`Retour au calme · reste ${mmss(left)} ·`)} « C'est fini » pour arrêter avant`;
@@ -1722,7 +1728,7 @@ function tickLibre(i, t) {
     el('next').innerHTML = `${m(`+${mmss(Math.max(0, liveElapsed() - (live.track.end - starts[0])))} en plus ·`)} continue à marcher si tu veux, puis « Terminer »`;
   }
   el('stepno').textContent = st.phase === 'intro' ? 'Départ' : st.phase === 'echauffement' ? 'Échauffement'
-    : st.phase === 'fin' ? 'Fin' : st.phase === 'recup' ? 'Retour au calme' : `Bloc ${st.bloc}/${st.blocs} · ${st.phase === 'course' ? 'course' : 'marche 2 min'}`;
+    : st.phase === 'fin' ? 'Fin' : st.phase === 'recup' ? 'Retour au calme' : `Bloc ${blocLabel(st)} · ${st.phase === 'course' ? 'course' : 'marche 2 min'}`;
   const btn = el('librebtn');
   if (btn) {
     btn.hidden = !st.action || touchLocked;
@@ -2038,12 +2044,60 @@ const screens = {
         <button class="option muscu" data-logplan="muscu"><span><span>La noter sans guidage</span><span class="muted">Séance déjà faite : charges et répétitions à la main.</span></span><span class="go">+</span></button>` : ''}
       <h3>Course guidée</h3>
       ${d.sessions.map((x) => `<button class="option" data-start="${esc(x.id)}"><span><span>${esc(x.name)}</span><span class="muted">${minutesLabel(total(x.steps))} · ${x.steps.length} étapes</span></span><span class="go">▶</span></button>`).join('')}
+      <h3>Séance libre</h3>
+      ${practiced(d, 'course') ? `<button class="option" data-courselibre><span><span>Course libre</span><span class="muted">Tu choisis ta marche de début, ta durée de course et ta marche de fin. Signal à chaque changement et à la moitié de la course. Hors programme.</span></span><span class="go">▶</span></button>` : ''}
+      ${practiced(d, 'natation') ? `<button class="option natation" data-manual="natation"><span><span>Natation libre</span><span class="muted">Nage ce que tu veux. Pas de téléphone dans l'eau : note-la en sortant, ou laisse ta montre la remplir.</span></span><span class="go">+</span></button>` : ''}
       <h3>Me tester</h3>
-      <button class="option" data-startlibre><span><span>Test : 5 courses au max</span><span class="muted">Cours le plus longtemps possible, 2 min de marche dès que tu t'arrêtes, 5 fois. Hors programme.</span></span><span class="go">▶</span></button>
+      <button class="option" data-startlibre><span><span>Test : courses au max</span><span class="muted">Tu choisis ta marche de début et de fin. Cours le plus longtemps possible, « Je marche » dès que tu t'arrêtes : 2 min de marche, puis tu repars. Autant de fois que tu veux. Hors programme.</span></span><span class="go">▶</span></button>
       <h3>Noter une séance faite</h3>
       ${manualButtons(d, '')}
       <h3>Vérifier les signaux</h3>
       <button class="option" data-starttest><span><span>Séance test · ${total(testSession().steps)} s</span><span class="muted">Étapes de 10 s, premier signal après 2 s. Ne compte nulle part.</span></span><span class="go">▶</span></button>`;
+  },
+
+  courselibre() {
+    const test = clMode === 'test';
+    const c = { ...courseLibreCfg(clCfg || load().settings.courseLibre), ...(test ? testCfg(clCfg) : {}) };
+    const row = (k, label, help) => `<div class="cl-row">
+        <div class="cl-lab"><b>${label}</b><span class="muted small">${help}</span></div>
+        <div class="cl-step">
+          <button type="button" data-clstep="${k}" data-cld="-5" aria-label="${label} moins 5 min">−5</button>
+          <button type="button" data-clstep="${k}" data-cld="-1" aria-label="${label} moins 1 min">−</button>
+          <output id="cl-${k}"><b>${c[k]}</b><small>min</small></output>
+          <button type="button" data-clstep="${k}" data-cld="1" aria-label="${label} plus 1 min">+</button>
+          <button type="button" data-clstep="${k}" data-cld="5" aria-label="${label} plus 5 min">+5</button>
+        </div>
+      </div>`;
+    const tot = c.echauf + c.course + c.fin;
+    if (test) {
+      return `
+      <p class="eyebrow" style="margin-top:0">Me tester</p>
+      <h1 class="prep-title">Test : courses au max</h1>
+      <section class="prep-sum cl-sum">
+        <p class="hero-num">2<small>min de marche par arrêt</small></p>
+        <p class="muted small" style="margin:0">Cours le plus longtemps possible. « Je marche » dès que tu t'arrêtes : 2 min de marche, signal, et tu repars. « Terminer » quand tu as fini.</p>
+      </section>
+      <div class="card cl-card">
+        ${row('echauf', 'Marche de début', c.echauf ? 'Signal de course à la fin.' : 'Aucune : tu cours dès le départ.')}
+        ${row('fin', 'Marche de fin', c.fin ? 'Commence quand tu touches « Terminer ».' : 'Aucune : « Terminer » va droit au bilan.')}
+      </div>
+      <p class="muted small">Hors programme : enregistré comme une course (historique, Progression, « Mes tests »), sans changer ton palier tout seul. Tes réglages sont gardés pour la prochaine fois.</p>
+      <div class="row"><button data-tab="demarrer">Retour</button><button class="btn-primary" data-clgo>Continuer</button></div>`;
+    }
+    return `
+      <p class="eyebrow" style="margin-top:0">Séance libre</p>
+      <h1 class="prep-title">Course libre</h1>
+      <section class="prep-sum cl-sum">
+        <p class="hero-num">${c.course}<small>min de course</small></p>
+        <p class="muted small" style="margin:0">${tot} min en tout, marches comprises.</p>
+      </section>
+      <div class="card cl-card">
+        ${row('echauf', 'Marche de début', c.echauf ? 'Signal de course à la fin.' : 'Aucune : tu cours dès le départ.')}
+        ${row('course', 'Course', 'Signal à la moitié.')}
+        ${row('fin', 'Marche de fin', c.fin ? 'Signal de marche au début, signal de fin à la fin.' : 'Aucune : signal de fin à la fin de la course.')}
+      </div>
+      <p class="muted small">Signaux et flash comme d'habitude, 3 bips avant chaque changement. Hors programme : enregistrée comme une course (historique, Progression), sans effet sur ton palier. Tes réglages sont gardés pour la prochaine fois.</p>
+      <div class="row"><button data-tab="demarrer">Retour</button><button class="btn-primary" data-clgo>Continuer</button></div>`;
   },
 
   testfin() {
@@ -2112,13 +2166,14 @@ const screens = {
       ${s.ask && !s.ask.choix ? `<section class="why-tips course">${palierAsk(s.ask)}</section>` : ''}
       ${isTest(s) ? `<p class="notice small replay-note"><strong>Séance test, elle ne compte nulle part</strong> : pas d'historique, pas de bilan, aucun effet sur ton programme. Le vrai moteur de séance : signaux, 3 bips avant chaque changement, flash, barre, mi-séance, verrou.</p>${IOS && load().settings.son !== 'exclusif' ? '<p class="alert"><strong>Mode silencieux coupé et volume monté, sinon aucun son.</strong> En mode « Avec ma musique », l\'iPhone en silencieux ne joue aucun signal.</p>' : ''}` : ''}
       ${s.refaite ? `<p class="notice small replay-note"><strong>La même séance que ${esc(dateLabel(s.refaiteDate))}</strong>, étape par étape. Elle compte comme une course de plus : ${s.refaiteNote}</p>` : ''}
+      ${isCourseLibre(s) ? `<p class="notice small replay-note"><strong>Course libre, hors programme</strong> : ${s.courseLibre.echauf ? `${s.courseLibre.echauf} min de marche, ` : ''}${s.courseLibre.course} min de course${s.courseLibre.fin ? `, ${s.courseLibre.fin} min de marche` : ''}. Signal à la moitié de la course. Elle compte dans ton historique et ta Progression, sans changer ton palier.</p>` : ''}
       ${isLibre(s) ? `<section class="prep-sum libre-prep">
-        <p class="hero-num">${s.blocs || 5}<small>courses au max</small></p>
+        ${s.illimite ? '<p class="hero-num">2<small>min de marche par arrêt</small></p>' : `<p class="hero-num">${s.blocs || 5}<small>courses au max</small></p>`}
         <ol class="small libre-how">
-          <li>5 min de marche d'échauffement (« Je commence à courir » pour l'écourter).</li>
+          ${s.illimite ? (s.marches.echauf ? `<li>${s.marches.echauf} min de marche d'échauffement (« Je commence à courir » pour l'écourter).</li>` : '<li>Pas de marche de début : tu cours dès le signal.</li>') : '<li>5 min de marche d\'échauffement (« Je commence à courir » pour l\'écourter).</li>'}
           <li>Cours aussi longtemps que tu peux. Dès que tu t'arrêtes, touche <b>« Je marche »</b>.</li>
           <li>2 min de marche, puis le signal de course : repars. <b>« Je recours »</b> si tu repars avant.</li>
-          <li>Après le 5e bloc, ou si tu touches « Terminer » avant : 5 min de marche de retour au calme. « C'est fini » pour arrêter avant, ou continue à marcher : le chrono tourne jusqu'à « C'est fini ».</li>
+          ${s.illimite ? `<li>Pas de nombre de blocs : recommence autant que tu veux. Quand tu as fini, touche <b>« Terminer »</b>${s.marches.fin ? ` : ${s.marches.fin} min de marche de retour au calme, « C'est fini » pour arrêter avant.` : ' : bilan direct, pas de marche de fin.'}</li>` : '<li>Après le 5e bloc, ou si tu touches « Terminer » avant : 5 min de marche de retour au calme. « C\'est fini » pour arrêter avant, ou continue à marcher : le chrono tourne jusqu\'à « C\'est fini ».</li>'}
         </ol>
         <p class="muted small" style="margin:0">Signaux seulement, pas de voix. Écran bloqué : appui long 2 s sur « Je marche ». Hors programme : enregistrée comme une course, sans effet sur ton palier.</p>
       </section>` : `<section class="prep-sum">
@@ -2160,7 +2215,7 @@ const screens = {
         <p class="next" id="next"></p>
         <div class="extend" id="extend" hidden></div>
         ${libre ? '<button class="libre-btn" id="librebtn" data-libre hidden></button><div class="libre-blocs" id="libreblocs"></div>' : segmentsBar()}
-        <p class="halfway" id="halfway" hidden>Moitié de la séance faite</p>
+        <p class="halfway" id="halfway" hidden>${isCourseLibre(live?.session) ? 'Moitié de ta course faite' : 'Moitié de la séance faite'}</p>
         <div class="live-stats">
           <div><b id="dist">0,00</b><span>${libre ? 'km séance' : 'km'}</span></div>
           <div><b id="pace">–</b><span>allure /km</span><small id="paceavg">moy. –</small></div>
@@ -2763,7 +2818,8 @@ function runBilan({ session, starts, end, reached, elapsedSec, prolongSec = 0, t
     sessionName: session.name,
     level: session.level ?? null,
     ...(session.refaite ? { refaite: session.refaite } : {}),
-    ...(libre ? { libre: true, blocsPrevus: session.blocs || 5, blocs: libreBlocs(steps, stepMs, gps.points, track.points), segments: libreSegments(steps, stepMs, gps.points, track.points, finMs) || undefined } : {}),
+    ...(isCourseLibre(session) ? { courseLibre: session.courseLibre } : {}),
+    ...(libre ? { libre: true, blocsPrevus: session.illimite ? null : session.blocs || 5, ...(session.marches ? { marches: session.marches } : {}), blocs: libreBlocs(steps, stepMs, gps.points, track.points), segments: libreSegments(steps, stepMs, gps.points, track.points, finMs) || undefined } : {}),
     ...(courseDist ? { enCourse: courseDist } : {}),
     steps,
     plannedSec: total(steps),
@@ -2823,7 +2879,8 @@ function replaySession(id) {
     openMuscuPrep();
     return;
   }
-  if (h.libre) { openPrepare(libreSession()); return; }
+  if (h.libre) { openPrepare(libreSession(h.marches || load().settings.testLibre)); return; }
+  if (h.courseLibre) { openPrepare(courseLibreSession(h.courseLibre)); return; } // mêmes réglages, toujours hors programme
   const r = replayRun(h);
   if (!r) return;
   const plan = planFor(d);
@@ -3049,9 +3106,32 @@ document.addEventListener('click', (e) => {
     go(ds.tab === 'demarrer' && live && !live.done ? 'live' : ds.tab);
   } else if (ds.start) {
     openPrepare(findSession(ds.start));
+  } else if ('courselibre' in ds) {
+    if (live && !live.done) return;
+    clMode = 'course';
+    clCfg = courseLibreCfg(load().settings.courseLibre);
+    go('courselibre');
+  } else if (ds.clstep) {
+    const k = ds.clstep;
+    const [lo, hi] = CL_BORNES[k];
+    clCfg = { ...clCfg, ...courseLibreCfg({ ...(clCfg || load().settings.courseLibre), [k]: Math.min(hi, Math.max(lo, (clCfg?.[k] ?? 0) + Number(ds.cld))) }) };
+    render();
+  } else if ('clgo' in ds) {
+    if (live && !live.done) return;
+    if (clMode === 'test') {
+      const c = testCfg(clCfg);
+      update((d) => { d.settings.testLibre = c; });
+      openPrepare(libreSession(c));
+      return;
+    }
+    const c = courseLibreCfg(clCfg || load().settings.courseLibre);
+    update((d) => { d.settings.courseLibre = c; });
+    openPrepare(courseLibreSession(c));
   } else if ('startlibre' in ds) {
     if (live && !live.done) return;
-    openPrepare(libreSession());
+    clMode = 'test';
+    clCfg = { ...courseLibreCfg(load().settings.courseLibre), ...testCfg(load().settings.testLibre) };
+    go('courselibre');
   } else if ('libre' in ds) {
     libreLive();
   } else if ('starttest' in ds) {

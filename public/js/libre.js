@@ -24,17 +24,35 @@ const RALLONGE_SOUS = 300; // s restantes sur l'étape ouverte : on rallonge
 
 const openRun = () => ({ kind: 'course', duration: OPEN, libre: true, ouvert: true });
 
-export function libreSession() {
+// Test sans nombre de blocs fixé (depuis le 23/11) : marche de début et de fin au choix
+// (minutes, 0 = aucune), autant de blocs que le coureur veut, jusqu'à « Terminer ».
+// Anciennes séances sauvegardées (blocs: 5, sans illimite) : comportement d'avant inchangé.
+export const TEST_DEFAUT = { echauf: 5, fin: 5 };
+export function testCfg(saved) {
+  const c = { ...TEST_DEFAUT, ...(saved || {}) };
+  const b = (v) => Math.min(30, Math.max(0, Math.round(Number(v) || 0)));
+  return { echauf: b(c.echauf), fin: b(c.fin) };
+}
+
+export function libreSession(cfg) {
+  const c = testCfg(cfg);
   return {
     id: LIBRE_ID,
     libre: true,
-    blocs: BLOCS,
-    name: `Test : ${BLOCS} courses au max`,
-    steps: [{ kind: 'echauffement', duration: WARMUP }, openRun()],
+    illimite: true,
+    finSec: c.fin * 60,
+    marches: c, // pas « test » : session.test marque la séance de vérification des signaux
+    name: 'Test : courses au max',
+    steps: [...(c.echauf ? [{ kind: 'echauffement', duration: c.echauf * 60 }] : []), openRun()],
   };
 }
 
+const recupSec = (session) => (session.illimite ? session.finSec : RECUP);
+
 export const isLibre = (s) => Boolean(s?.libre);
+
+// « Bloc 3/5 » pour l'ancien test, « Bloc 3 » sans nombre fixé.
+export const blocLabel = (st) => (Number.isFinite(st.blocs) ? `${st.bloc}/${st.blocs}` : `${st.bloc}`);
 
 // Numéro du bloc de course (1 à 5) à l'étape i : blocs commencés jusque-là.
 const runsUpTo = (steps, i) => steps.slice(0, i + 1).filter((s) => s.kind === 'course').length;
@@ -42,7 +60,7 @@ const runsUpTo = (steps, i) => steps.slice(0, i + 1).filter((s) => s.kind === 'c
 // Où on en est : phase, numéro du bloc (en cours, ou à venir pendant une marche) et bouton.
 export function libreState(session, i) {
   const steps = session.steps;
-  const blocs = session.blocs || BLOCS;
+  const blocs = session.illimite ? Infinity : session.blocs || BLOCS;
   if (i < 0) return { phase: 'intro', bloc: 1, blocs, action: null };
   if (i >= steps.length) return { phase: 'fin', bloc: blocs, blocs, action: null };
   const s = steps[i];
@@ -65,7 +83,7 @@ export function libreAction(session, i, offset) {
   steps.push({ ...cut, duration: cutAt(offset), libre: true });
   if (st.phase === 'course') {
     if (st.bloc < st.blocs) steps.push({ kind: 'marche', duration: MARCHE }, openRun());
-    else steps.push({ kind: 'recuperation', duration: RECUP }); // retour au calme, puis signal de fin
+    else steps.push({ kind: 'recuperation', duration: RECUP }); // ancien test à 5 blocs : retour au calme, puis signal de fin
   } else if (st.phase === 'recup') {
     // Retour au calme écourté : la séance s'arrête ici (signal de fin).
   } else {
@@ -181,11 +199,11 @@ export function segmentTotals(segs) {
   return { course: r(course), marche: r(marche), seance: r(course + marche) };
 }
 
-// « Terminer » avant la fin : l'étape en cours s'arrête maintenant et les 5 min de retour au
-// calme commencent. null si le retour au calme est déjà commencé (ou fini).
+// « Terminer » avant la fin : l'étape en cours s'arrête maintenant et la marche de fin (5 min
+// pour l'ancien test, celle choisie sinon) commence. null aussi sans marche de fin. null si le retour au calme est déjà commencé (ou fini).
 export function libreFinir(session, i, offset) {
   const st = libreState(session, i);
-  if (!['echauffement', 'course', 'marche'].includes(st.phase)) return null;
+  if (!['echauffement', 'course', 'marche'].includes(st.phase) || !recupSec(session)) return null;
   const { ouvert, ...cut } = session.steps[i];
-  return { ...session, steps: [...session.steps.slice(0, i), { ...cut, duration: cutAt(offset), libre: true }, { kind: 'recuperation', duration: RECUP }] };
+  return { ...session, steps: [...session.steps.slice(0, i), { ...cut, duration: cutAt(offset), libre: true }, { kind: 'recuperation', duration: recupSec(session) }] };
 }

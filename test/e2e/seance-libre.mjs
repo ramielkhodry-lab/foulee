@@ -1,4 +1,4 @@
-// Test « 5 courses au max » : échauffement, 5 blocs au max avec 2 min de marche, bilan avec les blocs.
+// Test « courses au max » (sans nombre de blocs fixé) : échauffement, 5 blocs au max avec 2 min de marche, bilan avec les blocs.
 import { createRequire } from 'node:module';
 const { chromium, devices } = createRequire(import.meta.url)('playwright');
 import { createServer } from 'node:http';
@@ -48,6 +48,9 @@ for (const [name, dev] of [['iphone', 'iPhone 13'], ['android', 'Pixel 7']]) {
   await page.click('#tabs [data-tab="demarrer"]');
   await page.screenshot({ path: `${out}/${name}-0-demarrer.png` });
   await page.click('[data-startlibre]');
+  await page.waitForSelector('[data-clgo]');
+  await page.screenshot({ path: `${out}/${name}-0b-reglage.png`, fullPage: true });
+  await page.click('[data-clgo]');
   await page.waitForSelector('[data-ready]:not([disabled])', { timeout: 15000 });
   await page.screenshot({ path: `${out}/${name}-1-avant-de-partir.png`, fullPage: true });
   await page.click('[data-ready]');
@@ -86,6 +89,11 @@ for (const [name, dev] of [['iphone', 'iPhone 13'], ['android', 'Pixel 7']]) {
       await page.waitForTimeout(2300);
       await page.mouse.up();
       await page.waitForSelector('#touchlock', { state: 'detached' });
+    } else if (k === 4) {
+      // Plus de fin automatique après 5 blocs : « Terminer » → marche de fin.
+      await page.click('[data-finish]');
+      await page.waitForSelector('[data-librefinir]');
+      await page.click('[data-librefinir]');
     } else {
       await page.click('#librebtn');
     }
@@ -148,6 +156,7 @@ for (const [name, dev] of [['iphone', 'iPhone 13'], ['android', 'Pixel 7']]) {
   const early = {};
   await page.click('#tabs [data-tab="demarrer"]');
   await page.click('[data-startlibre]');
+  await page.click('[data-clgo]');
   await page.waitForSelector('[data-ready]:not([disabled])', { timeout: 15000 });
   await page.click('[data-ready]');
   await page.waitForSelector('#librebtn');
@@ -181,9 +190,9 @@ for (const [name, dev] of [['iphone', 'iPhone 13'], ['android', 'Pixel 7']]) {
   const close = secs.length === 5 && secs.every((s, k) => s >= RUNS[k] && s <= RUNS[k] + 3) // le test touche ~1 s après la durée voulue;
   const checks = {
     'pas de bouton « Étape suivante »': noSkip,
-    'bloc 1 : « Je marche »': b1.btn === 'Je marche' && b1.stepno.startsWith('Bloc 1/5'),
-    'bloc 5 : « J\'arrête »': log[4].during.btn?.startsWith('J\'arrête'),
-    'marche : 2 min et bloc suivant annoncé': log[0].walk.stepno === 'Bloc 2/5 · marche 2 min' && /reste [12]:\d\d/.test(log[0].walk.next),
+    'bloc 1 : « Je marche »': b1.btn === 'Je marche' && b1.stepno.startsWith('Bloc 1 ·'),
+    'bloc 5 : toujours « Je marche » (pas de nombre de blocs)': log[4].during.btn === 'Je marche',
+    'marche : 2 min et bloc suivant annoncé': log[0].walk.stepno === 'Bloc 2 · marche 2 min' && /reste [12]:\d\d/.test(log[0].walk.next),
     'séance : 5 courses, 4 marches': session.steps.filter((x) => x.kind === 'course').length === 5 && session.steps.filter((x) => x.kind === 'marche').length === 4,
     'marche coupée par « Je recours »': session.steps.filter((x) => x.kind === 'marche')[3].duration < 60,
     'distance du bloc en grand pendant la course': log.every((x) => /^\d,\d\dkm$/.test(x.during.count)),
@@ -198,7 +207,7 @@ for (const [name, dev] of [['iphone', 'iPhone 13'], ['android', 'Pixel 7']]) {
     'bilan : détail segment par segment': ['Échauffement', 'Course 1', 'Marche 1', 'Marche 4', 'Retour au calme', 'Marche en plus', 'En courant', 'En marchant', 'Séance entière'].every((x) => bilanText.includes(x)),
     'enregistré : 11 segments + marche en plus': h.segments?.length === 12 && h.segments.at(-1).kind === 'plus',
     'direct : distance du segment aussi en marche': /^\d,\d\dkm$/.test(log[0].walk.count) && /^\d,\d\dkm$/.test(recup.count),
-    'enregistrée hors palier': h.libre === true && h.level === null && h.blocsPrevus === 5,
+    'enregistrée hors palier': h.libre === true && h.level === null && h.blocsPrevus === null && h.marches?.echauf === 5,
     'blocs : durées justes (+3 s max)': close,
     'plus longue = bloc 2': bilanText.includes('(bloc 2)'),
     'distance par bloc (GPS)': (h.blocs || []).filter((b) => b.km > 0).length >= 3 && h.distanceKm > 0,
