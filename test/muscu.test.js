@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { EXERCICES, LIEUX, SEANCES, alternatives, muscuPlan, nextLoad, nextSeance, tonnage, byId } from '../public/js/muscu.js';
+import { EXERCICES, LIEUX, SEANCES, alternatives, muscuPlan, nextLoad, nextSeance, tonnage, byId, slotExercise } from '../public/js/muscu.js';
 import { upcoming } from '../public/js/plan.js';
 
 const goal = { series: 3, min: 8, max: 12 };
@@ -91,4 +91,13 @@ test('matériel en plus : alternatives en plus, programme par défaut inchangé'
   const n = nextLoad(ex, h, goal);
   assert.equal(n.poids, null);
   assert.match(n.reason, /élastique plus dur/);
+});
+
+test('sans banc : développé au sol haltères proposé, jamais par défaut', () => {
+  const ids = alternatives('pectoraux', 'halteres').map((e) => e.id);
+  assert.ok(ids.includes('dev-sol-h'));
+  assert.equal(byId('dev-couche-h').besoin, 'un banc');
+  assert.equal(slotExercise('A', 1, 'halteres').id, 'dev-couche-h');
+  assert.equal(slotExercise('B', 2, 'halteres').id, 'pompes');
+  assert.equal(slotExercise('A', 1, 'halteres', { 'A:1': 'dev-sol-h' }).id, 'dev-sol-h');
 });
