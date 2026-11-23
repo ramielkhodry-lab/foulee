@@ -524,7 +524,7 @@ function historyRow(h, open = false) {
     ? (swimMeters(h) ? `${swimMeters(h)}<small>m</small>` : '')
     : h.distanceKm ? `${h.distanceKm.toLocaleString('fr-FR')}<small>km</small>` : h.elapsedSec ? `${Math.round(h.elapsedSec / 60)}<small>min</small>` : '';
   return `
-    <details class="hist"${open || h.id === fixedRun || h.id === keepOpen ? ' open' : ''}>
+    <details class="hist" data-hist="${esc(h.id)}"${open || h.id === fixedRun || h.id === keepOpen ? ' open' : ''}>
       <summary class="li">${icon(sport)}<div class="li-main"><b>${dateLabel(h.date)}</b><span>${parts.length ? parts.join(' · ') : esc(h.structure || h.sessionName || SPORT_LABEL[sport])}</span></div><span class="li-side ${sport}">${side}</span></summary>
       <div class="li-more">
         ${traceOf(h).length ? `<div class="map" data-map="${esc(h.id)}"></div>` : ''}
@@ -596,8 +596,12 @@ const sportOf = (h) => h.sport || 'course';
 const swimMeters = (h) => (h.swim?.longueurs ? h.swim.longueurs * (h.swim.bassinM || 25) : Math.round((h.distanceKm || 0) * 1000));
 // Répétitions faites (gainage en secondes non compté) : la mesure réelle d'une muscu au poids du corps.
 const repsOf = (h) => (h.exercices || []).filter((x) => x.unite !== 's').reduce((a, x) => a + (x.reps || []).reduce((s, r) => s + (Number(r) || 0), 0), 0);
-// Musculation : en kg dès qu'une charge a été notée, sinon en répétitions (0 kg au poids du corps ne dit rien).
-const muscuKey = (history) => (history.some((h) => sportOf(h) === 'muscu' && tonnage(h) > 0) ? 'kg' : 'reps');
+// Musculation : en kg seulement si chaque séance a une charge notée ; sinon en répétitions.
+// (Avant : kg dès une seule charge, et les séances au poids du corps disparaissaient de la courbe.)
+const muscuKey = (history) => {
+  const m = history.filter((h) => sportOf(h) === 'muscu');
+  return m.length && m.every((h) => tonnage(h) > 0) ? 'kg' : 'reps';
+};
 const UNIT_LABEL = { km: 'km', m: 'm', kg: 'kg', reps: 'rép.' };
 const fmtKm = (km) => (Math.round(km * 10) / 10).toLocaleString('fr-FR');
 
@@ -862,13 +866,17 @@ function weekCurve(history, kind, unitKey) {
   }
   const color = { course: 'var(--run)', natation: 'var(--swim)', muscu: 'var(--muscu)' }[kind];
   const [lx, ly] = pts.at(-1);
-  // Bulle au toucher d'un point : le récap de la semaine, rien que du mesuré.
+  // Bulle au toucher d'un point : la semaine, puis chaque séance avec son jour (rien que du
+  // mesuré). Toucher une séance de la bulle ouvre son détail dans l'historique.
+  const counts = weeks.map((w) => weekList(history, w, kind).length);
   const hit = weeks.map((w, i) => {
-    const lines = vals[i] ? curveTip(history, w, kind) : null;
-    if (!lines) return '<span></span>';
+    const tip = counts[i] ? curveTip(history, w, kind) : null;
+    if (!tip) return '<span></span>';
     const x = (pts[i][0] / W) * 100;
     const y = Math.round((pts[i][1] / H) * 140); // .curve fait 140 px de haut
-    return `<button type="button" data-curvetip="${i}" style="--x:${x}%;--y:${y}px" aria-label="${esc(lines.join(', '))}"><span class="curve-tip ${kind}${i < 2 ? ' edge-l' : i > 5 ? ' edge-r' : ''}">${lines.map((l, j) => (j ? `<span>${esc(l)}</span>` : `<b>${esc(l)}</b>`)).join('')}</span></button>`;
+    const one = tip.seances.length === 1 ? tip.seances[0] : null;
+    const rows = tip.seances.map((r) => `<button type="button" class="ct-row" data-openhist="${esc(r.id)}"><span>${esc(r.jour)}</span><span>${esc(r.detail)}</span><i aria-hidden="true">›</i></button>`).join('');
+    return `<span class="ct" style="--x:${x}%;--y:${y}px"><button type="button" class="ct-pt" data-curvetip="${i}" aria-label="${esc([tip.titre, ...tip.total].join(', '))}"></button><span class="curve-tip ${kind}${i < 2 ? ' edge-l' : i > 5 ? ' edge-r' : ''}"${one ? ` data-openhist="${esc(one.id)}"` : ''}><b>${esc(tip.titre)}</b>${tip.total.map((l) => `<span class="ct-tot">${esc(l)}</span>`).join('')}${rows}</span></span>`;
   }).join('');
   return `
     <div class="curve-wrap">
@@ -877,7 +885,7 @@ function weekCurve(history, kind, unitKey) {
       <defs><linearGradient id="area-${kind}" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="${color}" stop-opacity="0.35"/><stop offset="1" stop-color="${color}" stop-opacity="0"/></linearGradient></defs>
       <path d="${d} L${lx},${H} L${pts[0][0]},${H} Z" fill="url(#area-${kind})"/>
       <path d="${d}" fill="none" stroke="${color}" stroke-width="3" stroke-linecap="round"/>
-      ${pts.map(([x, y], i) => (vals[i] ? `<circle cx="${x}" cy="${y}" r="3.5" fill="${color}"/>` : '')).join('')}
+      ${pts.map(([x, y], i) => (counts[i] ? `<circle cx="${x}" cy="${y}" r="3.5" fill="${color}"/>` : '')).join('')}
       ${kind === 'course' ? pts.map(([x, y], i) => (tests[i] ? `<circle cx="${x}" cy="${y}" r="7" fill="none" stroke="${color}" stroke-width="2"/>` : '')).join('') : ''}
       <circle cx="${lx}" cy="${ly}" r="9" fill="${color}" opacity="0.25"/>
     </svg>
@@ -891,34 +899,55 @@ const dureeCourte = (sec) => {
   return m >= 60 ? `${Math.floor(m / 60)} h ${String(m % 60).padStart(2, '0')}` : `${m} min`;
 };
 
-// Récap d'une semaine pour la bulle de la courbe. La durée n'apparaît que si chaque séance l'a.
-function curveTip(history, monday, kind) {
+// Séances d'un sport dans une semaine (lundi → dimanche), dans l'ordre des jours.
+const weekList = (history, monday, kind) => {
   const end = addDays(monday, 7);
-  const list = history.filter((h) => { const d = String(h.date).slice(0, 10); return d >= monday && d < end && sportOf(h) === kind; });
-  if (!list.length) return null;
-  const lines = [`Semaine du ${Number(monday.slice(8))}/${Number(monday.slice(5, 7))}`];
-  if (kind === 'natation') {
-    const withLg = list.filter((h) => h.swim?.longueurs);
-    const lg = withLg.reduce((a, h) => a + h.swim.longueurs, 0);
-    const m = list.reduce((a, h) => a + swimMeters(h), 0);
-    if (lg && withLg.length === list.length) {
-      const bassins = [...new Set(withLg.map((h) => h.swim.bassinM || 25))];
-      lines.push(`${lg} longueurs${bassins.length === 1 ? ` · ${bassins[0]} m` : ''}`);
-    }
-    lines.push(`${m.toLocaleString('fr-FR')} m`);
-  } else if (kind === 'course') {
-    lines.push(`${fmtKm(list.reduce((a, h) => a + runKm(h), 0))} km`);
-    const tests = list.filter((h) => h.libre && libreResume(h));
-    for (const t of tests) lines.push(`Test : ${mmss(libreResume(t).plusLongue)} de course continue max`);
+  return history.filter((h) => { const d = String(h.date).slice(0, 10); return d >= monday && d < end && sportOf(h) === kind; })
+    .sort((a, b) => String(a.date).localeCompare(String(b.date)));
+};
+
+// Ce qu'une séance pèse dans la courbe, en une ligne courte.
+function seanceMesure(h, kind) {
+  const parts = [];
+  if (kind === 'natation') { const m = swimMeters(h); if (m) parts.push(`${m.toLocaleString('fr-FR')} m`); }
+  else if (kind === 'course') {
+    if (runKm(h)) parts.push(`${fmtKm(runKm(h))} km`);
+    if (h.libre) parts.push('test');
   } else {
-    const reps = list.reduce((a, h) => a + repsOf(h), 0);
-    const kg = list.reduce((a, h) => a + tonnage(h), 0);
-    if (reps) lines.push(`${reps} répétitions`);
-    if (kg) lines.push(`${Math.round(kg).toLocaleString('fr-FR')} kg soulevés`);
+    if (repsOf(h)) parts.push(`${repsOf(h)} rép.`);
+    if (tonnage(h)) parts.push(`${Math.round(tonnage(h)).toLocaleString('fr-FR')} kg`);
   }
-  if (list.every((h) => h.elapsedSec > 0)) lines.push(dureeCourte(list.reduce((a, h) => a + h.elapsedSec, 0)));
-  if (list.length > 1) lines.push(`${list.length} séances`);
-  return lines;
+  if (h.elapsedSec > 0) parts.push(dureeCourte(h.elapsedSec));
+  return parts.join(' · ') || SPORT_LABEL[kind];
+}
+
+// Récap d'une semaine pour la bulle de la courbe : le total de la semaine, puis chaque séance
+// avec son jour, pour qu'on ne lise jamais un total de semaine comme celui d'un jour.
+// La durée totale n'apparaît que si chaque séance l'a.
+function curveTip(history, monday, kind) {
+  const list = weekList(history, monday, kind);
+  if (!list.length) return null;
+  const dim = addDays(monday, 6);
+  const dm = (iso) => `${Number(iso.slice(8))}/${Number(iso.slice(5, 7))}`;
+  const titre = `Semaine du ${dm(monday)} au ${dm(dim)}`;
+  const total = [];
+  if (kind === 'natation') {
+    const m = list.reduce((a, h) => a + swimMeters(h), 0);
+    total.push(`${m.toLocaleString('fr-FR')} m`);
+  } else if (kind === 'course') {
+    total.push(`${fmtKm(list.reduce((a, h) => a + runKm(h), 0))} km`);
+  } else {
+    const kg = list.reduce((a, h) => a + tonnage(h), 0);
+    const reps = list.reduce((a, h) => a + repsOf(h), 0);
+    if (reps) total.push(`${reps} répétitions`);
+    if (kg) total.push(`${Math.round(kg).toLocaleString('fr-FR')} kg soulevés`);
+    if (!total.length) total.push(`${list.length} séance${list.length > 1 ? 's' : ''}`);
+  }
+  const n = `${list.length} séance${list.length > 1 ? 's' : ''}`;
+  total.push(list.every((h) => h.elapsedSec > 0) ? `${n} · ${dureeCourte(list.reduce((a, h) => a + h.elapsedSec, 0))} au total` : n);
+  if (total[0] === total[1]?.split(' · ')[0]) total.shift();
+  const seances = list.map((h) => ({ id: h.id, jour: shortDate(h.date), detail: seanceMesure(h, kind) }));
+  return { titre, total, seances };
 }
 
 // --- Sons -------------------------------------------------------------------
@@ -2426,7 +2455,7 @@ const screens = {
           ${weekCurve(d.history, sp, key)}
         </section>
         ${sp === 'course' ? testsChart(d.history) : ''}
-        ${sp === 'muscu' ? `<p class="muted small" style="margin-top:4px">${key === 'kg' ? 'Total soulevé = charge × répétitions de la semaine, hors poids du corps.' : 'Répétitions faites dans la semaine, toutes séries comprises (gainage non compté). Passe en kg dès que tu notes une charge.'}</p>` : ''}
+        ${sp === 'muscu' ? `<p class="muted small" style="margin-top:4px">${key === 'kg' ? 'Total soulevé = charge × répétitions de la semaine, hors poids du corps.' : 'Répétitions faites dans la semaine, toutes séries comprises (gainage non compté). La courbe passe en kg quand chaque séance a une charge notée.'}</p>` : ''}
         <h3>Records</h3>
         ${sp === 'muscu' && key === 'reps' ? `<div class="records">${topSets.length ? topSets.map((x) => `<div class="muscu"><b>${x.r}<small>rép.</small></b><span>${esc(x.nom.split(" (")[0])} · en une série</span></div>`).join('') : '<div class="muscu"><b>–</b><span>aucune série notée</span></div>'}</div>` : sp === 'muscu' ? `<div class="records">${topLifts.length ? topLifts.map((x) => `<div class="muscu"><b>${String(x.poids).replace('.', ',')}<small>kg</small></b><span>${esc(x.nom.split(' (')[0])}</span></div>`).join('') : '<div class="muscu"><b>–</b><span>aucune charge notée</span></div>'}</div>` : `<div class="records">
           ${practiced(d, 'course') || runs.length ? `<div class="course"><b>${longest ? fmtKm(longest) : '–'}<small>km</small></b><span>plus longue course</span></div>
@@ -3026,11 +3055,27 @@ function readBilan() {
 }
 
 // Bulle de la courbe : un toucher l'ouvre, un deuxième (ou ailleurs) la ferme. Pas de nouveau rendu.
+// Toucher une séance de la bulle (ou la bulle quand la semaine n'en a qu'une) ouvre son détail.
 document.addEventListener('click', (e) => {
-  const b = e.target.closest('[data-curvetip]');
-  document.querySelectorAll('[data-curvetip].on').forEach((x) => { if (x !== b) x.classList.remove('on'); });
+  const open = e.target.closest('.ct.on [data-openhist]');
+  if (open) {
+    e.stopImmediatePropagation();
+    openHistory(open.dataset.openhist);
+    return;
+  }
+  const b = e.target.closest('[data-curvetip]')?.parentElement;
+  document.querySelectorAll('.ct.on').forEach((x) => { if (x !== b) x.classList.remove('on'); });
   if (b) b.classList.toggle('on');
 });
+
+function openHistory(id) {
+  keepOpen = id;
+  if (current !== 'progression') go('progression'); else render();
+  const el = [...document.querySelectorAll('details.hist[data-hist]')].find((x) => x.dataset.hist === id);
+  if (!el) return;
+  el.open = true;
+  el.scrollIntoView({ behavior: 'smooth', block: 'start' });
+}
 
 document.addEventListener('click', (e) => {
   const t = e.target.closest('button');
