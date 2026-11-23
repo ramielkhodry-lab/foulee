@@ -77,7 +77,16 @@ const shortDayName = (iso) => new Date(`${iso}T12:00`).toLocaleDateString('fr-FR
 const kgLabel = (kg) => `${String(kg).replace('.', ',')} kg`;
 // « 3 × 8-12 · 40 kg » : la dose d'un exercice prévu.
 const dose = (x) => `${x.series} × ${x.min}–${x.max}${x.unite === 's' ? ' s' : ''}${x.poids ? ` · ${kgLabel(x.poids)}` : x.materiel === 'corps' ? '' : x.materiel === 'elastique' ? ' · élastique' : ' · charge à trouver'}`;
-const exoList = (p) => `<ol class="exos">${p.exercices.map((x) => `<li><b>${esc(x.nom)}</b><span class="dose">${dose(x)}</span><span class="why">${esc(x.muscle)} · ${esc(x.reason)}</span></li>`).join('')}</ol>`;
+// Séance à venir : chaque exercice peut être remplacé ici par un autre du même muscle
+// (même réglage settings.muscuChoix que l'écran « Avant de commencer »).
+const exoAlt = (p, x) => {
+  if (!p.seance || x.slot === undefined || String(p.date || '') < today()) return '';
+  const d = load();
+  const alts = alternatives(x.muscle, d.profile.questionnaire?.lieu || 'salle', d.settings.materiel);
+  if (alts.length < 2) return '';
+  return `<label class="mprep-alt exo-alt"><span>Pas le matériel ? Autre exercice, même muscle&nbsp;:</span><select data-pvswap="${p.seance}:${x.slot}" aria-label="Autre exercice pour ${esc(x.muscle)}">${alts.map((e) => `<option value="${e.id}" ${e.id === x.id ? 'selected' : ''}>${esc(e.nom)}${e.besoin ? ` (il faut ${esc(e.besoin)})` : ''}</option>`).join('')}</select></label>`;
+};
+const exoList = (p) => `<ol class="exos" data-pvdate="${esc(p.date || '')}">${p.exercices.map((x) => `<li><b>${esc(x.nom)}</b><span class="dose">${dose(x)}</span><span class="why">${esc(x.muscle)} · ${x.besoin ? `il faut ${esc(x.besoin)} · ` : ''}${esc(x.reason)}</span>${exoAlt(p, x)}</li>`).join('')}</ol>`;
 const shortDate = (d) => new Date(`${String(d).slice(0, 10)}T12:00`).toLocaleDateString('fr-FR', { weekday: 'short', day: 'numeric', month: 'short' });
 
 // Pourquoi cette séance, et les conseils tirés du dernier bilan du même sport.
@@ -653,7 +662,7 @@ function muscuLibrary(d) {
   };
   return `
     <h3>Exercices par muscle</h3>
-    <p class="muted small">${esc(LIEUX[lieu].label)}. Pour changer un exercice du programme, choisis-en un autre du même muscle quand tu notes ta séance.</p>
+    <p class="muted small">${esc(LIEUX[lieu].label)}. Pour changer un exercice du programme, ouvre le détail de la séance et choisis-en un autre du même muscle.</p>
     <div class="lib">${MUSCLES.map((m) => {
       const list = alternatives(m, lieu, d.settings.materiel);
       if (!list.length) return '';
@@ -3469,6 +3478,17 @@ document.addEventListener('click', (e) => {
 });
 
 document.addEventListener('change', (e) => {
+  if (e.target.dataset.pvswap) {
+    // Depuis l'aperçu d'une séance à venir : même effet que dans « Avant de commencer ».
+    const key = e.target.dataset.pvswap;
+    const date = e.target.closest('[data-pvdate]')?.dataset.pvdate;
+    update((d) => { d.settings.muscuChoix = { ...d.settings.muscuChoix, [key]: e.target.value }; });
+    render();
+    // Le détail reste ouvert sur l'exercice changé.
+    const sel = [...document.querySelectorAll('[data-pvswap]')].find((el) => el.dataset.pvswap === key && (!date || el.closest('[data-pvdate]')?.dataset.pvdate === date));
+    if (sel) { for (let el = sel.closest('details'); el; el = el.parentElement?.closest('details')) el.open = true; sel.focus({ preventScroll: true }); }
+    return;
+  }
   if (e.target.dataset.mpswap) {
     // Avant la séance : autre exercice du même muscle, gardé pour les prochaines fois.
     const key = e.target.dataset.mpswap;

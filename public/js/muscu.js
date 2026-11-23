@@ -14,10 +14,12 @@ const E = (id, nom, muscle, materiel, pas = 0, unite = 'reps', extra = {}) => ({
 export const EXERCICES = [
   E('presse-pec', 'Presse pectorale', 'pectoraux', 'machine', 5),
   E('dev-couche', 'Développé couché à la barre', 'pectoraux', 'barre', 2.5),
-  E('dev-couche-h', 'Développé couché haltères', 'pectoraux', 'halteres', 2),
+  E('dev-couche-h', 'Développé couché haltères', 'pectoraux', 'halteres', 2, 'reps', { besoin: 'un banc' }),
   E('ecarte-poulie', 'Écarté à la poulie', 'pectoraux', 'poulie', 2.5),
   E('pompes', 'Pompes', 'pectoraux', 'corps'),
   E('pompes-elastique', 'Pompes avec élastique dans le dos (tenu sous les mains)', 'pectoraux', 'elastique'),
+  // En fin de groupe : n'est jamais l'exercice par défaut, les programmes existants ne bougent pas.
+  E('dev-sol-h', 'Développé au sol haltères (allongé par terre, sans banc)', 'pectoraux', 'halteres', 2),
 
   E('tirage-vertical', 'Tirage vertical', 'dos', 'machine', 5),
   E('rowing-assis', 'Rowing assis', 'dos', 'machine', 5),
