@@ -36,7 +36,8 @@ export function validateSteps(steps) {
 
 // Liste des sons à jouer : [{ at: secondes, clip: id }], triée.
 // voice=false : signaux seuls (montée = course, descente = marche), sans annonce parlée.
-export function buildEvents(steps, { voice = true, leadIn = LEAD_IN, half: withHalf = true } = {}) {
+// halfStep : la mi-séance tombe à la moitié de cette étape (course libre : moitié de la course).
+export function buildEvents(steps, { voice = true, leadIn = LEAD_IN, half: withHalf = true, halfStep = null } = {}) {
   validateSteps(steps);
   const { starts, end } = stepStarts(steps, leadIn);
   const events = voice ? [{ at: 0.3, clip: 'intro' }] : [];
@@ -54,7 +55,8 @@ export function buildEvents(steps, { voice = true, leadIn = LEAD_IN, half: withH
     // Étape « libre » (test 5 courses au max) : sa fin n'est pas connue d'avance, pas de bips.
     if (s.duration >= 5 && !s.libre) for (const d of [3, 2, 1]) events.push({ at: stepEnd - d, clip: 'bip' });
   });
-  const half = withHalf ? halfwayAt(starts, end, events, voice) : null;
+  const mid = Number.isInteger(halfStep) && steps[halfStep] ? starts[halfStep] + steps[halfStep].duration / 2 : null;
+  const half = withHalf ? halfwayAt(starts, end, events, voice, mid) : null;
   if (half !== null) events.push({ at: half, clip: 'signal_moitie' });
   if (voice) {
     events.push({ at: end, clip: 'bip_long' });
@@ -68,8 +70,8 @@ export function buildEvents(steps, { voice = true, leadIn = LEAD_IN, half: withH
 // Mi-séance : moitié du temps d'effort (intro exclue), décalée au plus près si un autre son
 // tombe trop près (sinon l'un des deux serait coupé). null si la séance est trop courte.
 const HALF_LEN = 0.9;
-export function halfwayAt(starts, end, events, voice = false) {
-  const mid = starts[0] + (end - starts[0]) / 2;
+export function halfwayAt(starts, end, events, voice = false, at = null) {
+  const mid = at ?? starts[0] + (end - starts[0]) / 2;
   const before = voice ? 3.5 : 1; // une annonce parlée dure jusqu'à ~3 s
   const free = (t) => t > starts[0] + 5 && t + HALF_LEN < end - 1
     && events.every((e) => e.at <= t - before || e.at >= t + HALF_LEN + 0.2);

@@ -1,12 +1,15 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { libreSession, libreState, libreAction, libreRallonge, libreDone, libreBlocs, libreResume, MARCHE, OPEN } from '../public/js/libre.js';
+import { libreFinir as finir2, testCfg, libreSession, libreState, libreAction, libreRallonge, libreDone, libreBlocs, libreResume, MARCHE, OPEN } from '../public/js/libre.js';
 import { buildEvents, stepStarts } from '../public/js/track.js';
 import { nextRunLevel } from '../public/js/plan.js';
 import { canReplay, replayRun } from '../public/js/refaire.js';
 
+// Ancien test à 5 blocs (séance sauvegardée avant le 23/11) : comportement inchangé.
+const ancien = () => ({ id: 'libre-5-blocs', libre: true, blocs: 5, name: 'Test : 5 courses au max', steps: [{ kind: 'echauffement', duration: 300 }, { kind: 'course', duration: OPEN, libre: true, ouvert: true }] });
+
 test('déroulé : échauffement, 5 blocs, 4 marches de 2 min, puis fin', () => {
-  let s = libreSession();
+  let s = ancien();
   assert.equal(libreState(s, 0).phase, 'echauffement');
   // fin naturelle de l'échauffement : bloc 1 ouvert
   assert.deepEqual(libreState(s, 1), { phase: 'course', bloc: 1, blocs: 5, action: 'Je marche' });
@@ -189,4 +192,29 @@ test('« Terminer » avant la fin : 5 min de marche tout de suite', () => {
   assert.equal(libreFinir(s, 2, 10), null); // déjà au retour au calme
   const m = libreFinir(libreAction(libreSession(), 1, 60), 2, 30); // pendant une marche de 2 min
   assert.deepEqual(m.steps.slice(2).map((x) => [x.kind, x.duration]), [['marche', 31], ['recuperation', 300]]);
+});
+
+test('test sans nombre de blocs : marches au choix, « Je marche » toujours, Terminer → marche de fin', () => {
+  let s = libreSession({ echauf: 3, fin: 4 });
+  assert.equal(s.steps[0].duration, 180);
+  let i = 1;
+  for (let b = 1; b <= 8; b++) {
+    const st = libreState(s, i);
+    assert.equal(st.action, 'Je marche');
+    assert.equal(st.bloc, b);
+    s = libreAction(s, i, 60);
+    assert.equal(s.steps[i + 1].kind, 'marche');
+    assert.equal(s.steps[i + 1].duration, MARCHE);
+    i += 2;
+  }
+  const f = finir2(s, i, 30);
+  assert.deepEqual(f.steps.at(-1), { kind: 'recuperation', duration: 240 });
+});
+
+test('test sans marche : course dès le départ, Terminer sans marche de fin', () => {
+  const s = libreSession({ echauf: 0, fin: 0 });
+  assert.equal(s.steps.length, 1);
+  assert.equal(libreState(s, 0).phase, 'course');
+  assert.equal(finir2(s, 0, 30), null);
+  assert.deepEqual(testCfg({ echauf: 99, fin: -1 }), { echauf: 30, fin: 0 });
 });

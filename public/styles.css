@@ -768,3 +768,14 @@ body.flash-muscu { animation: flash-muscu 1.5s ease-out; }
 .tbar-km { font-size: 10px; color: var(--ink); font-weight: 700; }
 .partage-carte { display: flex; align-items: center; gap: 10px; font-weight: 650; margin: 0 0 12px; padding: 12px 14px; border-radius: 14px; background: var(--surface-2); }
 .partage-carte input { width: 22px; height: 22px; margin: 0; }
+
+/* Course libre : réglage des 3 durées */
+.cl-card { padding: 6px 14px; margin-bottom: 12px; }
+.cl-row { display: flex; flex-direction: column; gap: 8px; padding: 12px 0; border-bottom: 1px solid var(--line, rgba(255,255,255,.08)); }
+.cl-row:last-child { border-bottom: 0; }
+.cl-lab { display: flex; flex-direction: column; gap: 2px; }
+.cl-step { display: grid; grid-template-columns: 48px 48px 1fr 48px 48px; gap: 6px; align-items: center; }
+.cl-step button { min-height: 44px; padding: 0; font-weight: 700; }
+.cl-step output { text-align: center; font-family: 'Barlow Condensed', sans-serif; }
+.cl-step output b { font-size: 30px; }
+.cl-step output small { margin-left: 4px; color: var(--muted, #9a9a9a); }
